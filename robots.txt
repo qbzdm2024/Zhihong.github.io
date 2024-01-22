@@ -1,0 +1,3 @@
+User-agent: *
+
+Sitemap: https://chensimin.site/sitemap.xml
