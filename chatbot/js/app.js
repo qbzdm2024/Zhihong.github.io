@@ -501,8 +501,8 @@ class App {
 
     if (!this.chatEngine.apiKey) {
       this._addMessage("assistant",
-        "⚙️ Please enter your **Anthropic API key** in the Settings panel on the left to start chatting. " +
-        "You can get an API key from [console.anthropic.com](https://console.anthropic.com).", []);
+        "⚙️ Please enter your **OpenAI API key** in the Settings panel on the left to start chatting. " +
+        "You can get an API key from [platform.openai.com/api-keys](https://platform.openai.com/api-keys).", []);
       return;
     }
 

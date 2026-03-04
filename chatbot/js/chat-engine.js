@@ -1,6 +1,6 @@
 /**
  * Chat Engine
- * Handles LLM interaction via Anthropic Claude API.
+ * Handles LLM interaction via OpenAI API.
  * Implements RAG: retrieves knowledge chunks, builds context, generates response.
  */
 
@@ -9,18 +9,18 @@ class ChatEngine {
     this.kb = knowledgeBase;
     this.triage = triageEngine;
     this.apiKey = "";
-    this.model = "claude-haiku-4-5-20251001"; // Default to Haiku for cost efficiency
+    this.model = "gpt-4o-mini"; // Default: fast and cost-efficient
     this.conversationHistory = [];
     this.maxHistoryTurns = 10;
   }
 
   setApiKey(key) {
     this.apiKey = key.trim();
-    localStorage.setItem("hf_chatbot_api_key", this.apiKey);
+    localStorage.setItem("hf_chatbot_openai_key", this.apiKey);
   }
 
   loadApiKey() {
-    const saved = localStorage.getItem("hf_chatbot_api_key");
+    const saved = localStorage.getItem("hf_chatbot_openai_key");
     if (saved) this.apiKey = saved;
     return this.apiKey;
   }
@@ -113,7 +113,7 @@ This message appears to contain symptom descriptions. After providing educationa
    */
   async chat(userMessage, options = {}) {
     if (!this.apiKey) {
-      throw new Error("API key not set. Please enter your Anthropic API key in the settings panel.");
+      throw new Error("API key not set. Please enter your OpenAI API key in the settings panel.");
     }
 
     // Retrieve relevant knowledge
@@ -122,26 +122,24 @@ This message appears to contain symptom descriptions. After providing educationa
     const intent = this.detectIntent(userMessage);
     const isTriageMode = options.triageMode || intent.isTriage;
 
-    // Build messages for API
+    // Build messages for OpenAI API (system message goes in messages array)
     const systemPrompt = this.buildSystemPrompt(context, isTriageMode);
     const messages = [
+      { role: "system", content: systemPrompt },
       ...this.conversationHistory.slice(-this.maxHistoryTurns * 2),
       { role: "user", content: userMessage }
     ];
 
-    // Call Anthropic API
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    // Call OpenAI API
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
+        "Authorization": `Bearer ${this.apiKey}`
       },
       body: JSON.stringify({
         model: this.model,
         max_tokens: 1500,
-        system: systemPrompt,
         messages
       })
     });
@@ -155,7 +153,7 @@ This message appears to contain symptom descriptions. After providing educationa
     }
 
     const data = await response.json();
-    const assistantMessage = data.content[0]?.text || "";
+    const assistantMessage = data.choices[0]?.message?.content || "";
 
     // Update conversation history
     this.conversationHistory.push({ role: "user", content: userMessage });
@@ -193,13 +191,11 @@ This message appears to contain symptom descriptions. After providing educationa
 
     const triagePrompt = this.triage.buildAITriagePrompt(symptomDescription, structuredSymptoms);
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": this.apiKey,
-        "anthropic-version": "2023-06-01",
-        "anthropic-dangerous-direct-browser-access": "true"
+        "Authorization": `Bearer ${this.apiKey}`
       },
       body: JSON.stringify({
         model: this.model,
@@ -214,7 +210,7 @@ This message appears to contain symptom descriptions. After providing educationa
     }
 
     const data = await response.json();
-    const aiResponse = data.content[0]?.text || "";
+    const aiResponse = data.choices[0]?.message?.content || "";
     return this.triage.parseAITriageResponse(aiResponse, symptomDescription);
   }
 }
