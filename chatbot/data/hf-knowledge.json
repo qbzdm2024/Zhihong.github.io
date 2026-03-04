@@ -1,0 +1,232 @@
+{
+  "version": "1.0",
+  "lastUpdated": "2026-03-04",
+  "sources": [
+    {
+      "id": "cornell_homecare",
+      "name": "Cornell Homecare - Heart Failure Education",
+      "url": "http://cornellhomecare.com/",
+      "type": "clinical_tool",
+      "description": "Team-developed patient education and triage resource",
+      "enabled": true
+    },
+    {
+      "id": "cornell_traffictool",
+      "name": "Cornell Homecare - Traffic Light Triage Tool",
+      "url": "http://cornellhomecare.com/traffictool",
+      "type": "clinical_tool",
+      "description": "Heart failure symptom traffic light triage system",
+      "enabled": true
+    },
+    {
+      "id": "aha_hf_warning",
+      "name": "American Heart Association - Heart Failure Warning Signs",
+      "url": "https://www.heart.org/en/health-topics/heart-failure/warning-signs-of-heart-failure",
+      "type": "patient_education",
+      "description": "AHA patient education on heart failure warning signs",
+      "enabled": true
+    },
+    {
+      "id": "aha_hf_living",
+      "name": "American Heart Association - Living with Heart Failure",
+      "url": "https://www.heart.org/en/health-topics/heart-failure/living-with-heart-failure-and-managing-advanced-hf",
+      "type": "patient_education",
+      "description": "AHA guidance on living with and managing heart failure",
+      "enabled": true
+    },
+    {
+      "id": "acc_aha_2022",
+      "name": "2022 AHA/ACC/HFSA Guideline for the Management of Heart Failure",
+      "url": "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001063",
+      "type": "clinical_guideline",
+      "description": "Comprehensive clinical practice guideline for heart failure management",
+      "enabled": true
+    },
+    {
+      "id": "tls_rct_2024",
+      "name": "Traffic Light Self-Monitoring RCT 2024 (Int J Nursing Studies)",
+      "url": "https://pubmed.ncbi.nlm.nih.gov/38368847/",
+      "type": "research",
+      "description": "RCT validating traffic light diary for HF self-management",
+      "enabled": true
+    }
+  ],
+  "chunks": [
+    {
+      "id": "hf_basics_1",
+      "sourceId": "aha_hf_warning",
+      "title": "What is Heart Failure?",
+      "category": "basics",
+      "keywords": ["heart failure", "definition", "what is", "basics", "ejection fraction", "HFrEF", "HFpEF"],
+      "content": "Heart failure means the heart is not pumping as well as it should. It does not mean the heart has stopped working. Instead, the heart cannot pump enough blood to meet the body's needs. Heart failure can affect the left side, right side, or both sides of the heart. There are two main types: Heart failure with reduced ejection fraction (HFrEF), where the heart muscle is weakened and cannot squeeze properly; and Heart failure with preserved ejection fraction (HFpEF), where the heart muscle is stiff and cannot fill with blood properly. Common causes include coronary artery disease, high blood pressure, diabetes, and previous heart attacks."
+    },
+    {
+      "id": "hf_basics_2",
+      "sourceId": "aha_hf_warning",
+      "title": "Heart Failure Stages",
+      "category": "basics",
+      "keywords": ["stages", "NYHA", "class", "severity", "progression", "ACC stages", "A B C D"],
+      "content": "Heart failure is classified by the ACC/AHA into four stages (A–D) and by the New York Heart Association (NYHA) into four functional classes. Stage A: At risk for heart failure, no structural disease or symptoms. Stage B: Structural heart disease but no symptoms. Stage C: Structural heart disease with current or prior symptoms. Stage D: Advanced heart failure with symptoms at rest requiring specialized interventions. NYHA Class I: No symptoms with ordinary activity. Class II: Mild symptoms with moderate exertion. Class III: Marked limitation — symptoms with minimal exertion. Class IV: Symptoms at rest or with any activity."
+    },
+    {
+      "id": "hf_symptoms_1",
+      "sourceId": "aha_hf_warning",
+      "title": "Common Symptoms of Heart Failure",
+      "category": "symptoms",
+      "keywords": ["symptoms", "shortness of breath", "dyspnea", "swelling", "edema", "fatigue", "tired", "weight gain", "cough", "confusion"],
+      "content": "Common symptoms of heart failure include: Shortness of breath (dyspnea) — especially during activity, at rest, or when lying flat (orthopnea). Persistent coughing or wheezing, sometimes producing pink or white mucus. Buildup of excess fluid in the body (edema) — swelling in the legs, ankles, feet, or abdomen. Tiredness or fatigue — feeling exhausted or weak, especially during physical activities. Lack of appetite or nausea — the digestive system gets less blood, causing digestive discomfort. Confusion or impaired thinking — reduced blood flow to the brain. Increased heart rate — the heart beats faster to compensate for reduced function. Sudden weight gain from fluid retention (more than 2–3 pounds in one day or 5 pounds in one week)."
+    },
+    {
+      "id": "hf_symptoms_2",
+      "sourceId": "cornell_homecare",
+      "title": "When Symptoms Mean You Need Help",
+      "category": "symptoms",
+      "keywords": ["worsening symptoms", "new symptoms", "when to call", "getting worse", "alert signs"],
+      "content": "It is important to know the difference between stable and changing symptoms. Stable symptoms are ones you have had for a long time and are not getting worse. Changing or new symptoms need attention. Watch for: sudden or significant increase in breathlessness, new chest pain or pressure, swelling that is new or much worse than usual, rapid unexplained weight gain, dizziness or lightheadedness (especially when standing), new or unusual fatigue that limits your usual activities, and feeling confused or more forgetful than usual. Track your symptoms daily and report changes to your care team."
+    },
+    {
+      "id": "hf_monitoring_1",
+      "sourceId": "cornell_homecare",
+      "title": "Daily Weight Monitoring",
+      "category": "monitoring",
+      "keywords": ["weight", "daily weight", "weigh yourself", "fluid retention", "weight gain", "scale"],
+      "content": "Weighing yourself every day is one of the most important things you can do to manage heart failure. Weigh yourself every morning after you use the bathroom and before you eat or drink anything. Wear the same clothes each time, or no clothes. Use the same scale. Record your weight each day. A weight gain of 2 pounds in one day or 5 pounds in one week may mean you are retaining fluid. This is a yellow-zone warning and you should contact your care team. A gain of 4 pounds in one day is a red-zone emergency — contact your care team immediately or seek emergency care."
+    },
+    {
+      "id": "hf_monitoring_2",
+      "sourceId": "cornell_homecare",
+      "title": "Blood Pressure and Heart Rate Monitoring",
+      "category": "monitoring",
+      "keywords": ["blood pressure", "heart rate", "pulse", "monitoring", "vitals", "BP", "HR"],
+      "content": "Monitor your blood pressure and heart rate regularly as directed by your care team. Normal blood pressure is generally below 120/80 mmHg. Your care team will give you a target range. If your blood pressure is consistently above 140/90 or below 90/60, contact your care team. Monitor your heart rate. A resting heart rate above 100 beats per minute (tachycardia) or below 60 beats per minute (bradycardia), especially with symptoms, should be reported. An irregular heartbeat (feeling your heart flutter, skip, or race) should always be reported to your care team."
+    },
+    {
+      "id": "hf_diet_1",
+      "sourceId": "acc_aha_2022",
+      "title": "Sodium (Salt) Restriction",
+      "category": "diet",
+      "keywords": ["sodium", "salt", "diet", "restrict", "food", "low sodium", "2300 mg", "salty foods"],
+      "content": "The 2022 AHA/ACC/HFSA guidelines recommend limiting sodium intake to less than 2,300 mg per day to reduce fluid congestion in heart failure. High sodium intake causes the body to retain water, increasing fluid buildup and worsening heart failure symptoms. Tips for reducing sodium: avoid adding salt to food at the table or during cooking; read food labels and choose products with less than 600mg sodium per serving; avoid processed, canned, and fast foods which are high in sodium; use herbs and spices instead of salt for flavoring; choose fresh or frozen vegetables without added salt; be aware that restaurant meals are typically very high in sodium."
+    },
+    {
+      "id": "hf_diet_2",
+      "sourceId": "cornell_homecare",
+      "title": "Fluid Management",
+      "category": "diet",
+      "keywords": ["fluids", "water", "fluid restriction", "drinks", "liquid", "how much to drink", "dehydration"],
+      "content": "Many people with heart failure need to limit how much fluid they drink. Your care team will tell you how much fluid you are allowed per day, typically 1.5 to 2 liters (6–8 cups). All liquids count: water, juice, milk, soup, coffee, tea, ice cream, gelatin. Tips: use smaller cups to make your fluid allowance last longer; suck on ice chips if you feel thirsty; rinse your mouth with water without swallowing; keep track of your fluid intake. Overloading on fluids causes congestion and worsening shortness of breath. However, do not restrict fluids more than your care team recommends as this can cause dehydration and kidney problems."
+    },
+    {
+      "id": "hf_diet_3",
+      "sourceId": "aha_hf_living",
+      "title": "Heart-Healthy Diet for Heart Failure",
+      "category": "diet",
+      "keywords": ["diet", "nutrition", "potassium", "healthy eating", "Mediterranean", "DASH", "alcohol", "food choices"],
+      "content": "A heart-healthy diet is essential for managing heart failure. Eat plenty of fruits and vegetables. Choose whole grains over refined grains. Include lean proteins: fish, poultry, beans, and nuts. Limit saturated fats, trans fats, and cholesterol. Avoid or minimize alcohol — it can weaken the heart muscle and interfere with medications. Some medications (like ACE inhibitors or ARBs) may affect potassium levels — follow your care team's advice about potassium-containing foods like bananas and oranges. The DASH diet (Dietary Approaches to Stop Hypertension) and Mediterranean diet patterns are often recommended for heart health."
+    },
+    {
+      "id": "hf_exercise_1",
+      "sourceId": "acc_aha_2022",
+      "title": "Exercise and Physical Activity",
+      "category": "exercise",
+      "keywords": ["exercise", "activity", "physical activity", "walk", "cardiac rehab", "fitness", "movement"],
+      "content": "Regular physical activity is strongly recommended for heart failure patients who are stable (Class I recommendation in 2022 AHA/ACC/HFSA guidelines). Exercise improves heart function, reduces symptoms, and improves quality of life. Cardiac rehabilitation programs are also beneficial (Class IIa). Start slowly and gradually increase activity. Walking is one of the best exercises. Aim for at least 30 minutes of moderate activity most days, if tolerated. Stop and rest if you experience chest pain, severe shortness of breath, dizziness, or extreme fatigue. Do not exercise on days when you feel significantly worse than usual. Always consult your care team before starting an exercise program."
+    },
+    {
+      "id": "hf_exercise_2",
+      "sourceId": "cornell_homecare",
+      "title": "Safe Exercise Guidelines",
+      "category": "exercise",
+      "keywords": ["safe exercise", "exercise warning signs", "when to stop", "talk test", "exertion", "breathing during exercise"],
+      "content": "Use the 'talk test' to gauge exercise intensity: if you can speak in short sentences while exercising, you are at an appropriate level. If you are too out of breath to talk, slow down. Warning signs to stop exercising immediately: chest pain or pressure, severe shortness of breath, palpitations (fluttering in your chest), dizziness or lightheadedness, severe fatigue. Avoid exercise in extreme heat or cold. Rest for at least 1–2 hours after meals before exercising. Stay well-hydrated within your fluid limits. Keep an exercise log and share it with your care team. Remember: some shortness of breath during moderate activity is normal, but it should not be severe."
+    },
+    {
+      "id": "hf_medications_1",
+      "sourceId": "acc_aha_2022",
+      "title": "Heart Failure Medications",
+      "category": "medications",
+      "keywords": ["medications", "medicine", "pills", "ACE inhibitor", "beta blocker", "diuretic", "ARNI", "SGLT2", "drugs"],
+      "content": "Common heart failure medications include: Diuretics (water pills) — help remove excess fluid; Beta-blockers — slow heart rate and reduce the heart's workload; ACE inhibitors or ARBs — relax blood vessels and reduce blood pressure; ARNI (Sacubitril/Valsartan, Entresto) — combination therapy that reduces hospitalizations and mortality; SGLT2 inhibitors (e.g., dapagliflozin, empagliflozin) — newer medications with proven benefits in heart failure, recommended in the 2022 guidelines; Aldosterone antagonists — reduce fluid retention; Digoxin — helps the heart beat stronger. Never stop taking heart failure medications without consulting your care team, even if you feel better."
+    },
+    {
+      "id": "hf_medications_2",
+      "sourceId": "cornell_homecare",
+      "title": "Medication Adherence Tips",
+      "category": "medications",
+      "keywords": ["medication adherence", "taking medications", "missed dose", "side effects", "pill organizer", "medication reminder"],
+      "content": "Taking your medications as prescribed is critical. Tips for medication adherence: use a pill organizer; set daily alarms as reminders; keep a medication list with you at all times; pick up refills before you run out; never skip doses, even on days you feel well; report side effects to your care team — do not stop medications on your own; know the names, doses, and purposes of all your medications. If you miss a dose, take it as soon as you remember, unless it is almost time for your next dose — in that case, skip the missed dose. Do not double up."
+    },
+    {
+      "id": "hf_triage_green_1",
+      "sourceId": "cornell_traffictool",
+      "title": "Green Zone: Stable and Doing Well",
+      "category": "triage",
+      "keywords": ["green zone", "stable", "doing well", "normal", "no symptoms", "okay"],
+      "content": "GREEN ZONE — You are stable. Your weight is within your usual range (no weight gain more than 2 lbs/day or 5 lbs/week). You have no new or worsening symptoms. You can do your usual activities without significant difficulty. You have no new swelling in your legs, ankles, or feet. You are breathing comfortably at rest and with your usual activities. You have good energy. Action: Continue your usual medications, diet, fluid limits, and daily monitoring. Keep your follow-up appointments. Stay active within your exercise plan."
+    },
+    {
+      "id": "hf_triage_yellow_1",
+      "sourceId": "cornell_traffictool",
+      "title": "Yellow Zone: Warning — Contact Your Care Team",
+      "category": "triage",
+      "keywords": ["yellow zone", "warning", "contact doctor", "contact nurse", "worsening", "concerning symptoms", "call care team"],
+      "content": "YELLOW ZONE — You have concerning symptoms that need attention within 24 hours. Contact your care team (nurse or doctor) if you notice ANY of the following: Weight gain of 2–3 pounds in one day or 5 pounds in one week. New or increased swelling in your legs, ankles, feet, or abdomen. Shortness of breath that is new or worse with mild activity (e.g., walking around the house). Increased need to use extra pillows to sleep, or waking up at night breathless. New dizziness or lightheadedness, especially when standing. New or persistent dry cough. Feeling more tired than usual, limiting normal activities. Increased heart rate or irregular heartbeat. Decreased urine output. Do NOT wait to see if symptoms get better on their own. Call your care team."
+    },
+    {
+      "id": "hf_triage_red_1",
+      "sourceId": "cornell_traffictool",
+      "title": "Red Zone: Emergency — Call 911",
+      "category": "triage",
+      "keywords": ["red zone", "emergency", "call 911", "severe", "critical", "immediate", "life threatening", "ambulance"],
+      "content": "RED ZONE — EMERGENCY. Call 911 immediately or have someone take you to the emergency room if you experience ANY of the following: Severe shortness of breath at rest or inability to breathe normally. Chest pain, chest pressure, or chest tightness. Coughing up pink or foamy mucus. Sudden confusion or change in mental status. Fainting or loss of consciousness (passing out). Rapid or irregular heartbeat with dizziness or faintness. Weight gain of 4 or more pounds in one day. Sudden severe weakness or inability to move arms or legs. Signs of stroke: facial drooping, arm weakness, speech difficulty. DO NOT DRIVE YOURSELF. Call 911 immediately."
+    },
+    {
+      "id": "hf_triage_weight_1",
+      "sourceId": "cornell_traffictool",
+      "title": "Weight-Based Triage Rules",
+      "category": "triage",
+      "keywords": ["weight triage", "weight rules", "weight gain", "fluid weight", "pounds kilograms"],
+      "content": "Weight monitoring thresholds for triage: GREEN ZONE: Weight is at or near your baseline. Weight gain less than 2 lbs (0.9 kg) from yesterday, or less than 3 lbs (1.4 kg) from your dry weight this week. YELLOW ZONE: Weight gain of 2–3 lbs (0.9–1.4 kg) in one day, OR 3–5 lbs (1.4–2.3 kg) over one week compared to your usual weight. Contact your care team. RED ZONE: Weight gain of 4 or more lbs (1.8 kg) in one day, OR more than 5 lbs (2.3 kg) in one week with worsening symptoms. Call 911 or seek emergency care. Reference (research validation): A 1 kg gain in one day = yellow zone; 2.5 kg gain in one week = red zone, as validated in the 2024 Traffic Light RCT (IJNS)."
+    },
+    {
+      "id": "hf_triage_sob_1",
+      "sourceId": "cornell_traffictool",
+      "title": "Shortness of Breath Triage Rules",
+      "category": "triage",
+      "keywords": ["shortness of breath", "dyspnea", "breathless", "breathing", "SOB triage", "breathlessness scale"],
+      "content": "Shortness of breath (SOB) triage using the 0–10 visual analog scale: GREEN ZONE (0–3, none to mild): No new or worsening shortness of breath. You can breathe comfortably at rest and with usual activities. YELLOW ZONE (4–6, moderate): New or worsening shortness of breath with mild or moderate activity. You may need to stop and rest more often. Waking up at night because of breathlessness (orthopnea). Contact your care team within 24 hours. RED ZONE (7–10, severe): Severe shortness of breath at rest or while sitting still. You are struggling to breathe even without activity. Breathing does not improve with rest. CALL 911 IMMEDIATELY."
+    },
+    {
+      "id": "hf_selfcare_1",
+      "sourceId": "acc_aha_2022",
+      "title": "Heart Failure Self-Care Principles",
+      "category": "self_care",
+      "keywords": ["self care", "self management", "daily habits", "heart failure management", "adherence", "lifestyle"],
+      "content": "Heart failure self-care involves three key behaviors: (1) Maintenance — taking medications as prescribed, following a low-sodium diet, monitoring weight and symptoms daily, attending follow-up appointments, getting vaccinations (flu, pneumonia, COVID-19). (2) Monitoring — checking weight every day, recognizing changes in symptoms, tracking breathing and swelling. (3) Management — knowing when and how to respond to symptom changes, following the traffic light action plan, contacting your care team when in the yellow zone, calling 911 when in the red zone. Multidisciplinary team support significantly improves outcomes (ACC/AHA/HFSA 2022, Class I recommendation)."
+    },
+    {
+      "id": "hf_selfcare_2",
+      "sourceId": "aha_hf_living",
+      "title": "Lifestyle Changes for Heart Failure",
+      "category": "self_care",
+      "keywords": ["lifestyle", "smoking", "alcohol", "sleep", "stress", "depression", "anxiety", "quality of life"],
+      "content": "Important lifestyle changes for heart failure management include: Stop smoking — smoking worsens heart failure and interferes with medications; Limit or avoid alcohol — alcohol is toxic to the heart muscle; Manage stress — stress raises blood pressure and increases heart rate; Get adequate sleep — treat sleep apnea if present (sleep-disordered breathing worsens heart failure); Maintain a healthy weight — obesity increases the heart's workload; Monitor for depression — depression is common in heart failure and affects adherence to treatment; depression screening is recommended (ACC/AHA 2022, Class IIa); Stay socially connected — social isolation is associated with worse outcomes; Plan for emergencies — know your action plan."
+    },
+    {
+      "id": "hf_appointments_1",
+      "sourceId": "cornell_homecare",
+      "title": "Follow-up Care and When to Call",
+      "category": "self_care",
+      "keywords": ["follow up", "appointments", "care team", "doctor visits", "contact", "phone numbers", "check in"],
+      "content": "Regular follow-up is essential in heart failure management. After a hospitalization, a follow-up visit within 7–14 days is strongly recommended. Call your care team (do not wait for your next appointment) if you: experience any yellow-zone symptoms; have questions about your medications; notice a change in your usual symptoms; feel confused about your care plan. Keep important phone numbers handy: your care team's office number, after-hours nurse line, and 911. Bring a written medication list, your weight log, and a symptom diary to every appointment. Consider asking a family member or caregiver to attend appointments with you."
+    },
+    {
+      "id": "hf_devices_1",
+      "sourceId": "acc_aha_2022",
+      "title": "Heart Failure Devices (ICD, CRT, LVAD)",
+      "category": "advanced",
+      "keywords": ["ICD", "defibrillator", "CRT", "pacemaker", "LVAD", "devices", "implantable", "advanced therapy"],
+      "content": "Some heart failure patients have implanted devices: Implantable Cardioverter-Defibrillator (ICD) — delivers a shock to restore normal heart rhythm if a dangerous arrhythmia occurs. Cardiac Resynchronization Therapy (CRT) — coordinates the contractions of the heart's ventricles to improve pumping efficiency. Left Ventricular Assist Device (LVAD) — a mechanical pump that helps the heart pump blood; used in advanced (Stage D) heart failure. If you have a device: carry your device identification card at all times; keep follow-up appointments for device checks; know the warning signs that your device has fired or is malfunctioning; inform all healthcare providers that you have a device. (ACC/AHA/HFSA 2022 guidelines)"
+    }
+  ]
+}

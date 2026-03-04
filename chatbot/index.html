@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HF Self-Management Chatbot — Heart Failure Education & Triage</title>
+  <meta name="description" content="Heart failure patient self-management education and symptom triage chatbot powered by RAG-LLM with dual triage modes." />
+  <link rel="stylesheet" href="./css/chatbot.css" />
+</head>
+<body>
+
+<div class="app-container">
+
+  <!-- ─── Header ─────────────────────────────────────────────────────────── -->
+  <header class="app-header">
+    <div class="header-brand">
+      <span class="header-icon">💙</span>
+      <div class="header-text">
+        <h1>Heart Failure Self-Management Assistant</h1>
+        <p>Education · Symptom Triage · Evidence-Based Guidance</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="disclaimer-badge">⚠ For education only — Not medical advice</span>
+      <button class="btn-icon" id="clear-chat-btn" title="Clear conversation">
+        🗑 Clear
+      </button>
+    </div>
+  </header>
+
+  <!-- ─── Sidebar ────────────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+
+    <!-- Settings -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        <span class="sidebar-section-title">⚙ Settings</span>
+        <span>
+          <span class="status-dot disconnected" id="connection-dot"></span>
+          <span style="font-size:11px; color:var(--gray-500)" id="connection-label">Not connected</span>
+        </span>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label" for="api-key-input">Anthropic API Key</label>
+        <input
+          type="password"
+          id="api-key-input"
+          class="settings-input"
+          placeholder="sk-ant-..."
+          autocomplete="off"
+        />
+        <div style="font-size:11px; color:var(--gray-400); margin-top:3px;">
+          Get a key at <a href="https://console.anthropic.com" target="_blank" style="color:var(--blue)">console.anthropic.com</a>. Stored locally only.
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label" for="model-select">Model</label>
+        <select id="model-select" class="settings-select">
+          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast · Cost-efficient)</option>
+          <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Balanced)</option>
+          <option value="claude-opus-4-6">Claude Opus 4.6 (Most capable)</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Triage Mode -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        <span class="sidebar-section-title">🚦 Triage Mode</span>
+      </div>
+      <div class="triage-toggle" style="margin-bottom:10px;">
+        <button class="triage-tab" data-mode="rule">Rule-Based</button>
+        <button class="triage-tab active" data-mode="both">Both</button>
+        <button class="triage-tab" data-mode="ai">AI Only</button>
+      </div>
+      <div style="font-size:11px; color:var(--gray-500);">
+        <strong>Rule-Based:</strong> Cornell Traffic Light Tool logic (deterministic)<br>
+        <strong>AI Reasoning:</strong> LLM clinical assessment (2022 AHA/ACC guidelines)<br>
+        <strong>Both:</strong> Side-by-side comparison
+      </div>
+    </div>
+
+    <!-- Structured Triage Input -->
+    <div class="sidebar-section">
+      <div class="sidebar-section-header">
+        <span class="sidebar-section-title">📋 Structured Triage Input</span>
+      </div>
+      <div class="triage-input-section" style="margin-bottom:0;">
+        <div class="triage-form-title">📏 Measurable Values</div>
+        <div class="triage-form-grid">
+          <div class="triage-field">
+            <label for="t-weight-day">Weight gain today (lbs)</label>
+            <input type="number" id="t-weight-day" min="0" max="20" step="0.5" placeholder="0" />
+          </div>
+          <div class="triage-field">
+            <label for="t-weight-week">Weight gain this week (lbs)</label>
+            <input type="number" id="t-weight-week" min="0" max="30" step="0.5" placeholder="0" />
+          </div>
+          <div class="triage-field">
+            <label for="t-sob">Shortness of breath (0–10)</label>
+            <input type="number" id="t-sob" min="0" max="10" step="1" placeholder="0" />
+          </div>
+        </div>
+
+        <div class="triage-form-title" style="margin-top:8px;">🔴 Emergency Symptoms</div>
+        <div class="triage-checkboxes">
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-chest-pain" /> Chest pain / pressure
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-fainting" /> Fainting / loss of consciousness
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-pink-cough" /> Pink / foamy cough
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-confusion" /> Sudden confusion
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-stroke" /> Stroke signs
+          </label>
+        </div>
+
+        <div class="triage-form-title" style="margin-top:8px;">🟡 Warning Symptoms</div>
+        <div class="triage-checkboxes">
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-swelling" /> New/worse swelling
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-ortho" /> Orthopnea (pillow breathing)
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-dizzy" /> Dizziness on standing
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-irregular" /> Irregular heartbeat
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-rapid-hr" /> Rapid heart rate (&gt;100)
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-fatigue" /> Unusual fatigue
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-cough" /> New dry cough
+          </label>
+          <label class="triage-checkbox">
+            <input type="checkbox" id="t-urine" /> Decreased urination
+          </label>
+        </div>
+
+        <div class="settings-group" style="margin-top:8px; margin-bottom:0;">
+          <label class="settings-label" for="triage-symptom-text">Describe symptoms (for AI triage)</label>
+          <textarea
+            id="triage-symptom-text"
+            class="settings-input"
+            rows="2"
+            placeholder="e.g., I've gained 3 lbs today and I'm short of breath when walking..."
+          ></textarea>
+        </div>
+
+        <button class="btn btn-primary btn-sm" id="run-triage-btn" style="margin-top:8px; width:100%;">
+          🚦 Run Triage Assessment
+        </button>
+      </div>
+    </div>
+
+    <!-- Knowledge Base -->
+    <div class="sidebar-section" style="flex:1;">
+      <div class="sidebar-section-header">
+        <span class="sidebar-section-title">📚 Knowledge Base</span>
+        <button class="btn btn-sm btn-secondary" id="add-source-btn">+ Add Source</button>
+      </div>
+
+      <div class="kb-stats">
+        <div class="kb-stat">
+          <span class="kb-stat-label">Active sources:</span>
+          <span class="kb-stat-value" id="kb-sources-count">—</span>
+        </div>
+        <div class="kb-stat">
+          <span class="kb-stat-label">Knowledge chunks:</span>
+          <span class="kb-stat-value" id="kb-chunks-count">—</span>
+        </div>
+      </div>
+
+      <ul class="source-list" id="source-list">
+        <!-- Populated by app.js -->
+      </ul>
+    </div>
+
+  </aside>
+
+  <!-- ─── Main Chat Area ──────────────────────────────────────────────────── -->
+  <main class="chat-area">
+    <div class="chat-messages" id="chat-messages">
+      <!-- Messages rendered by app.js -->
+    </div>
+
+    <div class="chat-input-area">
+      <!-- Quick action buttons -->
+      <div class="quick-actions">
+        <button class="quick-btn" data-message="What are the warning signs of heart failure I should watch for?">
+          ⚠ Warning signs
+        </button>
+        <button class="quick-btn" data-message="What should I do if I gain 3 pounds overnight?">
+          ⚖ Weight gain
+        </button>
+        <button class="quick-btn" data-message="What foods should I avoid with heart failure?">
+          🥗 Diet advice
+        </button>
+        <button class="quick-btn" data-message="Is it safe for me to exercise with heart failure?">
+          🏃 Exercise safety
+        </button>
+        <button class="quick-btn" data-message="I am having trouble breathing when lying flat at night. What should I do?">
+          😮‍💨 Breathing trouble
+        </button>
+        <button class="quick-btn" data-message="What are the green, yellow, and red zones in heart failure self-management?">
+          🚦 Traffic light zones
+        </button>
+      </div>
+
+      <div class="input-row">
+        <textarea
+          id="chat-input"
+          class="chat-textarea"
+          placeholder="Ask about heart failure symptoms, diet, medications, or describe how you're feeling..."
+          rows="1"
+        ></textarea>
+        <button class="send-btn" id="send-btn" title="Send message (Enter)">
+          ➤
+        </button>
+      </div>
+      <div style="font-size:11px; color:var(--gray-400); margin-top:5px; text-align:center;">
+        Press <kbd style="background:var(--gray-100);padding:1px 4px;border-radius:3px;border:1px solid var(--gray-300)">Enter</kbd> to send ·
+        <kbd style="background:var(--gray-100);padding:1px 4px;border-radius:3px;border:1px solid var(--gray-300)">Shift+Enter</kbd> for new line ·
+        For emergencies call <strong>911</strong>
+      </div>
+    </div>
+  </main>
+
+  <!-- ─── Triage Panel ────────────────────────────────────────────────────── -->
+  <section class="triage-panel" id="triage-panel">
+    <div class="triage-panel-header">
+      <div class="triage-panel-title">
+        🚦 Symptom Triage Results
+        <span style="font-size:11px; color:var(--gray-400); font-weight:400;">
+          — Dual assessment: Rule-based vs. AI reasoning
+        </span>
+      </div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <button class="btn btn-sm btn-secondary" id="clear-triage-btn">Clear</button>
+      </div>
+    </div>
+    <div class="triage-panel-body" id="triage-panel-body">
+      <div class="triage-empty">
+        Describe your symptoms in the chat or fill in the structured form on the left to see a triage assessment here.
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ─── Loading Overlay ────────────────────────────────────────────────────── -->
+<div class="loading-overlay" id="loading-overlay" style="display:none;">
+  <div class="loading-spinner">
+    <div class="spinner"></div>
+    <span id="loading-text" style="font-size:14px; color:var(--gray-600);">Thinking...</span>
+  </div>
+</div>
+
+<!-- ─── Toast Container ────────────────────────────────────────────────────── -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- ─── Add Source Modal ───────────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="add-source-modal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">📚 Add Knowledge Source</span>
+      <button class="modal-close" id="modal-close-btn">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-group">
+        <label class="settings-label" for="new-source-name">Source Name <span style="color:var(--red)">*</span></label>
+        <input
+          type="text"
+          id="new-source-name"
+          class="settings-input"
+          placeholder="e.g., AHA Heart Failure Patient Guide"
+        />
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label" for="new-source-url">Source URL (optional)</label>
+        <input
+          type="url"
+          id="new-source-url"
+          class="settings-input"
+          placeholder="https://..."
+        />
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label" for="new-source-type">Source Type</label>
+        <select id="new-source-type" class="settings-select">
+          <option value="patient_education">Patient Education</option>
+          <option value="clinical_guideline">Clinical Guideline</option>
+          <option value="clinical_tool">Clinical Tool</option>
+          <option value="research">Research / Evidence</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label" for="new-source-content">
+          Knowledge Content <span style="color:var(--red)">*</span>
+          <span style="font-weight:400; color:var(--gray-400)">(paste text from the source)</span>
+        </label>
+        <textarea
+          id="new-source-content"
+          class="settings-input"
+          rows="8"
+          placeholder="Paste the relevant text content from this knowledge source here. It will be chunked and indexed for retrieval. You can include guidelines, educational text, symptom lists, medication info, etc."
+        ></textarea>
+      </div>
+
+      <div style="font-size:12px; color:var(--gray-500); background:var(--gray-50); padding:8px 10px; border-radius:6px;">
+        💡 <strong>Tips:</strong> You can paste content from published guidelines, AHA patient handouts, your institution's protocols, or any heart failure educational material.
+        The content will be split into searchable chunks and cited in responses.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" id="modal-cancel-btn">Cancel</button>
+      <button class="btn btn-primary" id="modal-confirm-btn">✓ Add Source</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Scripts ────────────────────────────────────────────────────────────── -->
+<script src="./js/triage-engine.js"></script>
+<script src="./js/knowledge-base.js"></script>
+<script src="./js/chat-engine.js"></script>
+<script src="./js/app.js"></script>
+
+</body>
+</html>
