@@ -42,25 +42,26 @@
       </div>
 
       <div class="settings-group">
-        <label class="settings-label" for="api-key-input">Anthropic API Key</label>
+        <label class="settings-label" for="api-key-input">OpenAI API Key</label>
         <input
           type="password"
           id="api-key-input"
           class="settings-input"
-          placeholder="sk-ant-..."
+          placeholder="sk-..."
           autocomplete="off"
         />
         <div style="font-size:11px; color:var(--gray-400); margin-top:3px;">
-          Get a key at <a href="https://console.anthropic.com" target="_blank" style="color:var(--blue)">console.anthropic.com</a>. Stored locally only.
+          Get a key at <a href="https://platform.openai.com/api-keys" target="_blank" style="color:var(--blue)">platform.openai.com/api-keys</a>. Stored locally only.
         </div>
       </div>
 
       <div class="settings-group">
         <label class="settings-label" for="model-select">Model</label>
         <select id="model-select" class="settings-select">
-          <option value="claude-haiku-4-5-20251001">Claude Haiku 4.5 (Fast · Cost-efficient)</option>
-          <option value="claude-sonnet-4-6">Claude Sonnet 4.6 (Balanced)</option>
-          <option value="claude-opus-4-6">Claude Opus 4.6 (Most capable)</option>
+          <option value="gpt-4o-mini">GPT-4o Mini (Fast · Cost-efficient)</option>
+          <option value="gpt-4o">GPT-4o (Balanced · Multimodal)</option>
+          <option value="o1-mini">o1 Mini (Reasoning · Faster)</option>
+          <option value="o1">o1 (Advanced Reasoning)</option>
         </select>
       </div>
     </div>
