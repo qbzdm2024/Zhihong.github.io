@@ -89,6 +89,7 @@ class App {
     container.appendChild(welcome);
   }
 
+  // Returns the created message element so callers can append triage cards
   _addMessage(role, content, sources = []) {
     const container = document.getElementById("chat-messages");
     const msgDiv = document.createElement("div");
@@ -136,7 +137,84 @@ class App {
     msgDiv.appendChild(bodyDiv);
     container.appendChild(msgDiv);
     container.scrollTop = container.scrollHeight;
-    return msgDiv;
+    return msgDiv; // return so callers can attach inline triage
+  }
+
+  /**
+   * Append a side-by-side inline triage card directly inside a chat message.
+   * @param {HTMLElement} messageEl - the message div returned by _addMessage
+   * @param {Object|null} ruleResult
+   * @param {Object|null} aiResult
+   */
+  _appendInlineTriage(messageEl, ruleResult, aiResult) {
+    if (!ruleResult && !aiResult) return;
+    const body = messageEl.querySelector(".message-body");
+    const bubble = messageEl.querySelector(".message-bubble");
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "inline-triage";
+
+    if (ruleResult) wrapper.appendChild(this._buildInlineCard("rule", "📏 Rule-Based (Traffic Light)", ruleResult));
+    if (aiResult)   wrapper.appendChild(this._buildInlineCard("ai",   "🤖 AI Reasoning", aiResult));
+
+    // Insert after the bubble, before sources/time
+    bubble.insertAdjacentElement("afterend", wrapper);
+
+    // Comparison note if both present and disagree
+    if (ruleResult && aiResult && ruleResult.zone !== aiResult.zone) {
+      const note = document.createElement("div");
+      note.className = "inline-triage-note";
+      const zoneOrder = { GREEN: 0, YELLOW: 1, RED: 2 };
+      const safer = (zoneOrder[ruleResult.zone] ?? -1) >= (zoneOrder[aiResult.zone] ?? -1)
+        ? ruleResult : aiResult;
+      note.innerHTML = `⚠️ Systems disagree — following the more cautious recommendation: <strong>${safer.zone}</strong>. ${safer.action}`;
+      wrapper.insertAdjacentElement("afterend", note);
+    }
+
+    const container = document.getElementById("chat-messages");
+    container.scrollTop = container.scrollHeight;
+  }
+
+  _buildInlineCard(type, label, result) {
+    const zoneIcons = { GREEN: "🟢", YELLOW: "🟡", RED: "🔴", UNKNOWN: "⚪" };
+    const card = document.createElement("div");
+    card.className = `inline-triage-card ${type}`;
+
+    const header = document.createElement("div");
+    header.className = `inline-triage-header ${type}`;
+    header.textContent = label;
+
+    const body = document.createElement("div");
+    body.className = "inline-triage-body";
+
+    const badge = document.createElement("div");
+    badge.className = `zone-badge ${result.zone}`;
+    badge.style.marginBottom = "5px";
+    badge.textContent = `${zoneIcons[result.zone] || "⚪"} ${result.zone}`;
+    body.appendChild(badge);
+
+    const flags = result.flags || result.keySymptoms || [];
+    if (flags.length > 0) {
+      const ul = document.createElement("ul");
+      ul.className = "inline-triage-flags";
+      flags.slice(0, 3).forEach((f) => {
+        const li = document.createElement("li");
+        li.textContent = f;
+        ul.appendChild(li);
+      });
+      body.appendChild(ul);
+    }
+
+    if (result.action) {
+      const act = document.createElement("div");
+      act.className = `inline-triage-action ${result.zone}`;
+      act.textContent = result.action;
+      body.appendChild(act);
+    }
+
+    card.appendChild(header);
+    card.appendChild(body);
+    return card;
   }
 
   _addTypingIndicator() {
@@ -513,11 +591,11 @@ class App {
       const intent = this.chatEngine.detectIntent(message);
       const result = await this.chatEngine.chat(message, { triageMode: intent.isTriage });
       this._removeTypingIndicator();
-      this._addMessage("assistant", result.content, result.sources);
+      const msgEl = this._addMessage("assistant", result.content, result.sources);
 
-      // Run triage if symptoms detected
+      // Run triage ONLY when patient is reporting current personal symptoms
       if (intent.isTriage && this.triageMode !== "none") {
-        await this._runAutoTriage(message);
+        await this._runAutoTriage(message, msgEl);
       }
     } catch (err) {
       this._removeTypingIndicator();
@@ -528,33 +606,32 @@ class App {
     }
   }
 
-  async _runAutoTriage(symptomText) {
+  async _runAutoTriage(symptomText, messageEl = null) {
     try {
       let ruleResult = null;
       let aiResult = null;
-      const structuredData = this._readTriageForm();
 
-      // Always run rule-based if we have structured data
-      if (structuredData && this._hasAnyStructuredInput(structuredData)) {
-        ruleResult = this.triageEngine.ruleBasedTriage(structuredData);
+      // Extract symptoms from text first, then merge with any form inputs
+      const textExtracted = this.triageEngine.extractSymptomsFromText(symptomText);
+      const formData = this._readTriageForm();
+      const mergedSymptoms = this.triageEngine.mergeSymptoms(formData, textExtracted);
+
+      // Rule-based always runs using merged symptoms (text + form)
+      if (this.triageMode !== "ai") {
+        ruleResult = this.triageEngine.ruleBasedTriage(mergedSymptoms);
       }
 
-      // Run AI triage if mode allows
+      // AI triage if mode allows
       if (this.triageMode === "ai" || this.triageMode === "both") {
         this._setLoading(true, "Running AI triage assessment...");
-        aiResult = await this.chatEngine.runAITriage(
-          symptomText,
-          (this.triageMode === "both" && ruleResult) ? structuredData : null
-        );
-      } else if (this.triageMode === "rule" && !ruleResult) {
-        // Fallback rule triage without structured data
-        ruleResult = this.triageEngine.ruleBasedTriage({});
+        aiResult = await this.chatEngine.runAITriage(symptomText, mergedSymptoms);
       }
 
       if (ruleResult || aiResult) {
+        // Attach triage inline to the assistant message
+        if (messageEl) this._appendInlineTriage(messageEl, ruleResult, aiResult);
+        // Also update the bottom triage panel
         this._renderTriageResults(ruleResult, aiResult);
-        // Scroll triage panel into view
-        document.getElementById("triage-panel").scrollIntoView({ behavior: "smooth", block: "nearest" });
       }
     } catch (err) {
       console.error("Triage error:", err);

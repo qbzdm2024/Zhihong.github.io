@@ -288,5 +288,119 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
   }
 }
 
+  /**
+   * Extract structured symptom flags from free-text description.
+   * Mirrors the 14 fields used by ruleBasedTriage so text in chat
+   * can drive the rule-based engine even when the form is empty.
+   * @param {string} text
+   * @returns {Object} partial symptoms object
+   */
+  extractSymptomsFromText(text) {
+    const symptoms = {
+      weightGain1Day: 0, weightGain1Week: 0, sobScale: 0,
+      chestPain: false, faintingOrLoss: false, pinkFoamyCough: false,
+      severeConfusion: false, strokeSigns: false, swellingNewWorse: false,
+      ortho: false, dizzinessStanding: false, irregularHeartbeat: false,
+      rapidHeartRate: false, unusualFatigue: false, newCough: false,
+      decreasedUrine: false, heartRateBpm: null
+    };
+
+    if (/chest\s*(pain|discomfort|pressure|tightness|heaviness|hurt|ache)/i.test(text))
+      symptoms.chestPain = true;
+
+    if (/faint(ing|ed)?|pass(ed)?\s*out|los(t|ing)\s*consciousness|blackout|collaps/i.test(text))
+      symptoms.faintingOrLoss = true;
+
+    if (/pink\s*mucus|foamy\s*(cough|mucus)|cough(ing)?\s*(up\s*)?(blood|pink|foam)/i.test(text))
+      symptoms.pinkFoamyCough = true;
+
+    if (/confus(ed|ion)|disoriented|not\s*think(ing)?\s*clearly|mental\s*status/i.test(text))
+      symptoms.severeConfusion = true;
+
+    if (/stroke|facial\s*droop|arm\s*weak|speech\s*(difficult|problem|slur)|slurred/i.test(text))
+      symptoms.strokeSigns = true;
+
+    if (/swell(ing|en|ed)|edema|puffy\s*(legs?|ankles?|feet|foot)/i.test(text))
+      symptoms.swellingNewWorse = true;
+
+    if (/(extra|more)\s*pillow|lying\s*(flat|down)|sleep(ing)?\s*(sitting|upright|elevated)|wak(e|ing|ed)\s*(up\s*)?(breathless|short\s*of\s*breath|gasping)/i.test(text))
+      symptoms.ortho = true;
+
+    if (/dizzy|dizziness|lightheaded|light-headed/i.test(text))
+      symptoms.dizzinessStanding = true;
+
+    if (/palpitation|irregular\s*(heart|beat|pulse|rhythm)|flutter(ing)?|skipping\s*beat/i.test(text))
+      symptoms.irregularHeartbeat = true;
+
+    if (/racing\s*(heart|pulse)|heart\s*rac(ing|e)|rapid\s*(heart|pulse|beat)|tachycardia/i.test(text))
+      symptoms.rapidHeartRate = true;
+
+    if (/fatigue|tired|exhausted|weak(ness)?|no\s*energy/i.test(text))
+      symptoms.unusualFatigue = true;
+
+    if (/cough(ing)?/i.test(text) && !symptoms.pinkFoamyCough)
+      symptoms.newCough = true;
+
+    if (/less\s*(urin|pee)|not\s*urinat|decreased\s*urin|dark\s*urin|hardly\s*pee/i.test(text))
+      symptoms.decreasedUrine = true;
+
+    // SOB — infer severity from context words
+    if (/short(ness)?\s*of\s*breath|breathless|can'?t\s*breath|difficulty\s*breath(ing)?|dyspnea|hard\s*to\s*breath/i.test(text)) {
+      if (/at\s*rest|just\s*sitting|resting|severe|can'?t\s*breath|struggling|gasping/i.test(text))
+        symptoms.sobScale = 8;
+      else if (/moderate|walking|mild\s*activity/i.test(text))
+        symptoms.sobScale = 5;
+      else
+        symptoms.sobScale = 4;
+    }
+
+    // Weight gain — extract numeric value
+    const weightPatterns = [
+      /gain(ed)?\s+(\d+\.?\d*)\s*(pound|lb)/i,
+      /(\d+\.?\d*)\s*(pound|lb)\s*(heavier|gain)/i,
+      /weight\s*(gain|gained|up)\s*(\d+\.?\d*)\s*(pound|lb)/i,
+      /up\s+(\d+\.?\d*)\s*(pound|lb)/i
+    ];
+    for (const pattern of weightPatterns) {
+      const m = text.match(pattern);
+      if (m) {
+        const amount = parseFloat(m.find((v, i) => i > 0 && /^\d/.test(v)));
+        if (!isNaN(amount)) {
+          if (/week|7\s*day/i.test(text)) symptoms.weightGain1Week = amount;
+          else symptoms.weightGain1Day = amount;
+        }
+        break;
+      }
+    }
+
+    // Explicit heart rate BPM
+    const hrMatch = text.match(/(\d{2,3})\s*(bpm|beats?\s*per\s*minute)/i);
+    if (hrMatch) symptoms.heartRateBpm = parseInt(hrMatch[1]);
+
+    return symptoms;
+  }
+
+  /**
+   * Merge form-input symptoms with text-extracted symptoms.
+   * Boolean flags use OR; numeric values take the maximum.
+   * Form values take priority when the user explicitly entered them.
+   */
+  mergeSymptoms(formData, textData) {
+    const merged = { ...textData };
+    Object.keys(formData).forEach((key) => {
+      const fv = formData[key];
+      const tv = textData[key];
+      if (typeof fv === "boolean") {
+        merged[key] = fv || (tv === true);
+      } else if (typeof fv === "number") {
+        merged[key] = Math.max(fv || 0, tv || 0);
+      } else if (fv !== null && fv !== undefined) {
+        merged[key] = fv;
+      }
+    });
+    return merged;
+  }
+}
+
 // Export for use in app
 window.TriageEngine = TriageEngine;
