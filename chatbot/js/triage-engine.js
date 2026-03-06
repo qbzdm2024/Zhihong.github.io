@@ -134,55 +134,38 @@ class TriageEngine {
 
   /**
    * Build a structured triage prompt for the AI to assess.
+   * The AI uses its OWN independent clinical reasoning — it does NOT see
+   * the rule-based result so the two systems remain truly independent.
    * @param {string} freeTextSymptoms - User's description of symptoms
-   * @param {Object|null} structuredSymptoms - Optional structured data
    * @returns {string} system prompt for AI triage
    */
-  buildAITriagePrompt(freeTextSymptoms, structuredSymptoms = null) {
-    let structuredSection = "";
-    if (structuredSymptoms) {
-      const ruleResult = this.ruleBasedTriage(structuredSymptoms);
-      structuredSection = `
-## Rule-Based Triage (for comparison)
-The deterministic traffic light system classified this as: **${ruleResult.zone} ZONE**
-Triggered flags: ${ruleResult.flags.length > 0 ? ruleResult.flags.join("; ") : "None"}
-`;
-    }
-
+  buildAITriagePrompt(freeTextSymptoms) {
     return `You are a clinical decision support assistant for heart failure patient triage.
-Your task is to assess the patient's symptoms and provide a triage recommendation using clinical reasoning.
-
-This is for EDUCATIONAL and COMPARATIVE purposes. Your triage result will be compared against a deterministic rule-based traffic light system.
+Your task is to assess the patient's symptoms and provide a triage recommendation using your own clinical reasoning.
 
 IMPORTANT: Always advise the patient to consult their healthcare team. You are a support tool, not a replacement for medical advice.
-
-${structuredSection}
 
 ## Patient-Reported Symptoms
 ${freeTextSymptoms}
 
 ## Instructions
-Perform a clinical triage assessment:
+Perform an independent clinical triage assessment using evidence-based reasoning (2022 AHA/ACC/HFSA Heart Failure Guidelines):
 
 1. **Zone Assignment**: Assign one of three zones:
    - 🟢 GREEN: Stable — continue usual care
    - 🟡 YELLOW: Concerning — contact care team within hours
    - 🔴 RED: Emergency — call 911 immediately
 
-2. **Clinical Reasoning**: Explain WHY you assigned this zone using evidence-based reasoning. Consider:
+2. **Clinical Reasoning**: Explain WHY you assigned this zone. Consider:
    - Hemodynamic instability signs
    - Fluid overload indicators
-   - Ischemic/arrhythmic features
+   - Ischemic/arrhythmic features (distinguish cardiac chest pain from GI symptoms like regurgitation)
    - Functional status change
    - Risk stratification factors
 
 3. **Key Symptoms of Concern**: List the specific symptoms driving your assessment
 
 4. **Immediate Actions**: Give specific, actionable instructions
-
-5. **Comparison Note**: If rule-based data is provided, note any agreement or discrepancy and explain the clinical basis for any difference
-
-Base your reasoning on the 2022 AHA/ACC/HFSA Heart Failure Guidelines and standard clinical practice.
 
 Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms (array), immediateActions, evidenceBasis, disclaimer`;
   }
@@ -304,7 +287,14 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
       decreasedUrine: false, heartRateBpm: null
     };
 
-    if (/chest\s*(pain|discomfort|pressure|tightness|heaviness|hurt|ache)/i.test(text))
+    // Cardiac chest symptoms: pain / pressure / tightness / heaviness are always flagged.
+    // "Chest discomfort" alone is flagged UNLESS accompanied by clear GI indicators
+    // (regurgitation, heartburn, indigestion, acid reflux) — those are non-cardiac.
+    // Fix #2: "chest discomfort with regurgitation" → GI cause → NOT a red-flag cardiac symptom.
+    const hasCardiacChest = /chest\s*(pain|pressure|tightness|heaviness|hurt)/i.test(text);
+    const hasChestDiscomfort = /chest\s*(discomfort|ache)/i.test(text);
+    const hasGIContext = /regurgitat|heartburn|indigestion|acid\s*reflux|gerd|stomach\s*acid|sour\s*taste|burp/i.test(text);
+    if (hasCardiacChest || (hasChestDiscomfort && !hasGIContext))
       symptoms.chestPain = true;
 
     if (/faint(ing|ed)?|pass(ed)?\s*out|los(t|ing)\s*consciousness|blackout|collaps/i.test(text))
@@ -377,6 +367,107 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
     if (hrMatch) symptoms.heartRateBpm = parseInt(hrMatch[1]);
 
     return symptoms;
+  }
+
+  /**
+   * Determine which follow-up questions are still needed before running rule-based triage.
+   * Questions are skipped when the patient already provided that information.
+   * Fix #4 & #5: ask follow-ups per traffic light logic, skip already-known info.
+   * @param {Object} extractedSymptoms - from extractSymptomsFromText
+   * @param {string} text - original patient text
+   * @returns {Array<{key: string, question: string}>}
+   */
+  getNeededFollowUps(extractedSymptoms, text) {
+    const questions = [];
+
+    // ── Leg swelling ──────────────────────────────────────────────────────
+    if (extractedSymptoms.swellingNewWorse) {
+      // Traffic light tool asks: did you take an extra water pill?
+      if (!/water\s*pill|diuretic|furosemide|torsemide|lasix|bumex|extra\s*pill/i.test(text)) {
+        questions.push({
+          key: "waterPill",
+          question: "Have you already tried taking an extra water pill (diuretic) as directed by your doctor? If yes, has the swelling improved, stayed the same, or gotten worse?"
+        });
+      }
+    }
+
+    // ── Shortness of breath ────────────────────────────────────────────────
+    if (/short(ness)?\s*of\s*breath|breathless|dyspnea|can'?t\s*breath/i.test(text)) {
+      // Ask severity only if not already rated
+      const alreadyRated = /\b([0-9]|10)\s*(out\s*of|\/)\s*10|\brate[sd]?\b.*\b[0-9]\b|\b[0-9]\b.*\bscale/i.test(text);
+      if (!alreadyRated && extractedSymptoms.sobScale < 4) {
+        questions.push({
+          key: "sobSeverity",
+          question: "On a scale of 0–10, how severe is your shortness of breath? (0 = none, 10 = worst ever)"
+        });
+      }
+      // Ask activity context only if NOT already mentioned (Fix #5)
+      const activityAlreadyMentioned = /at\s*rest|just\s*sitting|resting|walking|during\s*walk|with\s*activit|exert|getting\s*worse\s*when\s*(walk|mov|climb|stand)/i.test(text);
+      if (!activityAlreadyMentioned) {
+        questions.push({
+          key: "sobActivity",
+          question: "Does the breathlessness happen only during activity, or also when you are at rest?"
+        });
+      }
+    }
+
+    // ── Weight gain ────────────────────────────────────────────────────────
+    if (/weight\s*(gain|up|increase)|gained.*(?:pound|lb|kg)/i.test(text)) {
+      if (extractedSymptoms.weightGain1Day === 0 && extractedSymptoms.weightGain1Week === 0) {
+        questions.push({
+          key: "weightAmount",
+          question: "How many pounds (or kg) have you gained, and over what period — since yesterday, or over the past week?"
+        });
+      }
+    }
+
+    return questions;
+  }
+
+  /**
+   * Summarise information already provided by the patient so follow-up
+   * questions can skip topics that have been addressed (Fix #5).
+   * @param {string} text
+   * @returns {string[]} plain-language list of known facts
+   */
+  extractAlreadyKnownInfo(text) {
+    const known = [];
+
+    if (/short(ness)?\s*of\s*breath|breathless/i.test(text)) {
+      if (/at\s*rest|just\s*sitting|resting|not\s*mov/i.test(text))
+        known.push("shortness of breath at rest");
+      if (/walk|activit|exert|mov|climb|going up/i.test(text))
+        known.push("shortness of breath worsens with activity or walking");
+      const scaleMatch = text.match(/\b(\d{1,2})\s*(?:out\s*of|\/)\s*10/i);
+      if (scaleMatch) known.push(`shortness of breath severity rated ${scaleMatch[1]}/10`);
+      if (/worse|worsening|getting worse/i.test(text))
+        known.push("symptoms are getting worse");
+    }
+
+    if (/swell(ing)?|edema/i.test(text)) {
+      if (/usual|my usual|always|chronic/i.test(text))
+        known.push("leg swelling is a known baseline symptom");
+      if (/worse|worsening|getting worse/i.test(text))
+        known.push("swelling is getting worse than usual");
+      if (/water\s*pill|diuretic|furosemide|lasix/i.test(text))
+        known.push("patient mentioned water pill / diuretic use");
+    }
+
+    if (/weight/i.test(text)) {
+      const lbsMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:pound|lb)/i);
+      if (lbsMatch) known.push(`weight gain of ${lbsMatch[1]} lbs mentioned`);
+      if (/today|one\s*day|24\s*hour|overnight/i.test(text))
+        known.push("weight gain was within the last day");
+      if (/week|7\s*day/i.test(text))
+        known.push("weight gain was over the past week");
+    }
+
+    if (/chest/i.test(text)) {
+      if (/regurgitat|heartburn|indigestion|acid/i.test(text))
+        known.push("chest discomfort is accompanied by GI symptoms (regurgitation/heartburn)");
+    }
+
+    return known;
   }
 
   /**
