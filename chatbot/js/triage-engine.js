@@ -286,7 +286,6 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
       conservativeNote: !agree ? "⚠️ The two systems disagreed. We recommend following the more urgent recommendation." : ""
     };
   }
-}
 
   /**
    * Extract structured symptom flags from free-text description.
