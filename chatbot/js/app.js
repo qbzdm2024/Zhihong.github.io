@@ -503,11 +503,24 @@ class App {
       });
     });
 
-    // API key input
-    document.getElementById("api-key-input").addEventListener("change", (e) => {
-      this.chatEngine.setApiKey(e.target.value);
+    // API key input — fire on blur AND on paste so user doesn't have to
+    // click away after typing; also migrate any key saved by the old Claude version
+    const apiInput = document.getElementById("api-key-input");
+    const saveKey = (value) => {
+      const key = value.trim();
+      if (!key) return;
+      this.chatEngine.setApiKey(key);
       this._updateConnectionStatus();
       this._showToast("API key saved", "success");
+    };
+    apiInput.addEventListener("blur",  (e) => saveKey(e.target.value));
+    apiInput.addEventListener("paste", (e) => {
+      // paste gives the value before paste; read after a tick
+      setTimeout(() => saveKey(apiInput.value), 0);
+    });
+    // Also support pressing Enter inside the field
+    apiInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); saveKey(e.target.value); apiInput.blur(); }
     });
 
     // Model select
