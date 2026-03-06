@@ -21,7 +21,15 @@ class ChatEngine {
 
   loadApiKey() {
     const saved = localStorage.getItem("hf_chatbot_openai_key");
-    if (saved) this.apiKey = saved;
+    if (saved) { this.apiKey = saved; return this.apiKey; }
+    // Migrate key saved by earlier Claude/Anthropic version of the chatbot
+    const legacy = localStorage.getItem("hf_chatbot_api_key");
+    if (legacy && legacy.startsWith("sk-") && !legacy.startsWith("sk-ant-")) {
+      // Looks like an OpenAI key that got stored under the old name
+      this.apiKey = legacy;
+      localStorage.setItem("hf_chatbot_openai_key", legacy);
+      localStorage.removeItem("hf_chatbot_api_key");
+    }
     return this.apiKey;
   }
 
