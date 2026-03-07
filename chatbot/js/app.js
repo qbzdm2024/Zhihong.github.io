@@ -162,9 +162,10 @@ class App {
    * @param {HTMLElement} messageEl - the message div returned by _addMessage
    * @param {Object|null} ruleResult
    * @param {Object|null} aiResult
+   * @param {string|null} aiError - error message if AI triage failed
    */
-  _appendInlineTriage(messageEl, ruleResult, aiResult) {
-    if (!ruleResult && !aiResult) return;
+  _appendInlineTriage(messageEl, ruleResult, aiResult, aiError = null) {
+    if (!ruleResult && !aiResult && !aiError) return;
     const body = messageEl.querySelector(".message-body");
     const bubble = messageEl.querySelector(".message-bubble");
 
@@ -173,6 +174,15 @@ class App {
 
     if (ruleResult) wrapper.appendChild(this._buildInlineCard("rule", "📏 Rule-Based (Traffic Light)", ruleResult));
     if (aiResult)   wrapper.appendChild(this._buildInlineCard("ai",   "🤖 AI Reasoning", aiResult));
+    if (!aiResult && aiError) {
+      const errCard = document.createElement("div");
+      errCard.className = "inline-triage-card ai";
+      errCard.innerHTML = `<div class="inline-triage-header ai">🤖 AI Reasoning</div>
+        <div class="inline-triage-body" style="color:#718096; font-size:12px; padding:8px;">
+          AI triage unavailable: ${aiError.slice(0, 120)}. Rule-based result above is still valid.
+        </div>`;
+      wrapper.appendChild(errCard);
+    }
 
     // Insert after the bubble, before sources/time
     bubble.insertAdjacentElement("afterend", wrapper);
@@ -693,8 +703,14 @@ class App {
       }
 
       // ── Case D: No triage-relevant symptoms — normal education response ────
-      // No triage zone is shown.
-      const result = await this.chatEngine.chat(message, { triageMode: false });
+      // If the query contains cardiac symptoms (fast heartbeat, palpitations, etc.)
+      // that fall outside the 7 traffic light categories and no HF context was
+      // established, flag it so the LLM can ask a clarifying question.
+      const cardiacNonTriage = this.triageEngine.detectCardiacNonTriageQuery(message);
+      const result = await this.chatEngine.chat(message, {
+        triageMode: false,
+        cardiacNonTriage
+      });
       this._removeTypingIndicator();
       this._addMessage("assistant", result.content, result.sources);
 
@@ -715,28 +731,30 @@ class App {
    * @param {HTMLElement|null} messageEl - chat bubble to attach inline card
    */
   async _runAutoTriage(symptomText, detectedSymptoms, extractedAnswers, messageEl = null) {
-    try {
-      let ruleResult = null;
-      let aiResult   = null;
+    let ruleResult = null;
+    let aiResult   = null;
+    let aiError    = null;
 
-      // Rule-based: exact traffic light logic per category
-      if (this.triageMode !== "ai") {
-        ruleResult = this.triageEngine.ruleBasedTriage(extractedAnswers, detectedSymptoms);
-      }
+    // Rule-based: exact traffic light logic — synchronous, never fails
+    if (this.triageMode !== "ai") {
+      ruleResult = this.triageEngine.ruleBasedTriage(extractedAnswers, detectedSymptoms);
+    }
 
-      // AI triage: independent clinical reasoning (no rule result injected)
-      if (this.triageMode === "ai" || this.triageMode === "both") {
-        this._setLoading(true, "Running AI triage assessment...");
+    // AI triage: independent clinical reasoning (no rule result injected)
+    if (this.triageMode === "ai" || this.triageMode === "both") {
+      this._setLoading(true, "Running AI triage assessment...");
+      try {
         aiResult = await this.chatEngine.runAITriage(symptomText, detectedSymptoms);
+      } catch (err) {
+        console.error("AI triage error:", err);
+        aiError = err.message;
+      } finally {
+        this._setLoading(false);
       }
+    }
 
-      if (ruleResult || aiResult) {
-        if (messageEl) this._appendInlineTriage(messageEl, ruleResult, aiResult);
-      }
-    } catch (err) {
-      console.error("Triage error:", err);
-    } finally {
-      this._setLoading(false);
+    if (ruleResult || aiResult || aiError) {
+      if (messageEl) this._appendInlineTriage(messageEl, ruleResult, aiResult, aiError);
     }
   }
 

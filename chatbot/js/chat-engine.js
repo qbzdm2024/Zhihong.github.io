@@ -67,8 +67,9 @@ class ChatEngine {
    * @param {string} context - retrieved knowledge chunks
    * @param {boolean} isTriageMode - true when patient described current symptoms
    * @param {Array<{key,question,category}>|null} followUpQuestions - structured follow-ups to ask
+   * @param {boolean} cardiacNonTriage - cardiac query outside 7 categories (ask HF clarification)
    */
-  buildSystemPrompt(context, isTriageMode = false, followUpQuestions = null) {
+  buildSystemPrompt(context, isTriageMode = false, followUpQuestions = null, cardiacNonTriage = false) {
     const basePrompt = `You are a compassionate, knowledgeable heart failure self-management assistant.
 Your purpose is to educate heart failure patients and caregivers about heart failure management only.
 
@@ -143,12 +144,28 @@ The patient is describing symptoms they are experiencing right now.
 - Do NOT repeat zone classifications in the text — the triage card shows them.`;
     }
 
+    // ── Cardiac query without confirmed HF context ────────────────────────────
+    // (e.g. "my heart is racing" without mentioning HF diagnosis)
+    if (cardiacNonTriage) {
+      return basePrompt + `
+
+## EDUCATION MODE — CARDIAC QUERY / POSSIBLE HF CONTEXT
+The patient described a cardiac symptom (e.g. fast heartbeat, palpitations, irregular rhythm)
+but has NOT mentioned having heart failure.
+
+Instructions:
+1. Briefly answer their question in the context of heart failure (since this is an HF support tool).
+2. After your answer, ask ONE clarifying question:
+   "Do you have a diagnosis of heart failure or are you being followed by a cardiologist? Knowing this helps me give you the most relevant guidance and check if any of these symptoms need urgent attention."
+3. Do NOT provide a triage zone in this response.`;
+    }
+
     // ── Education mode: general Q&A, no triage zone ──────────────────────────
     return basePrompt + `
 
 ## EDUCATION MODE
-The patient is asking a general question, not reporting current symptoms.
-Do NOT provide a triage zone. Provide evidence-based educational information.`;
+The patient is asking a general heart failure question, not reporting current symptoms.
+Do NOT provide a triage zone. Provide concise, evidence-based educational information.`;
   }
 
   // ─── Main Chat Function ──────────────────────────────────────────────────
@@ -156,7 +173,7 @@ Do NOT provide a triage zone. Provide evidence-based educational information.`;
   /**
    * Send a message and get a response with RAG context.
    * @param {string} userMessage
-   * @param {Object} options - { triageMode, followUpQuestions }
+   * @param {Object} options - { triageMode, followUpQuestions, cardiacNonTriage }
    * @returns {Object} { content, sources }
    */
   async chat(userMessage, options = {}) {
@@ -169,8 +186,9 @@ Do NOT provide a triage zone. Provide evidence-based educational information.`;
 
     const systemPrompt = this.buildSystemPrompt(
       context,
-      options.triageMode || false,
-      options.followUpQuestions || null
+      options.triageMode      || false,
+      options.followUpQuestions || null,
+      options.cardiacNonTriage || false
     );
 
     const messages = [
