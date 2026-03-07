@@ -85,16 +85,16 @@ class TriageEngine {
    */
   async detectSymptomsWithLLM(text, apiKey, model = "gpt-4o-mini") {
     const prompt = `You are a clinical symptom classifier for a heart failure triage tool.
-Given a patient message, identify which of these 7 symptom categories are mentioned and whether it is a first-person report of currently experienced symptoms.
+Given a patient message, identify which of these 7 symptom categories are present.
 
 Categories (use these exact keys):
 - sob: Shortness of breath, breathlessness, difficulty breathing, can't catch breath, winded, gasping
 - chestDiscomfort: Chest pain, pressure, tightness, heaviness, chest ache, squeezing in chest
-- fatigue: Fatigue, exhaustion, tiredness, weakness, no energy, worn out, wiped out, drained, can't keep up
-- weightChange: Weight gain or loss, scale went up or down, heavier than usual, put on weight/pounds/lbs, gained weight
-- confusion: Confusion, disorientation, foggy thinking, can't think clearly, memory problems, muddled
+- fatigue: Fatigue, exhaustion, tiredness, weakness, no energy, worn out, wiped out, drained
+- weightChange: Weight GAIN only (not loss) — scale went up, gained weight/pounds/lbs, heavier than usual, put on weight. Weight loss alone does NOT count.
+- confusion: Confusion, disorientation, foggy thinking, can't think clearly, memory problems
 - legSwelling: Leg, ankle, or foot swelling, puffiness, edema, ankles look bigger/puffy
-- lightheaded: Dizziness, lightheadedness, nearly fainted, unsteady, fell, balance problems, vertigo
+- lightheaded: Dizziness, lightheadedness, nearly fainted, unsteady, fell, balance problems
 
 Patient message:
 """
@@ -102,12 +102,13 @@ ${text}
 """
 
 Return ONLY valid JSON — no explanation, no markdown:
-{"categories": ["sob", "fatigue"], "isPersonalReport": true}
+{"categories": ["sob", "fatigue"]}
 
 Rules:
-- categories: array of matched category keys (empty array [] if none match)
-- isPersonalReport: true ONLY if the patient is describing symptoms they personally experience (uses "I", "my", "I've", "I'm", "I notice", "I feel", "I gained", "my weight", etc.) — false for general questions like "what causes fatigue?" or "how is leg swelling treated?"
-- Include a category whenever the concept is mentioned in ANY natural phrasing: "gained a few pounds" → weightChange, "feel wiped out" → fatigue, "ankles look bigger" → legSwelling, "can't catch my breath" → sob`;
+- categories: array of matched category keys present in the message (empty array [] if none)
+- Include a category for ANY natural phrasing: "gained a few pounds" → weightChange, "feel wiped out" → fatigue, "ankles look bigger" → legSwelling, "can't catch my breath" → sob
+- Include weightChange ONLY for weight GAIN — "I lost weight" alone does NOT trigger it
+- Include a category even when the message is partly a question ("Is this serious? I've been gaining weight") — detect the symptom content, not just the question`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -131,11 +132,132 @@ Rules:
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       return {
-        categories:      Array.isArray(parsed.categories) ? parsed.categories.filter(c => this.CATEGORY_LABELS[c]) : [],
-        isPersonalReport: parsed.isPersonalReport === true
+        categories: Array.isArray(parsed.categories)
+          ? parsed.categories.filter(c => this.CATEGORY_LABELS[c])
+          : []
       };
     }
-    return { categories: [], isPersonalReport: false };
+    return { categories: [] };
+  }
+
+  /**
+   * LLM-based answer extraction: given patient text and detected categories, ask the LLM
+   * to extract structured answers for each category's traffic-light questions.
+   * Returns null for fields not mentioned so follow-up questions are triggered correctly.
+   *
+   * @param {string} text - patient text (original + any follow-up answers)
+   * @param {string[]} categories - detected category keys
+   * @param {string} apiKey
+   * @param {string} model
+   * @returns {Promise<Object>} { sob: {...}, weightChange: {...}, ... }
+   */
+  async extractAnswersWithLLM(text, categories, apiKey, model = "gpt-4o-mini") {
+    // Per-category field specs matching the traffic light tool questions exactly
+    const catSpecs = {
+      sob: {
+        desc: "Shortness of Breath",
+        fields: `- isNew: "yes" (new symptom, never had before) | "no" (recurring/ongoing) | null
+- coSymptoms: array — include each item from ["chest_pain:severe","chest_pain:not_severe","fever","cough","leg_swelling","mucus","wheeze"] that is clearly present. Use "chest_pain:severe" for clearly severe/crushing chest pain; "chest_pain:not_severe" for mild/moderate chest pain.
+- isWorseUsual: "yes" | "no" | null
+- changedLastDay: "yes" | null`
+      },
+      chestDiscomfort: {
+        desc: "Chest Discomfort",
+        fields: `- isNew: "yes" | "no" | null
+- coSymptoms: array from ["shooting_pain","sob","heart_racing","sweating","nausea","regurg"] present
+- isAtRest: "rest" (occurs at rest/sitting/lying) | "activity" (only with exertion) | null`
+      },
+      fatigue: {
+        desc: "Fatigue / Unusual Tiredness",
+        fields: `- coSymptoms: array from ["fever","sob","weight_change","leg_swelling","cough","lightheaded"] present
+- isWorseUsual: "yes" | "no" | null
+- canDoActivities: "yes" (still managing normal daily activities) | "no" (fatigue preventing them) | null`
+      },
+      weightChange: {
+        desc: "Weight Gain (ONLY weight GAIN counts — weight loss is not a triage trigger)",
+        fields: `- changeType: "day_gain" (patient reports gaining ≥2 lbs since yesterday or in one day) | "week_gain" (patient reports gaining >5 lbs in past week) | "other" (weight gain present but below those amounts, or amount/timeframe not clear) | null (no weight gain described)
+- tookDiuretic: "yes" (patient says they ARE taking water pills / diuretics as prescribed) | "no" (patient says they are NOT taking them) | "unsure" | null (not mentioned)
+- coSymptoms: array from ["sob","cough","leg_swelling","nausea","bowel_changes"] present`
+      },
+      confusion: {
+        desc: "Confusion / Mental Status Change",
+        fields: `- isNew: "yes" | "no" | null
+- coSymptoms: array from ["unconscious","slurred_speech","face_asym","weakness","fever","urination","lightheaded"] present`
+      },
+      legSwelling: {
+        desc: "Leg / Ankle Swelling",
+        fields: `- isNewOrWorse: "yes" (clearly new or worsening) | "no" (same as usual/stable) | null (not specified)
+- legs: "one" (one leg or ankle specified) | "both" (both legs or ankles) | null (not specified which)
+- tookDiuretic: "yes" (patient says they ARE taking water pills / diuretics) | "no" (not taking them) | "unsure" | null`
+      },
+      lightheaded: {
+        desc: "Dizziness / Lightheadedness / Falls",
+        fields: `- isNew: "yes" | "no" | null
+- isWorseUsual: "yes" | "no" | null
+- changedLastDay: "yes" | null (changed or worsened in past 24 hours)`
+      }
+    };
+
+    const emptyStructures = {
+      sob:            { isNew: null, coSymptoms: [], isWorseUsual: null, changedLastDay: null },
+      chestDiscomfort:{ isNew: null, coSymptoms: [], isAtRest: null },
+      fatigue:        { coSymptoms: [], isWorseUsual: null, canDoActivities: null },
+      weightChange:   { changeType: null, tookDiuretic: null, coSymptoms: [] },
+      confusion:      { isNew: null, coSymptoms: [] },
+      legSwelling:    { isNewOrWorse: null, legs: null, tookDiuretic: null },
+      lightheaded:    { isNew: null, isWorseUsual: null, changedLastDay: null }
+    };
+
+    const relevantCats = categories.filter(c => catSpecs[c]);
+    const fieldDocs = relevantCats
+      .map(c => `### ${catSpecs[c].desc} (key: "${c}")\n${catSpecs[c].fields}`)
+      .join("\n\n");
+    const skeleton = relevantCats.reduce((acc, c) => {
+      acc[c] = emptyStructures[c] || {};
+      return acc;
+    }, {});
+
+    const prompt = `Extract clinical information from this patient message for heart failure symptom assessment.
+
+Patient message:
+"""
+${text}
+"""
+
+For each category below, extract the specified fields. Return null for anything not clearly stated or strongly implied — do NOT infer or guess.
+
+${fieldDocs}
+
+Return ONLY this JSON (fill in actual values or keep null):
+${JSON.stringify(skeleton, null, 2)}`;
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: 600,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const raw = data.choices[0]?.message?.content || "{}";
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]);
+      } catch (e) {
+        console.warn("Failed to parse LLM extraction response:", e);
+      }
+    }
+    return {};
   }
 
   /**
@@ -285,44 +407,40 @@ Rules:
   }
 
   _extractWeightAnswers(text) {
-    // answer_list: [changeType, isExpected, coSymptoms_str]
-    const a = { changeType: null, isExpected: null, coSymptoms: [] };
+    // answer_list: [changeType, tookDiuretic, coSymptoms_str]
+    // NOTE: Only weight GAIN is one of the 7 triage symptoms. Weight loss alone does not trigger triage.
+    const a = { changeType: null, tookDiuretic: null, coSymptoms: [] };
 
-    // [0] type: day_gain | week_gain | loss | other
-    // isGain catches explicit "gained X lbs", vague "gained some weight", and
-    // directional language like "increase 1 lb every day", "went up 3 lbs".
+    // [0] changeType — weight GAIN patterns only
     const isGain = /weight\s*(gain|up|increase|going\s*up|went\s*up|is\s*up)|gained|put\s*on\s*(weight|pound)|heavier|scale\s*(is|went|shows?)\s*(up|higher|more)|increas\w*\s+[\d.]+\s*(?:lb|pound|kg)|went\s*up\s+[\d.]+|up\s+[\d.]+\s*(?:lb|pound|kg)/i.test(text);
-    const isLoss = /weight\s*(loss|down|decrease|going\s*down)|lost\s*(weight|pound|lb|kg)/i.test(text);
-    const isWeek = /week|7\s*day/i.test(text);
-    const isDay  = /\bevery\s*day\b|today|one\s*day|24\s*hour|overnight|yesterday|since\s*yesterday|per\s*day|each\s*day/i.test(text);
 
-    const lbMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:pound|lb)/i);
-    const kgMatch = text.match(/(\d+(?:\.\d+)?)\s*kg/i);
-    const amount  = lbMatch ? parseFloat(lbMatch[1]) : (kgMatch ? parseFloat(kgMatch[1]) * 2.2 : null);
+    if (isGain) {
+      const isWeek = /week|7\s*day/i.test(text);
+      const isDay  = /\bevery\s*day\b|today|one\s*day|24\s*hour|overnight|yesterday|since\s*yesterday|per\s*day|each\s*day/i.test(text);
+      const lbMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:pound|lb)/i);
+      const kgMatch = text.match(/(\d+(?:\.\d+)?)\s*kg/i);
+      const amount  = lbMatch ? parseFloat(lbMatch[1]) : (kgMatch ? parseFloat(kgMatch[1]) * 2.2 : null);
 
-    if (isLoss) {
-      a.changeType = "loss";
-    } else if (isGain) {
-      // Classify by timeframe + amount; default to "other" when timeframe/amount unclear
-      if (isDay && amount !== null && amount >= 2) a.changeType = "day_gain";
+      if (isDay  && amount !== null && amount >= 2) a.changeType = "day_gain";
       else if (isWeek && amount !== null && amount >= 5) a.changeType = "week_gain";
-      else if (isDay)  a.changeType = "day_gain";   // timeframe known, amount unclear
-      else if (isWeek) a.changeType = "week_gain";  // timeframe known, amount unclear
-      else a.changeType = "other";                  // vague — ask follow-up
+      else if (isDay)  a.changeType = "day_gain";   // timeframe known, amount not clear
+      else if (isWeek) a.changeType = "week_gain";  // timeframe known, amount not clear
+      else             a.changeType = "other";       // vague gain
     }
 
-    // [1] expected / planned?
-    // IMPORTANT: check "not expected" FIRST — otherwise /expected/ matches inside
-    // "not expected" and incorrectly sets isExpected="yes".
-    if (/not\s*expected|unexpected|unplanned|surprised|don'?t\s*know\s*why|can'?t\s*explain/i.test(text))
-      a.isExpected = "no";
-    else if (/\bexpected\b|\bplanned\b|on\s*purpose|intentional|new\s*diet|started.*diet|trying\s*to\s*(lose|gain)|my\s*doctor.*told/i.test(text))
-      a.isExpected = "yes";
+    // [1] tookDiuretic — "Has the patient been taking their water pills (diuretic pills)?"
+    // Check "not taking" BEFORE "taking" to avoid false positives
+    if (/not\s*tak\w*.*(?:water\s*pill|diuretic|furosemide|lasix|torsemide|bumex)|didn'?t\s*take.*(?:water\s*pill|diuretic)|haven'?t\s*taken|stopped.*(?:water\s*pill|diuretic)/i.test(text))
+      a.tookDiuretic = "no";
+    else if (/tak\w*.*(?:water\s*pill|diuretic|furosemide|lasix|torsemide|bumex)|on\s*(?:a\s*)?(?:diuretic|water\s*pill)|my\s*(?:water\s*pill|diuretic)/i.test(text))
+      a.tookDiuretic = "yes";
 
-    // [2] co-symptoms
-    if (/short(ness)?\s*of\s*breath|breathless/i.test(text)) a.coSymptoms.push("sob");
-    if (/\bcough(ing)?\b/i.test(text))                       a.coSymptoms.push("cough");
-    if (/swell(ing|en)?|edema/i.test(text))                  a.coSymptoms.push("leg_swelling");
+    // [2] co-symptoms for weight change: SOB, cough, leg swelling, nausea, bowel changes
+    if (/short(ness)?\s*of\s*breath|breathless/i.test(text))       a.coSymptoms.push("sob");
+    if (/\bcough(ing)?\b/i.test(text))                              a.coSymptoms.push("cough");
+    if (/swell(ing|en)?|edema/i.test(text))                         a.coSymptoms.push("leg_swelling");
+    if (/\b(nausea|nauseat|vomit|sick\s*to\s*my\s*stomach)\b/i.test(text)) a.coSymptoms.push("nausea");
+    if (/bowel|diarrhea|constipat|stool|loose.*stool|changes.*bowel/i.test(text)) a.coSymptoms.push("bowel_changes");
 
     return a;
   }
@@ -407,10 +525,16 @@ Rules:
    * @param {string[]} detectedSymptoms - category keys to check
    * @returns {Array<{category, key, question}>}
    */
-  getNeededFollowUps(text, detectedSymptoms) {
+  /**
+   * @param {string} text - patient text (for regex fallback extraction)
+   * @param {string[]} detectedSymptoms
+   * @param {Object} preExtractedAnswers - answers already extracted by LLM (preferred); {} if not available
+   */
+  getNeededFollowUps(text, detectedSymptoms, preExtractedAnswers = {}) {
     const questions = [];
     for (const category of detectedSymptoms) {
-      const answers = this.extractAnswers(text, category);
+      // Use LLM-extracted answers when available; fall back to regex
+      const answers = preExtractedAnswers[category] || this.extractAnswers(text, category);
       const missing = this._getMissingQuestionsForCategory(category, answers);
       missing.forEach(q => questions.push({ ...q, category }));
     }
@@ -452,11 +576,11 @@ Rules:
 
       case "weightChange":
         if (answers.changeType === null)
-          q.push({ key: "weight_type", question: "Please describe your weight change:\n• Did you gain **2 or more pounds since yesterday**?\n• Did you gain **5 or more pounds in the past week**?\n• Is it a loss, or a different type of change?" });
-        if (answers.isExpected === null)
-          q.push({ key: "weight_expected", question: "Is this weight change **expected or planned** (for example, from a new diet or medication change)?" });
+          q.push({ key: "weight_type", question: "How much weight have you gained?\n• **2 or more pounds since yesterday** (gained in one day)\n• **More than 5 pounds in the past week**\n• Other amount or unsure" });
+        if (answers.tookDiuretic === null)
+          q.push({ key: "weight_diuretic", question: "Have you been taking your **water pills (diuretic pills)** as prescribed?\n• Yes\n• No\n• Unsure" });
         if (answers.coSymptoms.length === 0)
-          q.push({ key: "weight_co", question: "Are any of the following also happening? (say all that apply)\n• Shortness of breath\n• Cough\n• Leg or ankle swelling\n• None of these" });
+          q.push({ key: "weight_co", question: "Do you have any of these additional symptoms? (say all that apply)\n• Shortness of breath\n• Cough\n• Leg or ankle swelling\n• Nausea or vomiting\n• Changes in bowel movements\n• None of these" });
         break;
 
       case "confusion":
@@ -578,28 +702,34 @@ Rules:
     return { zone, reviewFlag };
   }
 
-  /** Weight change — traffic light logic */
+  /** Weight gain — traffic light logic
+   *  answerList[0] = changeType: "day_gain" | "week_gain" | "other" | null
+   *  answerList[1] = tookDiuretic: "yes" | "no" | "unsure" | null
+   *  answerList[2] = coSymptoms comma-joined: may include sob, cough, leg_swelling, nausea, bowel_changes
+   */
   getResultWeightChange(answerList) {
     let zone = this.ZONE_LIST[0];
     let reviewFlag = false;
 
-    // yellow_consider (no hf review)
+    const CO_SYMS = ["sob", "cough", "leg_swelling", "nausea", "bowel_changes"];
+
+    // yellow_consider: patient NOT taking diuretics (medication non-compliance)
     if (answerList[1] === "no")
       zone = this.ZONE_LIST[1];
 
-    // yellow_consider + hf review
-    if (this._checkStringForMultiple(1, answerList[2], ["sob", "cough", "leg_swelling"]) &&
+    // yellow_consider + hf review: ≥1 co-symptom AND (not on diuretics OR vague gain amount)
+    if (this._checkStringForMultiple(1, answerList[2], CO_SYMS) &&
         (answerList[1] === "no" || answerList[0] === "other")) {
       zone = this.ZONE_LIST[1];
       reviewFlag = true;
     }
 
-    // yellow_call (no hf review)
+    // yellow_call: measured day or week gain — regardless of diuretic status
     if (answerList[0] === "day_gain" || answerList[0] === "week_gain")
       zone = this.ZONE_LIST[2];
 
-    // yellow_call + hf review
-    if (this._checkStringForMultiple(2, answerList[2], ["sob", "cough", "leg_swelling"]) &&
+    // yellow_call + hf review: ≥2 co-symptoms AND (not on diuretics OR vague gain amount)
+    if (this._checkStringForMultiple(2, answerList[2], CO_SYMS) &&
         (answerList[1] === "no" || answerList[0] === "other")) {
       zone = this.ZONE_LIST[2];
       reviewFlag = true;
@@ -710,7 +840,8 @@ Rules:
         case "weightChange":
           answerList = [
             ans.changeType || "other",
-            ans.isExpected !== null ? ans.isExpected : "no",
+            // tookDiuretic: "yes"/"no"/"unsure"/null — only "no" triggers yellow_consider
+            ans.tookDiuretic !== null ? ans.tookDiuretic : "unsure",
             (ans.coSymptoms || []).join(",")
           ];
           result = this.getResultWeightChange(answerList);
@@ -726,13 +857,14 @@ Rules:
           break;
 
         case "legSwelling":
-          // When isNewOrWorse is unknown, assume "yes" (conservative) since the
-          // patient mentioned swelling — they likely noticed it as new or worse.
+          // Defaults when unknown: isNewOrWorse="yes" (patient noticed/reported swelling → likely new),
+          // legs="one" (single-sided default; "both" triggers additional reviewFlag but
+          // yellow_consider fires for either value), tookDiuretic="no" (conservative: flag for review)
           answerList = [
-            "", "",  // indices 0,1 unused
+            "", "",  // indices 0,1 unused in reference logic
             ans.isNewOrWorse !== null ? ans.isNewOrWorse : "yes",
-            ans.legs || "both",        // unknown → conservative: both legs
-            ans.tookDiuretic || "no"
+            ans.legs !== null ? ans.legs : "one",
+            ans.tookDiuretic !== null ? ans.tookDiuretic : "no"
           ];
           result = this.getResultLegSwelling(answerList);
           break;

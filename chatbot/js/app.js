@@ -661,24 +661,29 @@ class App {
         const combinedText = this.triageFollowUpState.originalText +
           "\nAdditional information: " + message;
 
-        // Re-detect categories from the combined text — the follow-up answer may
-        // introduce new symptom categories not present in the original message.
+        // Re-detect from combined text — follow-up may introduce new categories
         let detectedSymptoms = this.triageFollowUpState.detectedSymptoms;
         try {
           const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
             combinedText, this.chatEngine.apiKey, this.chatEngine.model
           );
-          // Merge: keep initial categories + add any new ones from the follow-up
-          const merged = [...detectedSymptoms];
           for (const c of llmDetection.categories) {
-            if (!merged.includes(c)) merged.push(c);
+            if (!detectedSymptoms.includes(c)) detectedSymptoms = [...detectedSymptoms, c];
           }
-          detectedSymptoms = merged;
         } catch (e) {
-          console.warn("LLM re-detection failed in Case A, using initial categories:", e.message);
+          console.warn("LLM re-detection failed in Case A:", e.message);
         }
 
-        const extractedAnswers = this._extractAllAnswers(combinedText, detectedSymptoms);
+        // LLM extraction from combined text for the most accurate answers
+        let extractedAnswers = {};
+        try {
+          extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
+            combinedText, detectedSymptoms, this.chatEngine.apiKey, this.chatEngine.model
+          );
+        } catch (e) {
+          console.warn("LLM answer extraction failed in Case A, using regex:", e.message);
+          extractedAnswers = this._extractAllAnswers(combinedText, detectedSymptoms);
+        }
 
         // AI acknowledges answer and provides education
         const result = await this.chatEngine.chat(message, { triageMode: true });
@@ -711,29 +716,41 @@ class App {
       // Both rule-based and AI models always run together — same trigger condition.
       const shouldTriage = detectedSymptoms.length > 0 && this.triageMode !== "none";
 
-      // ── Case B: Symptom report detected — check if follow-ups are needed ──
+      // ── Case B/C: Symptom detected — extract answers, then check follow-ups ──
       if (shouldTriage) {
-        const neededFollowUps = this.triageEngine.getNeededFollowUps(message, detectedSymptoms);
+        // LLM-based answer extraction (understands natural phrasing; regex fallback)
+        let extractedAnswers = {};
+        try {
+          extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
+            message, detectedSymptoms, this.chatEngine.apiKey, this.chatEngine.model
+          );
+        } catch (e) {
+          console.warn("LLM answer extraction failed, using regex:", e.message);
+          extractedAnswers = this._extractAllAnswers(message, detectedSymptoms);
+        }
+
+        const neededFollowUps = this.triageEngine.getNeededFollowUps(
+          message, detectedSymptoms, extractedAnswers
+        );
 
         if (neededFollowUps.length > 0) {
-          // Save state — triage runs in Case A after the patient answers
+          // Case B: save state — triage runs in Case A after patient answers
           this.triageFollowUpState = {
             originalText:     message,
             detectedSymptoms: detectedSymptoms,
+            extractedAnswers: extractedAnswers,
             answered:         false
           };
-          // Ask follow-up questions without showing a triage zone yet
           const result = await this.chatEngine.chat(message, {
             triageMode:        false,
             followUpQuestions: neededFollowUps
           });
           this._removeTypingIndicator();
           this._addMessage("assistant", result.content, result.sources);
-          return; // triage runs in Case A on next turn
+          return;
         }
 
-        // Case C: All needed info is present — triage immediately
-        const extractedAnswers = this._extractAllAnswers(message, detectedSymptoms);
+        // Case C: All info present — triage immediately with LLM-extracted answers
         const result = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
         const msgEl = this._addMessage("assistant", result.content, result.sources);
@@ -812,20 +829,54 @@ class App {
       let ruleResult = null;
       let aiResult   = null;
 
+      // When free text is provided, use the same LLM detection + extraction pipeline
+      // as the chat flow so rule-only and both modes give consistent results.
+      let textDetectedSymptoms = [];
+      let textExtractedAnswers = {};
+
+      if (symptomText && this.chatEngine.apiKey) {
+        try {
+          const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
+            symptomText, this.chatEngine.apiKey, this.chatEngine.model
+          );
+          textDetectedSymptoms = llmDetection.categories;
+        } catch (e) {
+          textDetectedSymptoms = this.triageEngine.detectSymptoms(symptomText);
+        }
+        if (textDetectedSymptoms.length > 0) {
+          try {
+            textExtractedAnswers = await this.triageEngine.extractAnswersWithLLM(
+              symptomText, textDetectedSymptoms, this.chatEngine.apiKey, this.chatEngine.model
+            );
+          } catch (e) {
+            textExtractedAnswers = this._extractAllAnswers(symptomText, textDetectedSymptoms);
+          }
+        }
+      } else if (symptomText) {
+        // No API key — regex fallback
+        textDetectedSymptoms = this.triageEngine.detectSymptoms(symptomText);
+        textExtractedAnswers = this._extractAllAnswers(symptomText, textDetectedSymptoms);
+      }
+
       if (this.triageMode !== "ai") {
-        // Convert sidebar form checkboxes to per-category answers
-        const { detectedSymptoms, extractedAnswers } = this._formDataToCategories(formData);
-        if (detectedSymptoms.length > 0) {
-          ruleResult = this.triageEngine.ruleBasedTriage(extractedAnswers, detectedSymptoms);
+        if (symptomText && textDetectedSymptoms.length > 0) {
+          // Text input takes priority — same pipeline as chat
+          ruleResult = this.triageEngine.ruleBasedTriage(textExtractedAnswers, textDetectedSymptoms);
+        } else {
+          // Fall back to form checkboxes
+          const { detectedSymptoms, extractedAnswers } = this._formDataToCategories(formData);
+          if (detectedSymptoms.length > 0) {
+            ruleResult = this.triageEngine.ruleBasedTriage(extractedAnswers, detectedSymptoms);
+          }
         }
       }
 
       const triageText = symptomText || this._formToText(formData);
       if ((this.triageMode === "ai" || this.triageMode === "both") && this.chatEngine.apiKey) {
-        const detectedSymptoms = symptomText
-          ? this.triageEngine.detectSymptoms(symptomText)
+        const detectedForAI = textDetectedSymptoms.length > 0
+          ? textDetectedSymptoms
           : Object.keys(this._formDataToCategories(formData).extractedAnswers);
-        aiResult = await this.chatEngine.runAITriage(triageText, detectedSymptoms);
+        aiResult = await this.chatEngine.runAITriage(triageText, detectedForAI);
       } else if (this.triageMode === "ai" && !this.chatEngine.apiKey) {
         this._showToast("API key required for AI triage", "warning");
       }
@@ -833,7 +884,7 @@ class App {
       if (ruleResult || aiResult) {
         this._renderTriageResults(ruleResult, aiResult);
       } else {
-        this._showToast("No triage-relevant symptoms detected in form input", "info");
+        this._showToast("No triage-relevant symptoms detected", "info");
       }
     } catch (err) {
       this._showToast("Triage error: " + err.message, "error");
