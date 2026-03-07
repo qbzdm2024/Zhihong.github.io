@@ -85,13 +85,13 @@ class TriageEngine {
    */
   async detectSymptomsWithLLM(text, apiKey, model = "gpt-4o-mini") {
     const prompt = `You are a clinical symptom classifier for a heart failure triage tool.
-Given a patient message, identify which of these 7 symptom categories are present.
+Given a patient message, identify which of these 7 symptom categories are PERSONALLY reported and whether the message is a personal symptom report.
 
 Categories (use these exact keys):
 - sob: Shortness of breath, breathlessness, difficulty breathing, can't catch breath, winded, gasping
 - chestDiscomfort: Chest pain, pressure, tightness, heaviness, chest ache, squeezing in chest
 - fatigue: Fatigue, exhaustion, tiredness, weakness, no energy, worn out, wiped out, drained
-- weightChange: Weight GAIN only (not loss) — scale went up, gained weight/pounds/lbs, heavier than usual, put on weight. Weight loss alone does NOT count.
+- weightChange: Weight GAIN only (not loss) — scale went up, gained weight/pounds/lbs, heavier than usual, put on weight
 - confusion: Confusion, disorientation, foggy thinking, can't think clearly, memory problems
 - legSwelling: Leg, ankle, or foot swelling, puffiness, edema, ankles look bigger/puffy
 - lightheaded: Dizziness, lightheadedness, nearly fainted, unsteady, fell, balance problems
@@ -102,13 +102,17 @@ ${text}
 """
 
 Return ONLY valid JSON — no explanation, no markdown:
-{"categories": ["sob", "fatigue"]}
+{"categories": ["sob", "fatigue"], "isPersonalReport": true}
 
 Rules:
-- categories: array of matched category keys present in the message (empty array [] if none)
-- Include a category for ANY natural phrasing: "gained a few pounds" → weightChange, "feel wiped out" → fatigue, "ankles look bigger" → legSwelling, "can't catch my breath" → sob
-- Include weightChange ONLY for weight GAIN — "I lost weight" alone does NOT trigger it
-- Include a category even when the message is partly a question ("Is this serious? I've been gaining weight") — detect the symptom content, not just the question`;
+- categories: symptoms the patient IS currently experiencing (empty array [] if none)
+- isPersonalReport:
+  - true → patient describing their own current/recent symptoms: "I gained 5 lbs", "my legs are swollen", "I've been very tired"
+  - true even with a question attached: "I gained 5 lbs this week — is this serious?", "my ankles are swollen, should I call?"
+  - false → general education question: "What causes weight gain in HF?", "How is leg swelling treated?", "What are HF symptoms?"
+  - false → hypothetical: "If someone has leg swelling, what does it mean?"
+- Only include a category if the patient is REPORTING that symptom, not merely asking about it
+- Include weightChange ONLY for weight GAIN — weight loss alone does NOT trigger it`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -132,12 +136,11 @@ Rules:
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
       return {
-        categories: Array.isArray(parsed.categories)
-          ? parsed.categories.filter(c => this.CATEGORY_LABELS[c])
-          : []
+        categories:      Array.isArray(parsed.categories) ? parsed.categories.filter(c => this.CATEGORY_LABELS[c]) : [],
+        isPersonalReport: parsed.isPersonalReport === true
       };
     }
-    return { categories: [] };
+    return { categories: [], isPersonalReport: false };
   }
 
   /**

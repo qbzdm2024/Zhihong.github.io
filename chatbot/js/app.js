@@ -698,47 +698,39 @@ class App {
         return;
       }
 
-      // ── Detect which of the 7 traffic light categories appear in the message ──
-      // LLM-based detection handles colloquial phrasing naturally.
+      // ── Detect which of the 7 categories are present and whether it's personal ──
+      // LLM handles natural phrasing + distinguishes personal reports from education questions.
       // Fall back to regex if LLM fails.
-      let detectedSymptoms;
+      let detectedSymptoms, isPersonalReport;
       try {
         const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
           message, this.chatEngine.apiKey, this.chatEngine.model
         );
-        detectedSymptoms = llmDetection.categories;
+        detectedSymptoms  = llmDetection.categories;
+        isPersonalReport  = llmDetection.isPersonalReport;
       } catch (e) {
         console.warn("LLM symptom detection failed, using regex fallback:", e.message);
         detectedSymptoms = this.triageEngine.detectSymptoms(message);
+        isPersonalReport = this.triageEngine.isPersonalSymptomReport(message);
       }
-      // Triage triggers whenever ANY of the 7 categories are detected, regardless of
-      // whether the message also contains a question ("Is this urgent?").
-      // Both rule-based and AI models always run together — same trigger condition.
-      const shouldTriage = detectedSymptoms.length > 0 && this.triageMode !== "none";
+      // Triage fires only when the patient is reporting personal symptoms.
+      // Pure education questions ("What causes leg swelling?") remain in Case D.
+      const shouldTriage = detectedSymptoms.length > 0 && isPersonalReport && this.triageMode !== "none";
 
-      // ── Case B/C: Symptom detected — extract answers, then check follow-ups ──
+      // ── Case B/C: Personal symptom report with triage categories detected ─────
       if (shouldTriage) {
-        // LLM-based answer extraction (understands natural phrasing; regex fallback)
-        let extractedAnswers = {};
-        try {
-          extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
-            message, detectedSymptoms, this.chatEngine.apiKey, this.chatEngine.model
-          );
-        } catch (e) {
-          console.warn("LLM answer extraction failed, using regex:", e.message);
-          extractedAnswers = this._extractAllAnswers(message, detectedSymptoms);
-        }
-
-        const neededFollowUps = this.triageEngine.getNeededFollowUps(
-          message, detectedSymptoms, extractedAnswers
-        );
+        // FOLLOW-UP GATING uses regex extraction — conservative (only explicit statements).
+        // The LLM tends to infer values ("legs are swollen" → isNewOrWorse:"yes", legs:"both")
+        // which would skip necessary follow-up questions. Regex returns null for anything
+        // not explicitly stated, ensuring all required questions are always asked.
+        const regexAnswers   = this._extractAllAnswers(message, detectedSymptoms);
+        const neededFollowUps = this.triageEngine.getNeededFollowUps(message, detectedSymptoms, regexAnswers);
 
         if (neededFollowUps.length > 0) {
-          // Case B: save state — triage runs in Case A after patient answers
+          // Case B: missing info — ask follow-up questions; triage runs in Case A after reply
           this.triageFollowUpState = {
             originalText:     message,
             detectedSymptoms: detectedSymptoms,
-            extractedAnswers: extractedAnswers,
             answered:         false
           };
           const result = await this.chatEngine.chat(message, {
@@ -750,7 +742,16 @@ class App {
           return;
         }
 
-        // Case C: All info present — triage immediately with LLM-extracted answers
+        // Case C: All info explicitly present.
+        // Now use LLM extraction for accurate triage (understands natural phrasing).
+        let extractedAnswers = regexAnswers;
+        try {
+          extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
+            message, detectedSymptoms, this.chatEngine.apiKey, this.chatEngine.model
+          );
+        } catch (e) {
+          console.warn("LLM answer extraction failed, using regex answers:", e.message);
+        }
         const result = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
         const msgEl = this._addMessage("assistant", result.content, result.sources);
