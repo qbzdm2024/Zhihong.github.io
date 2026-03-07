@@ -37,13 +37,22 @@ class TriageEngine {
       newCough = false,            // new dry hacking cough
       decreasedUrine = false,      // decreased urine output
       heartRateBpm = null,         // actual heart rate if known
-      // ── Chest discomfort follow-up decision tree (traffic light tool) ───
+      // ── Chest discomfort follow-up decision tree ────────────────────────
       chestDiscomfortOnly = false,
       chestIsNew = null,
       chestCoArmPain = false, chestCoSOB = false, chestCoRacingHeart = false,
       chestCoSweating = false, chestCoNausea = false,
       chestCoRegurgitation = false, chestCoNone = false,
       chestAtRest = false, chestDuringActivity = false,
+      // ── Confusion follow-up decision tree ───────────────────────────────
+      confusionIsNew = null,        // null=unknown, true=new/sudden, false=gradual
+      confusionStrokeSigns = false,
+      // ── Fatigue follow-up decision tree ─────────────────────────────────
+      fatigueIsNew = null,
+      fatigueLimitsActivities = null,
+      // ── Lightheadedness / Falls decision tree ────────────────────────────
+      fallOccurred = null,
+      dizzinessOrthostatic = null,
     } = symptoms;
 
     const redFlags = [];
@@ -56,8 +65,13 @@ class TriageEngine {
       redFlags.push("Fainting or loss of consciousness");
     if (pinkFoamyCough)
       redFlags.push("Coughing up pink or foamy mucus — sign of pulmonary edema");
-    if (severeConfusion)
-      redFlags.push("Sudden confusion or altered mental status");
+    // ── Confusion decision tree ──────────────────────────────────────────────
+    // Stroke warning signs always → RED regardless of new/existing
+    if (severeConfusion && confusionStrokeSigns)
+      redFlags.push("Confusion with stroke warning signs (speech/face/arm/vision/balance) — call 911 immediately");
+    // New/sudden confusion OR unknown (safety default) → RED
+    else if (severeConfusion && confusionIsNew !== false)
+      redFlags.push("New or sudden confusion — possible cardiac emergency (low output, electrolyte issue, or stroke)");
     if (strokeSigns)
       redFlags.push("Signs of stroke (facial droop, arm weakness, speech difficulty)");
     if (sobScale >= 7)
@@ -96,14 +110,36 @@ class TriageEngine {
         yellowFlags.push("New or worsening leg/ankle/foot swelling");
       if (ortho)
         yellowFlags.push("Waking at night breathless or needing extra pillows to sleep");
-      if (dizzinessStanding)
-        yellowFlags.push("Dizziness or lightheadedness when standing");
+      // ── Confusion: gradual/existing → YELLOW (not RED) ──────────────────
+      if (severeConfusion && confusionIsNew === false && !confusionStrokeSigns)
+        yellowFlags.push("Ongoing or gradually worsening confusion — contact your care team");
+
+      // ── Lightheadedness / Falls decision tree ────────────────────────────
+      if (dizzinessStanding) {
+        if (fallOccurred === true)
+          yellowFlags.push("Lightheadedness with a fall or near-fall — contact care team (fall risk)");
+        else if (dizzinessOrthostatic === true)
+          yellowFlags.push("Lightheadedness when standing up (orthostatic) — contact care team");
+        else
+          // No fall confirmed, unknown orthostatic — still YELLOW (safety)
+          yellowFlags.push("Lightheadedness or dizziness — contact care team for assessment");
+      }
+
       if (irregularHeartbeat)
         yellowFlags.push("New irregular heartbeat or palpitations");
       if (rapidHeartRate)
         yellowFlags.push("Resting heart rate elevated (>100 bpm)");
-      if (unusualFatigue)
-        yellowFlags.push("Unusual fatigue limiting daily activities");
+
+      // ── Fatigue decision tree ─────────────────────────────────────────────
+      if (unusualFatigue) {
+        if (fatigueIsNew === true || fatigueLimitsActivities === true)
+          yellowFlags.push("New or significantly worsening fatigue limiting daily activities");
+        else if (fatigueIsNew === null || fatigueLimitsActivities === null)
+          // Unknown if new — default to YELLOW for safety
+          yellowFlags.push("Unusual fatigue — contact care team if new or significantly worse than usual");
+        // fatigueIsNew === false AND fatigueLimitsActivities === false → GREEN (stable, monitor)
+      }
+
       if (newCough)
         yellowFlags.push("New dry or persistent cough");
       if (decreasedUrine)
@@ -330,18 +366,21 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
       ortho: false, dizzinessStanding: false, irregularHeartbeat: false,
       rapidHeartRate: false, unusualFatigue: false, newCough: false,
       decreasedUrine: false, heartRateBpm: null,
-      // ── Chest discomfort decision tree fields (traffic light tool) ────────
-      chestDiscomfortOnly: false, // "discomfort/ache" without clear cardiac language
-      chestIsNew: null,           // null=unknown, true=new, false=existing
-      chestCoArmPain: false,      // concurrent shooting arm/left-side pain
-      chestCoSOB: false,          // concurrent shortness of breath
-      chestCoRacingHeart: false,  // concurrent racing heart / palpitations
-      chestCoSweating: false,     // concurrent sweating
-      chestCoNausea: false,       // concurrent nausea or vomiting
-      chestCoRegurgitation: false,// concurrent regurgitation / heartburn (GI indicator)
-      chestCoNone: false,         // patient explicitly said "none of these"
-      chestAtRest: false,         // occurring at rest / while sitting
-      chestDuringActivity: false, // occurring during activity / walking
+      // ── Chest discomfort decision tree fields ─────────────────────────────
+      chestDiscomfortOnly: false,
+      chestIsNew: null, chestCoArmPain: false, chestCoSOB: false,
+      chestCoRacingHeart: false, chestCoSweating: false, chestCoNausea: false,
+      chestCoRegurgitation: false, chestCoNone: false,
+      chestAtRest: false, chestDuringActivity: false,
+      // ── Confusion decision tree fields ────────────────────────────────────
+      confusionIsNew: null,         // null=unknown, true=sudden/new, false=gradual/existing
+      confusionStrokeSigns: false,  // stroke warning signs mentioned
+      // ── Fatigue decision tree fields ──────────────────────────────────────
+      fatigueIsNew: null,           // null=unknown, true=new/worse, false=same as usual
+      fatigueLimitsActivities: null,// null=unknown, true=limits daily tasks, false=mild
+      // ── Lightheadedness / Falls decision tree fields ──────────────────────
+      fallOccurred: null,           // null=unknown, true=fell/nearly fell, false=no fall
+      dizzinessOrthostatic: null,   // null=unknown, true=on standing, false=other
     };
 
     // ── Chest pain classification ─────────────────────────────────────────
@@ -395,8 +434,17 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
     if (/pink\s*mucus|foamy\s*(cough|mucus)|cough(ing)?\s*(up\s*)?(blood|pink|foam)/i.test(text))
       symptoms.pinkFoamyCough = true;
 
-    if (/confus(ed|ion)|disoriented|not\s*think(ing)?\s*clearly|mental\s*status/i.test(text))
+    if (/confus(ed|ion)|disoriented|not\s*think(ing)?\s*clearly|mental\s*status/i.test(text)) {
       symptoms.severeConfusion = true;
+      // Extract whether new/sudden vs gradual
+      if (/\b(new\s*confusion|sudden(ly)?|came\s*on\s*suddenly|first\s*time|never\s*(had|experienced)\s*this\s*before|just\s*started)/i.test(text))
+        symptoms.confusionIsNew = true;
+      if (/\b(not\s*new|gradual(ly)?|always\s*(had|been)|same\s*as\s*usual|chronic|ongoing|been\s*having\s*(this|it)|slow(ly)?\s*(getting|becoming))\b/i.test(text))
+        symptoms.confusionIsNew = false;
+      // Extract stroke warning signs
+      if (/trouble\s*speak|slurred?\s*speech|can'?t\s*speak|facial\s*droop|face.*droop|arm\s*weak|one\s*side.*weak|weakness.*side|numb.*side|vision.*change|blurry\s*vision|difficult.*walk|los(t|ing).*balance/i.test(text))
+        symptoms.confusionStrokeSigns = true;
+    }
 
     if (/stroke|facial\s*droop|arm\s*weak|speech\s*(difficult|problem|slur)|slurred/i.test(text))
       symptoms.strokeSigns = true;
@@ -407,8 +455,18 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
     if (/(extra|more)\s*pillow|lying\s*(flat|down)|sleep(ing)?\s*(sitting|upright|elevated)|wak(e|ing|ed)\s*(up\s*)?(breathless|short\s*of\s*breath|gasping)/i.test(text))
       symptoms.ortho = true;
 
-    if (/dizzy|dizziness|lightheaded|light-headed/i.test(text))
+    if (/dizzy|dizziness|lightheaded|light-headed/i.test(text)) {
       symptoms.dizzinessStanding = true;
+      // Extract fall + orthostatic details from text
+      if (/\b(fell\b|fallen|had\s*a\s*fall|fall\s*down|hit.*floor|nearly\s*fell|almost\s*fell)/i.test(text))
+        symptoms.fallOccurred = true;
+      if (/haven'?t\s*(had|fallen|fell|fall)|no\s*fall|didn'?t\s*fall|not\s*fallen/i.test(text))
+        symptoms.fallOccurred = false;
+      if (/when\s*(i\s*stand|standing|i\s*get\s*up|getting\s*up)|from\s*(sitting|lying)|sit.*stand|orthostatic/i.test(text))
+        symptoms.dizzinessOrthostatic = true;
+      if (/not.*standing|all\s*the\s*time|constant|random|just\s*sitting/i.test(text))
+        symptoms.dizzinessOrthostatic = false;
+    }
 
     if (/palpitation|irregular\s*(heart|beat|pulse|rhythm)|flutter(ing)?|skipping\s*beat/i.test(text))
       symptoms.irregularHeartbeat = true;
@@ -416,8 +474,19 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
     if (/racing\s*(heart|pulse)|heart\s*rac(ing|e)|rapid\s*(heart|pulse|beat)|tachycardia/i.test(text))
       symptoms.rapidHeartRate = true;
 
-    if (/fatigue|tired|exhausted|weak(ness)?|no\s*energy/i.test(text))
+    if (/fatigue|tired|exhausted|weak(ness)?|no\s*energy/i.test(text)) {
       symptoms.unusualFatigue = true;
+      // Extract new vs usual fatigue
+      if (/\b(new\s*fatigue|more\s*tired\s*than\s*usual|worse.*usual|significantly\s*(worse|more\s*tired)|never.*this\s*tired|sudden(ly)?\s*(tired|exhausted)|unusually\s*tired)/i.test(text))
+        symptoms.fatigueIsNew = true;
+      if (/\b(same.*usual|not\s*worse|always\s*(tired|fatigued)|chronic\s*fatigue|usual\s*(fatigue|tiredness)|been\s*like\s*this)\b/i.test(text))
+        symptoms.fatigueIsNew = false;
+      // Extract whether it limits activities
+      if (/can'?t\s*(get\s*up|walk|dress|shower|do\s*anything|perform|stand)|limit.*activit|unable.*activit|activit.*limit|bedridden|stuck.*bed|can'?t\s*(do|manage)\s*(basic|daily)/i.test(text))
+        symptoms.fatigueLimitsActivities = true;
+      if (/\b(mild|slight|little\s*tired|manage|still\s*(able|doing|going)|functioning|get.*done)\b/i.test(text))
+        symptoms.fatigueLimitsActivities = false;
+    }
 
     if (/cough(ing)?/i.test(text) && !symptoms.pinkFoamyCough)
       symptoms.newCough = true;
@@ -513,6 +582,80 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
       }
     }
 
+    // ── Confusion ─────────────────────────────────────────────────────────
+    if (extractedSymptoms.severeConfusion) {
+      // Q1: New/sudden vs gradual? (skip if already stated)
+      const confusionNewStated = /\b(new\s*confusion|sudden|came\s*on\s*suddenly|first\s*time|not\s*new|gradual|always\s*had|been\s*having|chronic|ongoing)\b/i.test(text);
+      if (!confusionNewStated && extractedSymptoms.confusionIsNew === null) {
+        questions.push({
+          key: "confusionNew",
+          question: "Did this confusion come on suddenly or recently, or has it been gradually building up over time?"
+        });
+      }
+      // Q2: Stroke warning signs? (ask whenever not yet addressed)
+      const strokeSignsStated = /trouble\s*speak|slur|droop|arm\s*weak|one\s*side|vision|difficult.*walk|balance/i.test(text);
+      if (!strokeSignsStated && !extractedSymptoms.confusionStrokeSigns) {
+        questions.push({
+          key: "confusionStroke",
+          question: "Are any of these warning signs also present?\n" +
+            "• Trouble speaking or slurred speech\n" +
+            "• Facial drooping on one side\n" +
+            "• Weakness or numbness in an arm or leg\n" +
+            "• Sudden vision changes\n" +
+            "• Difficulty walking or loss of balance\n" +
+            "(These can be signs of stroke — call 911 immediately if yes)"
+        });
+      }
+    }
+
+    // ── Fatigue ───────────────────────────────────────────────────────────
+    if (extractedSymptoms.unusualFatigue) {
+      // Q1: New or worse than usual? (skip if already stated)
+      const fatigueNewStated = /\b(new\s*fatigue|more\s*tired.*usual|worse.*usual|same.*usual|not\s*worse|always\s*(tired|fatigued)|chronic|usual\s*fatigue)\b/i.test(text);
+      if (!fatigueNewStated && extractedSymptoms.fatigueIsNew === null) {
+        questions.push({
+          key: "fatigueNew",
+          question: "Is this fatigue new or noticeably worse than your usual level, or is it about the same as you normally experience?"
+        });
+      }
+      // Q2: Limiting daily activities? (skip if already stated)
+      const fatigueActivityStated = /limit|can'?t|unable|dress|shower|walk|basic|bedridden|manage|still\s*(able|doing)/i.test(text);
+      if (!fatigueActivityStated && extractedSymptoms.fatigueLimitsActivities === null) {
+        questions.push({
+          key: "fatigueActivity",
+          question: "Is the fatigue affecting your ability to do everyday activities such as getting dressed, preparing meals, or walking around your home?"
+        });
+      }
+    }
+
+    // ── Lightheadedness and Falls ─────────────────────────────────────────
+    if (extractedSymptoms.dizzinessStanding) {
+      // Q1: Have you fallen? (skip if already stated)
+      const fallStated = /\b(fell\b|fallen|had\s*a\s*fall|nearly\s*fell|haven'?t\s*(fallen|fell|had)|no\s*fall|didn'?t\s*fall)\b/i.test(text);
+      if (!fallStated && extractedSymptoms.fallOccurred === null) {
+        questions.push({
+          key: "fall",
+          question: "Have you fallen, or have you nearly fallen because of the lightheadedness?"
+        });
+      }
+      // Q2: Orthostatic (when standing)? (skip if already stated)
+      const orthoStated = /when\s*(i\s*stand|standing|getting\s*up|i\s*get\s*up)|from\s*(sitting|lying)|orthostatic|not.*standing|all\s*the\s*time/i.test(text);
+      if (!orthoStated && extractedSymptoms.dizzinessOrthostatic === null) {
+        questions.push({
+          key: "dizzinessOrtho",
+          question: "Does the lightheadedness happen mainly when you stand up from sitting or lying down, or does it occur at other times as well?"
+        });
+      }
+      // Q3: Recent medication changes?
+      const medStated = /medication|med\s*change|new\s*med|dose\s*change|started.*new/i.test(text);
+      if (!medStated) {
+        questions.push({
+          key: "medChange",
+          question: "Have you had any recent changes to your medications — such as a new blood pressure pill or a change in your diuretic (water pill) dose?"
+        });
+      }
+    }
+
     // ── Chest discomfort decision tree (traffic light tool — 3 questions) ──
     // Only applies to "discomfort/ache" — clear cardiac pain goes straight to RED.
     if (extractedSymptoms.chestDiscomfortOnly) {
@@ -594,6 +737,37 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
         known.push("weight gain was within the last day");
       if (/week|7\s*day/i.test(text))
         known.push("weight gain was over the past week");
+    }
+
+    if (/confus(ed|ion)|disoriented/i.test(text)) {
+      if (/new\s*confusion|sudden|came\s*on\s*suddenly|first\s*time/i.test(text))
+        known.push("confusion is NEW or sudden");
+      if (/not\s*new|gradual|always\s*had|been\s*having|chronic/i.test(text))
+        known.push("confusion is gradual/existing (not new)");
+      if (/trouble\s*speak|slur|droop|arm\s*weak|one\s*side|vision.*change|difficult.*walk/i.test(text))
+        known.push("stroke warning signs mentioned");
+    }
+
+    if (/fatigue|tired|exhausted/i.test(text)) {
+      if (/new\s*fatigue|worse.*usual|more\s*tired.*usual/i.test(text))
+        known.push("fatigue is new or worse than usual");
+      if (/same.*usual|not\s*worse|always\s*(tired|fatigued)/i.test(text))
+        known.push("fatigue is same as usual baseline (not new)");
+      if (/limit.*activit|can'?t.*basic|unable.*daily/i.test(text))
+        known.push("fatigue is limiting daily activities");
+      if (/mild|manage|still\s*(able|doing)/i.test(text))
+        known.push("fatigue is mild, patient is still managing daily activities");
+    }
+
+    if (/dizzy|dizziness|lightheaded/i.test(text)) {
+      if (/\b(fell\b|fallen|had\s*a\s*fall|nearly\s*fell)/i.test(text))
+        known.push("patient has fallen or nearly fallen");
+      if (/haven'?t\s*(fallen|fell|had)|no\s*fall|didn'?t\s*fall/i.test(text))
+        known.push("patient has NOT had a fall");
+      if (/when\s*(standing|i\s*stand|getting\s*up)/i.test(text))
+        known.push("lightheadedness occurs when standing up");
+      if (/medication.*change|new\s*med|dose\s*change/i.test(text))
+        known.push("recent medication change mentioned");
     }
 
     if (/chest/i.test(text)) {

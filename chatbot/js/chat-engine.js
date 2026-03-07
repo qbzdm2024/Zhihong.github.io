@@ -117,7 +117,7 @@ If a question is clearly outside this scope (e.g., taxes, weather, legal matters
 ## Triage Rules
 - ONLY perform triage if the patient is personally describing CURRENT symptoms they are experiencing right now.
 - Do NOT triage general/educational questions like "what are symptoms of HF?" or "what does chest pain mean?"
-- When triage IS appropriate, clearly state the zone (🟢 GREEN / 🟡 YELLOW / 🔴 RED) and note that a triage assessment is shown below your response.
+- IMPORTANT: Do NOT include any triage zone badge (🟢/🟡/🔴), zone name (GREEN/YELLOW/RED), or urgency recommendation in your text. A separate triage assessment card is automatically generated and shown alongside your response — stating the zone in your text would duplicate it. Simply acknowledge the symptoms empathetically and provide relevant education.
 
 ## Core Principles
 1. Cite sources INLINE using "According to [Name](URL), ..."
@@ -169,7 +169,8 @@ After the patient answers, a full triage assessment will be shown.`;
       return basePrompt + `
 
 ## THIS MESSAGE CONTAINS CURRENT SYMPTOM DESCRIPTIONS${knownSection}
-Acknowledge the specific symptoms mentioned, provide relevant education with inline citations, then note that a triage assessment is displayed below your response. Do not repeat the full triage logic in the text — it is shown in the triage card.`;
+Acknowledge the patient's symptoms with empathy and provide relevant education with inline citations.
+Do NOT include any triage zone (🟢/🟡/🔴 GREEN/YELLOW/RED), urgency level, or "call 911 / contact care team" recommendation in your text — a separate triage assessment card is shown automatically below your response. Avoid duplicating it.`;
     }
 
     return basePrompt;
