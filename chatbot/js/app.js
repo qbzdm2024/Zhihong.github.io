@@ -187,14 +187,25 @@ class App {
     // Insert after the bubble, before sources/time
     bubble.insertAdjacentElement("afterend", wrapper);
 
-    // Comparison note if both present and disagree
-    if (ruleResult && aiResult && ruleResult.zone !== aiResult.zone) {
+    // Comparison note if both present
+    if (ruleResult && aiResult) {
       const note = document.createElement("div");
       note.className = "inline-triage-note";
-      const zoneOrder = { GREEN: 0, YELLOW: 1, RED: 2 };
-      const safer = (zoneOrder[ruleResult.zone] ?? -1) >= (zoneOrder[aiResult.zone] ?? -1)
-        ? ruleResult : aiResult;
-      note.innerHTML = `⚠️ Systems disagree — following the more cautious recommendation: <strong>${safer.zone}</strong>. ${safer.action}`;
+      if (ruleResult.zone !== aiResult.zone) {
+        const zoneOrder = { GREEN: 0, YELLOW: 1, RED: 2 };
+        const safer = (zoneOrder[ruleResult.zone] ?? -1) >= (zoneOrder[aiResult.zone] ?? -1)
+          ? ruleResult : aiResult;
+        note.className = "inline-triage-note disagree";
+        note.innerHTML =
+          `⚠️ <strong>The two systems disagree:</strong><br>` +
+          `• Rule-based: <strong>${ruleResult.zone}</strong>${ruleResult.urgency && ruleResult.urgency !== ruleResult.zone ? " — " + ruleResult.urgency : ""}<br>` +
+          `• AI Assessment: <strong>${aiResult.zone}</strong>${aiResult.urgency && aiResult.urgency !== aiResult.zone ? " — " + aiResult.urgency : ""}<br>` +
+          `<span style="margin-top:4px;display:inline-block;">Following the more cautious recommendation: ` +
+          `<strong>${safer.zone}</strong>. ${safer.action}</span>`;
+      } else {
+        note.className = "inline-triage-note agree";
+        note.innerHTML = `✓ <strong>Both systems agree: ${ruleResult.zone}</strong> — ${ruleResult.action}`;
+      }
       wrapper.insertAdjacentElement("afterend", note);
     }
 
@@ -649,7 +660,24 @@ class App {
         this.triageFollowUpState.answered = true;
         const combinedText = this.triageFollowUpState.originalText +
           "\nAdditional information: " + message;
-        const detectedSymptoms = this.triageFollowUpState.detectedSymptoms;
+
+        // Re-detect categories from the combined text — the follow-up answer may
+        // introduce new symptom categories not present in the original message.
+        let detectedSymptoms = this.triageFollowUpState.detectedSymptoms;
+        try {
+          const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
+            combinedText, this.chatEngine.apiKey, this.chatEngine.model
+          );
+          // Merge: keep initial categories + add any new ones from the follow-up
+          const merged = [...detectedSymptoms];
+          for (const c of llmDetection.categories) {
+            if (!merged.includes(c)) merged.push(c);
+          }
+          detectedSymptoms = merged;
+        } catch (e) {
+          console.warn("LLM re-detection failed in Case A, using initial categories:", e.message);
+        }
+
         const extractedAnswers = this._extractAllAnswers(combinedText, detectedSymptoms);
 
         // AI acknowledges answer and provides education
@@ -665,22 +693,23 @@ class App {
         return;
       }
 
-      // ── Detect whether this is a personal symptom report ─────────────────
-      // LLM-based detection understands colloquial phrasing ("gained a few pounds",
-      // "feel wiped out", etc.) far better than regex. Fall back to regex if LLM fails.
-      let detectedSymptoms, isPersonalReport;
+      // ── Detect which of the 7 traffic light categories appear in the message ──
+      // LLM-based detection handles colloquial phrasing naturally.
+      // Fall back to regex if LLM fails.
+      let detectedSymptoms;
       try {
         const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
           message, this.chatEngine.apiKey, this.chatEngine.model
         );
         detectedSymptoms = llmDetection.categories;
-        isPersonalReport = llmDetection.isPersonalReport;
       } catch (e) {
         console.warn("LLM symptom detection failed, using regex fallback:", e.message);
         detectedSymptoms = this.triageEngine.detectSymptoms(message);
-        isPersonalReport = this.triageEngine.isPersonalSymptomReport(message);
       }
-      const shouldTriage = detectedSymptoms.length > 0 && isPersonalReport && this.triageMode !== "none";
+      // Triage triggers whenever ANY of the 7 categories are detected, regardless of
+      // whether the message also contains a question ("Is this urgent?").
+      // Both rule-based and AI models always run together — same trigger condition.
+      const shouldTriage = detectedSymptoms.length > 0 && this.triageMode !== "none";
 
       // ── Case B: Symptom report detected — check if follow-ups are needed ──
       if (shouldTriage) {

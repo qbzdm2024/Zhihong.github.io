@@ -289,11 +289,12 @@ Rules:
     const a = { changeType: null, isExpected: null, coSymptoms: [] };
 
     // [0] type: day_gain | week_gain | loss | other
-    // isGain catches both explicit "gained X lbs" and vague "gained some weight"
-    const isGain = /weight\s*(gain|up|increase|going\s*up|went\s*up|is\s*up)|gained|put\s*on\s*(weight|pound)|heavier|scale\s*(is|went|shows?)\s*(up|higher|more)/i.test(text);
+    // isGain catches explicit "gained X lbs", vague "gained some weight", and
+    // directional language like "increase 1 lb every day", "went up 3 lbs".
+    const isGain = /weight\s*(gain|up|increase|going\s*up|went\s*up|is\s*up)|gained|put\s*on\s*(weight|pound)|heavier|scale\s*(is|went|shows?)\s*(up|higher|more)|increas\w*\s+[\d.]+\s*(?:lb|pound|kg)|went\s*up\s+[\d.]+|up\s+[\d.]+\s*(?:lb|pound|kg)/i.test(text);
     const isLoss = /weight\s*(loss|down|decrease|going\s*down)|lost\s*(weight|pound|lb|kg)/i.test(text);
     const isWeek = /week|7\s*day/i.test(text);
-    const isDay  = /today|one\s*day|24\s*hour|overnight|yesterday|since\s*yesterday/i.test(text);
+    const isDay  = /\bevery\s*day\b|today|one\s*day|24\s*hour|overnight|yesterday|since\s*yesterday|per\s*day|each\s*day/i.test(text);
 
     const lbMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:pound|lb)/i);
     const kgMatch = text.match(/(\d+(?:\.\d+)?)\s*kg/i);
@@ -311,10 +312,12 @@ Rules:
     }
 
     // [1] expected / planned?
-    if (/expected|planned|on\s*purpose|intentional|new\s*diet|started.*diet|trying\s*to\s*(lose|gain)|my\s*doctor.*told/i.test(text))
-      a.isExpected = "yes";
-    else if (/not\s*expected|unexpected|unplanned|surprised|don'?t\s*know\s*why|can'?t\s*explain/i.test(text))
+    // IMPORTANT: check "not expected" FIRST — otherwise /expected/ matches inside
+    // "not expected" and incorrectly sets isExpected="yes".
+    if (/not\s*expected|unexpected|unplanned|surprised|don'?t\s*know\s*why|can'?t\s*explain/i.test(text))
       a.isExpected = "no";
+    else if (/\bexpected\b|\bplanned\b|on\s*purpose|intentional|new\s*diet|started.*diet|trying\s*to\s*(lose|gain)|my\s*doctor.*told/i.test(text))
+      a.isExpected = "yes";
 
     // [2] co-symptoms
     if (/short(ness)?\s*of\s*breath|breathless/i.test(text)) a.coSymptoms.push("sob");
@@ -723,10 +726,12 @@ Rules:
           break;
 
         case "legSwelling":
+          // When isNewOrWorse is unknown, assume "yes" (conservative) since the
+          // patient mentioned swelling — they likely noticed it as new or worse.
           answerList = [
             "", "",  // indices 0,1 unused
-            ans.isNewOrWorse || "no",
-            ans.legs || "one",
+            ans.isNewOrWorse !== null ? ans.isNewOrWorse : "yes",
+            ans.legs || "both",        // unknown → conservative: both legs
             ans.tookDiuretic || "no"
           ];
           result = this.getResultLegSwelling(answerList);
@@ -809,28 +814,29 @@ Rules:
       : "";
 
     return `You are a clinical decision support assistant for heart failure patient triage.
-Your task is to assess the patient's symptoms and provide a triage recommendation using your own independent clinical reasoning.
+Your task is to assess the patient's symptoms and provide a triage zone recommendation.
 
-IMPORTANT: You are a support tool, not a replacement for medical advice. Always advise the patient to consult their healthcare team.
+CRITICAL RULES:
+1. You MUST always assign a zone — GREEN, YELLOW, or RED. Never return "UNKNOWN" or refuse to classify.
+2. When symptoms related to heart failure are present (weight gain, leg swelling, SOB, fatigue, confusion, lightheadedness, chest discomfort), you MUST assign at minimum YELLOW.
+3. You are a support tool, not a replacement for medical advice.
 
 ## Patient-Reported Symptoms${catHints}
 ${freeTextSymptoms}
 
+## Zone Definitions
+- 🟢 GREEN: Symptoms are stable, consistent with patient's baseline, and not concerning for acute decompensation. Continue usual care.
+- 🟡 YELLOW: Symptoms suggest possible worsening or new HF-related change. Patient should contact care team TODAY.
+- 🔴 RED: Symptoms suggest acute decompensation, hemodynamic compromise, or life-threatening emergency. Call 911 immediately.
+
 ## Instructions
-Perform an independent clinical triage assessment using evidence-based reasoning (2022 AHA/ACC/HFSA Heart Failure Guidelines):
+Perform an independent clinical triage using 2022 AHA/ACC/HFSA Heart Failure Guidelines:
+1. Assign zone (GREEN/YELLOW/RED) based on the symptom constellation
+2. State your clinical reasoning — consider fluid overload, hemodynamic instability, ischemia, arrhythmia, and functional status
+3. List the key symptoms driving your assessment
+4. Give immediate action instructions
 
-1. **Zone Assignment** — assign one of:
-   - 🟢 GREEN: Stable — continue usual care
-   - 🟡 YELLOW: Concerning — contact care team today
-   - 🔴 RED: Emergency — call 911 immediately
-
-2. **Clinical Reasoning**: Explain WHY you assigned this zone. Consider hemodynamic instability, fluid overload, ischemic/arrhythmic features, and functional status.
-
-3. **Key Symptoms of Concern**: List the specific symptoms driving your assessment.
-
-4. **Immediate Actions**: Give specific, actionable instructions.
-
-Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms (array), immediateActions, evidenceBasis, disclaimer`;
+Format as JSON with fields: zone (GREEN/YELLOW/RED), urgency, reasoning, keySymptoms (array of strings), immediateActions (array of strings), evidenceBasis, disclaimer`;
   }
 
   /**
