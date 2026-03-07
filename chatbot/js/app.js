@@ -30,6 +30,17 @@ class App {
     this._renderWelcomeMessage();
   }
 
+  // ─── Helpers ─────────────────────────────────────────────────────────────
+
+  /** Build per-category extracted answers from combined patient text */
+  _extractAllAnswers(text, detectedSymptoms) {
+    const answers = {};
+    for (const cat of detectedSymptoms) {
+      answers[cat] = this.triageEngine.extractAnswers(text, cat);
+    }
+    return answers;
+  }
+
   // ─── UI Helpers ──────────────────────────────────────────────────────────
 
   _showToast(message, type = "info") {
@@ -193,17 +204,22 @@ class App {
     const body = document.createElement("div");
     body.className = "inline-triage-body";
 
+    // Zone badge + urgency sub-label
     const badge = document.createElement("div");
     badge.className = `zone-badge ${result.zone}`;
     badge.style.marginBottom = "5px";
-    badge.textContent = `${zoneIcons[result.zone] || "⚪"} ${result.zone}`;
+    const urgencyLabel = result.urgency && result.urgency !== result.zone
+      ? ` — ${result.urgency}`
+      : "";
+    badge.textContent = `${zoneIcons[result.zone] || "⚪"} ${result.zone}${urgencyLabel}`;
     body.appendChild(badge);
 
+    // Category-level flags (rule-based) or key symptoms (AI)
     const flags = result.flags || result.keySymptoms || [];
     if (flags.length > 0) {
       const ul = document.createElement("ul");
       ul.className = "inline-triage-flags";
-      flags.slice(0, 3).forEach((f) => {
+      flags.slice(0, 4).forEach((f) => {
         const li = document.createElement("li");
         li.textContent = f;
         ul.appendChild(li);
@@ -211,11 +227,20 @@ class App {
       body.appendChild(ul);
     }
 
+    // Recommended action
     if (result.action) {
       const act = document.createElement("div");
       act.className = `inline-triage-action ${result.zone}`;
       act.textContent = result.action;
       body.appendChild(act);
+    }
+
+    // HF education review note (rule-based only)
+    if (result.reviewNote) {
+      const note = document.createElement("div");
+      note.style.cssText = "margin-top:5px; font-size:12px; color:#4a5568; font-style:italic;";
+      note.textContent = result.reviewNote;
+      body.appendChild(note);
     }
 
     card.appendChild(header);
@@ -609,70 +634,70 @@ class App {
     try {
       const intent = this.chatEngine.detectIntent(message);
 
-      // ── Fix #4 & #5: Follow-up conversation flow ───────────────────────
-      // Case A: Patient is ANSWERING a pending follow-up question
+      // ── Case A: Patient is answering pending follow-up questions ──────────
       if (this.triageFollowUpState && !this.triageFollowUpState.answered) {
         this.triageFollowUpState.answered = true;
         const combinedText = this.triageFollowUpState.originalText +
-          "\nAdditional information provided by patient: " + message;
+          "\nAdditional information: " + message;
+        const detectedSymptoms = this.triageFollowUpState.detectedSymptoms;
+        const extractedAnswers = this._extractAllAnswers(combinedText, detectedSymptoms);
 
-        // AI acknowledges answer and provides education (triage card shown inline)
-        const alreadyKnown = this.triageEngine.extractAlreadyKnownInfo(
-          this.triageFollowUpState.originalText + " " + message
-        );
-        const result = await this.chatEngine.chat(message, {
-          triageMode: true,
-          alreadyKnownInfo: alreadyKnown
-        });
+        // AI acknowledges answer and provides education
+        const result = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
         const msgEl = this._addMessage("assistant", result.content, result.sources);
 
-        // Now run rule-based + AI triage with combined context
+        // Run triage with fully combined context
         if (this.triageMode !== "none") {
-          await this._runAutoTriage(combinedText, msgEl);
+          await this._runAutoTriage(combinedText, detectedSymptoms, extractedAnswers, msgEl);
         }
         this.triageFollowUpState = null;
         return;
       }
 
-      // ── Case B: New symptom report — check if follow-ups are needed ────
-      if (intent.isTriage && this.triageMode !== "none") {
-        const textExtracted = this.triageEngine.extractSymptomsFromText(message);
-        const neededFollowUps = this.triageEngine.getNeededFollowUps(textExtracted, message);
-        const alreadyKnown = this.triageEngine.extractAlreadyKnownInfo(message);
+      // ── Detect whether this is a personal symptom report ─────────────────
+      // Only the 7 traffic light tool categories can trigger triage.
+      // General education questions ("what are symptoms of HF?") never trigger triage.
+      const detectedSymptoms = this.triageEngine.detectSymptoms(message);
+      const isPersonalReport  = this.triageEngine.isPersonalSymptomReport(message);
+      const shouldTriage      = detectedSymptoms.length > 0 && isPersonalReport && this.triageMode !== "none";
+
+      // ── Case B: Symptom report detected — check if follow-ups are needed ──
+      if (shouldTriage) {
+        const neededFollowUps = this.triageEngine.getNeededFollowUps(message, detectedSymptoms);
 
         if (neededFollowUps.length > 0) {
-          // Store state — triage runs after patient answers
+          // Save state — triage runs in Case A after the patient answers
           this.triageFollowUpState = {
-            originalText: message,
-            pendingQuestions: neededFollowUps,
-            answered: false
+            originalText:     message,
+            detectedSymptoms: detectedSymptoms,
+            answered:         false
           };
-          // AI asks follow-up questions (no triage zone yet)
+          // Ask follow-up questions without showing a triage zone yet
           const result = await this.chatEngine.chat(message, {
-            triageMode: false,           // don't show triage note yet
-            followUpQuestions: neededFollowUps,
-            alreadyKnownInfo: alreadyKnown
+            triageMode:        false,
+            followUpQuestions: neededFollowUps
           });
           this._removeTypingIndicator();
           this._addMessage("assistant", result.content, result.sources);
-          return; // triage will run in Case A on next message
+          return; // triage runs in Case A on next turn
         }
+
+        // Case C: All needed info is present — triage immediately
+        const extractedAnswers = this._extractAllAnswers(message, detectedSymptoms);
+        const result = await this.chatEngine.chat(message, { triageMode: true });
+        this._removeTypingIndicator();
+        const msgEl = this._addMessage("assistant", result.content, result.sources);
+        await this._runAutoTriage(message, detectedSymptoms, extractedAnswers, msgEl);
+        return;
       }
 
-      // ── Case C: Enough info available — respond and (if triage) run immediately
-      const result = await this.chatEngine.chat(message, {
-        triageMode: intent.isTriage,
-        alreadyKnownInfo: intent.isTriage
-          ? this.triageEngine.extractAlreadyKnownInfo(message)
-          : []
-      });
+      // ── Case D: No triage-relevant symptoms — normal education response ────
+      // No triage zone is shown.
+      const result = await this.chatEngine.chat(message, { triageMode: false });
       this._removeTypingIndicator();
-      const msgEl = this._addMessage("assistant", result.content, result.sources);
+      this._addMessage("assistant", result.content, result.sources);
 
-      if (intent.isTriage && this.triageMode !== "none") {
-        await this._runAutoTriage(message, msgEl);
-      }
     } catch (err) {
       this._removeTypingIndicator();
       this._addErrorMessage(err.message);
@@ -682,30 +707,30 @@ class App {
     }
   }
 
-  async _runAutoTriage(symptomText, messageEl = null) {
+  /**
+   * Run rule-based and/or AI triage and append the inline triage card.
+   * @param {string} symptomText - full patient text (original + follow-ups)
+   * @param {string[]} detectedSymptoms - categories detected
+   * @param {Object} extractedAnswers - per-category answer objects
+   * @param {HTMLElement|null} messageEl - chat bubble to attach inline card
+   */
+  async _runAutoTriage(symptomText, detectedSymptoms, extractedAnswers, messageEl = null) {
     try {
       let ruleResult = null;
-      let aiResult = null;
+      let aiResult   = null;
 
-      // Extract symptoms from text first, then merge with any form inputs
-      const textExtracted = this.triageEngine.extractSymptomsFromText(symptomText);
-      const formData = this._readTriageForm();
-      const mergedSymptoms = this.triageEngine.mergeSymptoms(formData, textExtracted);
-
-      // Rule-based always runs using merged symptoms (text + form)
+      // Rule-based: exact traffic light logic per category
       if (this.triageMode !== "ai") {
-        ruleResult = this.triageEngine.ruleBasedTriage(mergedSymptoms);
+        ruleResult = this.triageEngine.ruleBasedTriage(extractedAnswers, detectedSymptoms);
       }
 
-      // AI triage if mode allows — Fix #1: AI receives only free text, no rule result injected.
+      // AI triage: independent clinical reasoning (no rule result injected)
       if (this.triageMode === "ai" || this.triageMode === "both") {
         this._setLoading(true, "Running AI triage assessment...");
-        aiResult = await this.chatEngine.runAITriage(symptomText);
+        aiResult = await this.chatEngine.runAITriage(symptomText, detectedSymptoms);
       }
 
       if (ruleResult || aiResult) {
-        // Fix #6: triage zone shown ONLY inline inside the chat message bubble.
-        // Removed _renderTriageResults() call — no longer duplicated in the side panel.
         if (messageEl) this._appendInlineTriage(messageEl, ruleResult, aiResult);
       }
     } catch (err) {
@@ -716,11 +741,11 @@ class App {
   }
 
   async _handleRunTriage() {
-    const structuredData = this._readTriageForm();
-    const symptomText = document.getElementById("triage-symptom-text")?.value ||
-      "Patient-reported symptoms from structured form";
+    const symptomText = (document.getElementById("triage-symptom-text")?.value || "").trim();
+    const formData    = this._readTriageForm();
+    const hasForm     = this._hasAnyFormInput(formData);
 
-    if (!this._hasAnyStructuredInput(structuredData) && !symptomText.trim()) {
+    if (!hasForm && !symptomText) {
       this._showToast("Please fill in symptom values or describe symptoms", "warning");
       return;
     }
@@ -728,20 +753,31 @@ class App {
     this._setLoading(true, "Running triage assessment...");
     try {
       let ruleResult = null;
-      let aiResult = null;
+      let aiResult   = null;
 
       if (this.triageMode !== "ai") {
-        ruleResult = this.triageEngine.ruleBasedTriage(structuredData);
+        // Convert sidebar form checkboxes to per-category answers
+        const { detectedSymptoms, extractedAnswers } = this._formDataToCategories(formData);
+        if (detectedSymptoms.length > 0) {
+          ruleResult = this.triageEngine.ruleBasedTriage(extractedAnswers, detectedSymptoms);
+        }
       }
 
+      const triageText = symptomText || this._formToText(formData);
       if ((this.triageMode === "ai" || this.triageMode === "both") && this.chatEngine.apiKey) {
-        aiResult = await this.chatEngine.runAITriage(symptomText, structuredData);
+        const detectedSymptoms = symptomText
+          ? this.triageEngine.detectSymptoms(symptomText)
+          : Object.keys(this._formDataToCategories(formData).extractedAnswers);
+        aiResult = await this.chatEngine.runAITriage(triageText, detectedSymptoms);
       } else if (this.triageMode === "ai" && !this.chatEngine.apiKey) {
         this._showToast("API key required for AI triage", "warning");
-        ruleResult = this.triageEngine.ruleBasedTriage(structuredData);
       }
 
-      this._renderTriageResults(ruleResult, aiResult);
+      if (ruleResult || aiResult) {
+        this._renderTriageResults(ruleResult, aiResult);
+      } else {
+        this._showToast("No triage-relevant symptoms detected in form input", "info");
+      }
     } catch (err) {
       this._showToast("Triage error: " + err.message, "error");
     } finally {
@@ -749,41 +785,165 @@ class App {
     }
   }
 
+  /**
+   * Convert sidebar form checkbox values to per-category answers for the new triage engine.
+   */
+  _formDataToCategories(form) {
+    const detectedSymptoms = [];
+    const extractedAnswers = {};
+
+    // SOB
+    if (form.sobScale > 0) {
+      detectedSymptoms.push("sob");
+      extractedAnswers.sob = {
+        isNew:         null,
+        coSymptoms:    [
+          ...(form.chestPain        ? ["chest_pain:severe"] : []),
+          ...(form.swellingNewWorse ? ["leg_swelling"]      : []),
+          ...(form.newCough         ? ["cough"]             : [])
+        ],
+        isWorseUsual:  null,
+        changedLastDay:null
+      };
+    }
+
+    // Chest discomfort — checkbox maps to the "chest_pain:severe" co-symptom in SOB,
+    // but also represents the chestDiscomfort category itself.
+    if (form.chestPain) {
+      detectedSymptoms.push("chestDiscomfort");
+      extractedAnswers.chestDiscomfort = {
+        isNew:      null,
+        coSymptoms: ["shooting_pain"],  // treat form "chest pain" as cardiac → RED path
+        isAtRest:   null
+      };
+    }
+
+    // Fatigue
+    if (form.unusualFatigue) {
+      detectedSymptoms.push("fatigue");
+      extractedAnswers.fatigue = {
+        coSymptoms:      [
+          ...(form.sobScale > 0     ? ["sob"]          : []),
+          ...(form.swellingNewWorse ? ["leg_swelling"] : []),
+          ...(form.newCough         ? ["cough"]        : [])
+        ],
+        isWorseUsual:    null,
+        canDoActivities: null
+      };
+    }
+
+    // Weight change
+    if (form.weightGain1Day >= 2 || form.weightGain1Week >= 3) {
+      detectedSymptoms.push("weightChange");
+      extractedAnswers.weightChange = {
+        changeType:  form.weightGain1Day >= 2 ? "day_gain" : "week_gain",
+        isExpected:  "no",
+        coSymptoms:  [
+          ...(form.sobScale > 0     ? ["sob"]          : []),
+          ...(form.newCough         ? ["cough"]        : []),
+          ...(form.swellingNewWorse ? ["leg_swelling"] : [])
+        ]
+      };
+    }
+
+    // Confusion
+    if (form.severeConfusion) {
+      detectedSymptoms.push("confusion");
+      extractedAnswers.confusion = {
+        isNew:      "yes",
+        coSymptoms: [
+          ...(form.faintingOrLoss ? ["unconscious"]   : []),
+          ...(form.strokeSigns    ? ["slurred_speech", "face_asym", "weakness"] : [])
+        ]
+      };
+    }
+
+    // Leg swelling
+    if (form.swellingNewWorse) {
+      detectedSymptoms.push("legSwelling");
+      extractedAnswers.legSwelling = {
+        isNewOrWorse: "yes",
+        legs:         null,
+        tookDiuretic: null
+      };
+    }
+
+    // Lightheadedness
+    if (form.dizzinessStanding) {
+      detectedSymptoms.push("lightheaded");
+      extractedAnswers.lightheaded = {
+        isNew:         null,
+        isWorseUsual:  null,
+        changedLastDay: null
+      };
+    }
+
+    // Standalone RED flags (fainting, pink cough, stroke) that don't fit neatly into
+    // a single category — surface them via confusion/sob pathways
+    if (form.faintingOrLoss && !form.severeConfusion) {
+      if (!detectedSymptoms.includes("confusion")) {
+        detectedSymptoms.push("confusion");
+        extractedAnswers.confusion = { isNew: "yes", coSymptoms: ["unconscious"] };
+      } else {
+        extractedAnswers.confusion.coSymptoms.push("unconscious");
+      }
+    }
+    if (form.strokeSigns && !detectedSymptoms.includes("confusion")) {
+      detectedSymptoms.push("confusion");
+      extractedAnswers.confusion = { isNew: "yes", coSymptoms: ["slurred_speech", "face_asym", "weakness"] };
+    }
+
+    return { detectedSymptoms, extractedAnswers };
+  }
+
+  /** Build a readable symptom text from form values (used for AI triage text input) */
+  _formToText(form) {
+    const parts = [];
+    if (form.sobScale > 0)      parts.push(`shortness of breath (severity ${form.sobScale}/10)`);
+    if (form.chestPain)         parts.push("chest pain or pressure");
+    if (form.faintingOrLoss)    parts.push("fainting or loss of consciousness");
+    if (form.pinkFoamyCough)    parts.push("coughing up pink or foamy mucus");
+    if (form.severeConfusion)   parts.push("sudden confusion or altered mental status");
+    if (form.strokeSigns)       parts.push("stroke signs (facial droop, arm weakness, speech difficulty)");
+    if (form.swellingNewWorse)  parts.push("new or worsening leg/ankle swelling");
+    if (form.ortho)             parts.push("orthopnea (needs extra pillows, wakes up breathless)");
+    if (form.dizzinessStanding) parts.push("dizziness when standing");
+    if (form.irregularHeartbeat)parts.push("irregular heartbeat or palpitations");
+    if (form.rapidHeartRate)    parts.push("rapid heart rate (>100 bpm at rest)");
+    if (form.unusualFatigue)    parts.push("unusual fatigue limiting usual activities");
+    if (form.newCough)          parts.push("new dry cough");
+    if (form.decreasedUrine)    parts.push("decreased urine output");
+    if (form.weightGain1Day > 0) parts.push(`weight gain of ${form.weightGain1Day} lbs today`);
+    if (form.weightGain1Week > 0) parts.push(`weight gain of ${form.weightGain1Week} lbs this week`);
+    return "Patient-reported symptoms: " + (parts.join("; ") || "none specified");
+  }
+
   _readTriageForm() {
-    const getVal = (id) => {
-      const el = document.getElementById(id);
-      return el ? el.value : null;
-    };
-    const getCheck = (id) => {
-      const el = document.getElementById(id);
-      return el ? el.checked : false;
-    };
-    const getNum = (id) => {
-      const val = getVal(id);
-      return val !== null && val !== "" ? parseFloat(val) : 0;
-    };
+    const getVal   = (id) => { const el = document.getElementById(id); return el ? el.value   : null; };
+    const getCheck = (id) => { const el = document.getElementById(id); return el ? el.checked : false; };
+    const getNum   = (id) => { const v = getVal(id); return v !== null && v !== "" ? parseFloat(v) : 0; };
 
     return {
-      weightGain1Day: getNum("t-weight-day"),
-      weightGain1Week: getNum("t-weight-week"),
-      sobScale: getNum("t-sob"),
-      chestPain: getCheck("t-chest-pain"),
-      faintingOrLoss: getCheck("t-fainting"),
-      pinkFoamyCough: getCheck("t-pink-cough"),
-      severeConfusion: getCheck("t-confusion"),
-      strokeSigns: getCheck("t-stroke"),
-      swellingNewWorse: getCheck("t-swelling"),
-      ortho: getCheck("t-ortho"),
+      weightGain1Day:    getNum("t-weight-day"),
+      weightGain1Week:   getNum("t-weight-week"),
+      sobScale:          getNum("t-sob"),
+      chestPain:         getCheck("t-chest-pain"),
+      faintingOrLoss:    getCheck("t-fainting"),
+      pinkFoamyCough:    getCheck("t-pink-cough"),
+      severeConfusion:   getCheck("t-confusion"),
+      strokeSigns:       getCheck("t-stroke"),
+      swellingNewWorse:  getCheck("t-swelling"),
+      ortho:             getCheck("t-ortho"),
       dizzinessStanding: getCheck("t-dizzy"),
-      irregularHeartbeat: getCheck("t-irregular"),
-      rapidHeartRate: getCheck("t-rapid-hr"),
-      unusualFatigue: getCheck("t-fatigue"),
-      newCough: getCheck("t-cough"),
-      decreasedUrine: getCheck("t-urine"),
+      irregularHeartbeat:getCheck("t-irregular"),
+      rapidHeartRate:    getCheck("t-rapid-hr"),
+      unusualFatigue:    getCheck("t-fatigue"),
+      newCough:          getCheck("t-cough"),
+      decreasedUrine:    getCheck("t-urine"),
     };
   }
 
-  _hasAnyStructuredInput(data) {
+  _hasAnyFormInput(data) {
     return Object.values(data).some((v) => v === true || (typeof v === "number" && v > 0));
   }
 
