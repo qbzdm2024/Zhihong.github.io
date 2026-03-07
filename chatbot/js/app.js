@@ -10,6 +10,12 @@ class App {
     this.isLoading = false;
     this.lastTriageResults = null;
     this.triageMode = "both"; // "rule", "ai", or "both"
+
+    // Fix #4 & #5: track pending follow-up conversations.
+    // When the AI has asked follow-up questions, we wait for the patient's answer
+    // before running the rule-based triage.
+    this.triageFollowUpState = null;
+    // Structure: { originalText: string, pendingQuestions: Array, answered: boolean }
   }
 
   async initialize() {
@@ -602,11 +608,68 @@ class App {
 
     try {
       const intent = this.chatEngine.detectIntent(message);
-      const result = await this.chatEngine.chat(message, { triageMode: intent.isTriage });
+
+      // ── Fix #4 & #5: Follow-up conversation flow ───────────────────────
+      // Case A: Patient is ANSWERING a pending follow-up question
+      if (this.triageFollowUpState && !this.triageFollowUpState.answered) {
+        this.triageFollowUpState.answered = true;
+        const combinedText = this.triageFollowUpState.originalText +
+          "\nAdditional information provided by patient: " + message;
+
+        // AI acknowledges answer and provides education (triage card shown inline)
+        const alreadyKnown = this.triageEngine.extractAlreadyKnownInfo(
+          this.triageFollowUpState.originalText + " " + message
+        );
+        const result = await this.chatEngine.chat(message, {
+          triageMode: true,
+          alreadyKnownInfo: alreadyKnown
+        });
+        this._removeTypingIndicator();
+        const msgEl = this._addMessage("assistant", result.content, result.sources);
+
+        // Now run rule-based + AI triage with combined context
+        if (this.triageMode !== "none") {
+          await this._runAutoTriage(combinedText, msgEl);
+        }
+        this.triageFollowUpState = null;
+        return;
+      }
+
+      // ── Case B: New symptom report — check if follow-ups are needed ────
+      if (intent.isTriage && this.triageMode !== "none") {
+        const textExtracted = this.triageEngine.extractSymptomsFromText(message);
+        const neededFollowUps = this.triageEngine.getNeededFollowUps(textExtracted, message);
+        const alreadyKnown = this.triageEngine.extractAlreadyKnownInfo(message);
+
+        if (neededFollowUps.length > 0) {
+          // Store state — triage runs after patient answers
+          this.triageFollowUpState = {
+            originalText: message,
+            pendingQuestions: neededFollowUps,
+            answered: false
+          };
+          // AI asks follow-up questions (no triage zone yet)
+          const result = await this.chatEngine.chat(message, {
+            triageMode: false,           // don't show triage note yet
+            followUpQuestions: neededFollowUps,
+            alreadyKnownInfo: alreadyKnown
+          });
+          this._removeTypingIndicator();
+          this._addMessage("assistant", result.content, result.sources);
+          return; // triage will run in Case A on next message
+        }
+      }
+
+      // ── Case C: Enough info available — respond and (if triage) run immediately
+      const result = await this.chatEngine.chat(message, {
+        triageMode: intent.isTriage,
+        alreadyKnownInfo: intent.isTriage
+          ? this.triageEngine.extractAlreadyKnownInfo(message)
+          : []
+      });
       this._removeTypingIndicator();
       const msgEl = this._addMessage("assistant", result.content, result.sources);
 
-      // Run triage ONLY when patient is reporting current personal symptoms
       if (intent.isTriage && this.triageMode !== "none") {
         await this._runAutoTriage(message, msgEl);
       }
@@ -634,17 +697,16 @@ class App {
         ruleResult = this.triageEngine.ruleBasedTriage(mergedSymptoms);
       }
 
-      // AI triage if mode allows
+      // AI triage if mode allows — Fix #1: AI receives only free text, no rule result injected.
       if (this.triageMode === "ai" || this.triageMode === "both") {
         this._setLoading(true, "Running AI triage assessment...");
-        aiResult = await this.chatEngine.runAITriage(symptomText, mergedSymptoms);
+        aiResult = await this.chatEngine.runAITriage(symptomText);
       }
 
       if (ruleResult || aiResult) {
-        // Attach triage inline to the assistant message
+        // Fix #6: triage zone shown ONLY inline inside the chat message bubble.
+        // Removed _renderTriageResults() call — no longer duplicated in the side panel.
         if (messageEl) this._appendInlineTriage(messageEl, ruleResult, aiResult);
-        // Also update the bottom triage panel
-        this._renderTriageResults(ruleResult, aiResult);
       }
     } catch (err) {
       console.error("Triage error:", err);

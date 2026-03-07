@@ -23,7 +23,7 @@ class TriageEngine {
       weightGain1Day = 0,          // lbs gained in last 24 hours
       weightGain1Week = 0,         // lbs gained over last week
       sobScale = 0,                // shortness of breath 0-10
-      chestPain = false,           // chest pain or pressure
+      chestPain = false,           // clear cardiac chest pain/pressure/tightness → RED
       faintingOrLoss = false,      // fainting / loss of consciousness
       pinkFoamyCough = false,      // coughing pink/foamy mucus
       severeConfusion = false,     // sudden confusion / change in mental status
@@ -37,6 +37,13 @@ class TriageEngine {
       newCough = false,            // new dry hacking cough
       decreasedUrine = false,      // decreased urine output
       heartRateBpm = null,         // actual heart rate if known
+      // ── Chest discomfort follow-up decision tree (traffic light tool) ───
+      chestDiscomfortOnly = false,
+      chestIsNew = null,
+      chestCoArmPain = false, chestCoSOB = false, chestCoRacingHeart = false,
+      chestCoSweating = false, chestCoNausea = false,
+      chestCoRegurgitation = false, chestCoNone = false,
+      chestAtRest = false, chestDuringActivity = false,
     } = symptoms;
 
     const redFlags = [];
@@ -62,6 +69,21 @@ class TriageEngine {
     if (heartRateBpm !== null && heartRateBpm > 120 && sobScale >= 4)
       redFlags.push(`Very high heart rate (${heartRateBpm} bpm) with breathing symptoms`);
 
+    // ── Chest discomfort: cardiac co-symptoms present → RED ─────────────────
+    // Traffic light tool: arm pain / SOB / racing heart / sweating / nausea
+    // alongside chest discomfort = possible cardiac emergency regardless of new/existing.
+    if (chestDiscomfortOnly) {
+      const cardiacCoList = [
+        chestCoArmPain        && "shooting arm pain",
+        chestCoSOB            && "shortness of breath",
+        chestCoRacingHeart    && "racing heart",
+        chestCoSweating       && "sweating",
+        chestCoNausea         && "nausea/vomiting",
+      ].filter(Boolean);
+      if (cardiacCoList.length > 0)
+        redFlags.push(`Chest discomfort with cardiac co-symptoms: ${cardiacCoList.join(", ")}`);
+    }
+
     // ─── YELLOW ZONE checks ─────────────────────────────────────────────────
     if (redFlags.length === 0) {
       if (weightGain1Day >= 2 && weightGain1Day < 4)
@@ -86,6 +108,29 @@ class TriageEngine {
         yellowFlags.push("New dry or persistent cough");
       if (decreasedUrine)
         yellowFlags.push("Decreased urine output");
+
+      // ── Chest discomfort: no cardiac co-symptoms → apply new/rest logic ──
+      // Traffic light tool decision tree:
+      //   Regurgitation ONLY (no cardiac co-symptoms) → GI cause → GREEN (no flag)
+      //   New symptom, no clear cause           → YELLOW
+      //   Existing + at rest                    → YELLOW
+      //   Existing + only during activity       → GREEN (no flag)
+      //   Unknown if new (unanswered)            → YELLOW (safety default)
+      if (chestDiscomfortOnly) {
+        const hasCardiacCo = chestCoArmPain || chestCoSOB || chestCoRacingHeart || chestCoSweating || chestCoNausea;
+        const hasGIOnly = chestCoRegurgitation && !hasCardiacCo;
+        if (!hasCardiacCo && !hasGIOnly) {
+          if (chestIsNew === true)
+            yellowFlags.push("New chest discomfort (no cardiac co-symptoms) — contact your care team");
+          else if (chestAtRest)
+            yellowFlags.push("Chest discomfort occurring at rest — contact your care team");
+          else if (chestIsNew === null)
+            // Unknown whether new: default to YELLOW for safety
+            yellowFlags.push("Chest discomfort — unable to confirm if new; contact care team to be safe");
+          // chestIsNew === false + activity-only + no cardiac co-symptoms → GREEN (stable)
+        }
+        // hasGIOnly → no flag → GREEN
+      }
     }
 
     // ─── Determine Zone ─────────────────────────────────────────────────────
@@ -134,55 +179,38 @@ class TriageEngine {
 
   /**
    * Build a structured triage prompt for the AI to assess.
+   * The AI uses its OWN independent clinical reasoning — it does NOT see
+   * the rule-based result so the two systems remain truly independent.
    * @param {string} freeTextSymptoms - User's description of symptoms
-   * @param {Object|null} structuredSymptoms - Optional structured data
    * @returns {string} system prompt for AI triage
    */
-  buildAITriagePrompt(freeTextSymptoms, structuredSymptoms = null) {
-    let structuredSection = "";
-    if (structuredSymptoms) {
-      const ruleResult = this.ruleBasedTriage(structuredSymptoms);
-      structuredSection = `
-## Rule-Based Triage (for comparison)
-The deterministic traffic light system classified this as: **${ruleResult.zone} ZONE**
-Triggered flags: ${ruleResult.flags.length > 0 ? ruleResult.flags.join("; ") : "None"}
-`;
-    }
-
+  buildAITriagePrompt(freeTextSymptoms) {
     return `You are a clinical decision support assistant for heart failure patient triage.
-Your task is to assess the patient's symptoms and provide a triage recommendation using clinical reasoning.
-
-This is for EDUCATIONAL and COMPARATIVE purposes. Your triage result will be compared against a deterministic rule-based traffic light system.
+Your task is to assess the patient's symptoms and provide a triage recommendation using your own clinical reasoning.
 
 IMPORTANT: Always advise the patient to consult their healthcare team. You are a support tool, not a replacement for medical advice.
-
-${structuredSection}
 
 ## Patient-Reported Symptoms
 ${freeTextSymptoms}
 
 ## Instructions
-Perform a clinical triage assessment:
+Perform an independent clinical triage assessment using evidence-based reasoning (2022 AHA/ACC/HFSA Heart Failure Guidelines):
 
 1. **Zone Assignment**: Assign one of three zones:
    - 🟢 GREEN: Stable — continue usual care
    - 🟡 YELLOW: Concerning — contact care team within hours
    - 🔴 RED: Emergency — call 911 immediately
 
-2. **Clinical Reasoning**: Explain WHY you assigned this zone using evidence-based reasoning. Consider:
+2. **Clinical Reasoning**: Explain WHY you assigned this zone. Consider:
    - Hemodynamic instability signs
    - Fluid overload indicators
-   - Ischemic/arrhythmic features
+   - Ischemic/arrhythmic features (distinguish cardiac chest pain from GI symptoms like regurgitation)
    - Functional status change
    - Risk stratification factors
 
 3. **Key Symptoms of Concern**: List the specific symptoms driving your assessment
 
 4. **Immediate Actions**: Give specific, actionable instructions
-
-5. **Comparison Note**: If rule-based data is provided, note any agreement or discrepancy and explain the clinical basis for any difference
-
-Base your reasoning on the 2022 AHA/ACC/HFSA Heart Failure Guidelines and standard clinical practice.
 
 Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms (array), immediateActions, evidenceBasis, disclaimer`;
   }
@@ -301,11 +329,65 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
       severeConfusion: false, strokeSigns: false, swellingNewWorse: false,
       ortho: false, dizzinessStanding: false, irregularHeartbeat: false,
       rapidHeartRate: false, unusualFatigue: false, newCough: false,
-      decreasedUrine: false, heartRateBpm: null
+      decreasedUrine: false, heartRateBpm: null,
+      // ── Chest discomfort decision tree fields (traffic light tool) ────────
+      chestDiscomfortOnly: false, // "discomfort/ache" without clear cardiac language
+      chestIsNew: null,           // null=unknown, true=new, false=existing
+      chestCoArmPain: false,      // concurrent shooting arm/left-side pain
+      chestCoSOB: false,          // concurrent shortness of breath
+      chestCoRacingHeart: false,  // concurrent racing heart / palpitations
+      chestCoSweating: false,     // concurrent sweating
+      chestCoNausea: false,       // concurrent nausea or vomiting
+      chestCoRegurgitation: false,// concurrent regurgitation / heartburn (GI indicator)
+      chestCoNone: false,         // patient explicitly said "none of these"
+      chestAtRest: false,         // occurring at rest / while sitting
+      chestDuringActivity: false, // occurring during activity / walking
     };
 
-    if (/chest\s*(pain|discomfort|pressure|tightness|heaviness|hurt|ache)/i.test(text))
-      symptoms.chestPain = true;
+    // ── Chest pain classification ─────────────────────────────────────────
+    // Clear cardiac language (pain/pressure/tightness/heaviness/hurt) → RED directly.
+    // "Chest discomfort/ache" without GI context → needs decision tree (Fix #2).
+    const hasCardiacChest = /chest\s*(pain|pressure|tightness|heaviness|hurt)/i.test(text);
+    const hasChestDiscomfort = /chest\s*(discomfort|ache)/i.test(text);
+    const hasGIContext = /regurgitat|heartburn|indigestion|acid\s*reflux|gerd|stomach\s*acid|sour\s*taste|burp/i.test(text);
+
+    if (hasCardiacChest) {
+      symptoms.chestPain = true;           // → RED, no further questions needed
+    } else if (hasChestDiscomfort && !hasGIContext) {
+      symptoms.chestDiscomfortOnly = true; // → follow-up decision tree
+    }
+    // If hasChestDiscomfort + hasGIContext and no cardiac keywords → GI cause → no flag → GREEN
+
+    // ── Extract follow-up answer details (from combined text after patient replies) ──
+    if (hasCardiacChest || hasChestDiscomfort) {
+      // Q1: new symptom?
+      if (/\b(new\s*symptom|first\s*time|never\s*(had|experienced)\s*(this|it)\s*before|started\s*recently|yes[,.]?\s*(it\s*is|this\s*is)\s*new)\b/i.test(text))
+        symptoms.chestIsNew = true;
+      if (/\b(not\s*new|existing|had\s*(this|it)\s*before|always\s*had|usual\s*symptom|been\s*having|chronic|same\s*as\s*(before|usual)|no[,.]?\s*(it[''s]*\s*)?(is\s*)?not\s*new)\b/i.test(text))
+        symptoms.chestIsNew = false;
+
+      // Q2: co-occurring symptoms
+      if (/shooting.*arm|arm.*pain|pain.*left\s*side.*chest|left\s*side.*pain/i.test(text))
+        symptoms.chestCoArmPain = true;
+      if (/short(ness)?\s*of\s*breath|breathless/i.test(text))
+        symptoms.chestCoSOB = true;
+      if (/racing.*heart|heart.*rac|palpitation|irregular.*heart/i.test(text))
+        symptoms.chestCoRacingHeart = true;
+      if (/\bsweat(ing)?\b/i.test(text))
+        symptoms.chestCoSweating = true;
+      if (/\b(nausea|nauseat|vomit)\b/i.test(text))
+        symptoms.chestCoNausea = true;
+      if (/regurgitat|heartburn|indigestion|acid\s*reflux/i.test(text))
+        symptoms.chestCoRegurgitation = true;
+      if (/none\s*of\s*(these|the\s*above|them)|no\s*(other|concurrent|additional)\s*symptoms?/i.test(text))
+        symptoms.chestCoNone = true;
+
+      // Q3: rest vs. activity
+      if (/\bat\s*rest\b|resting|just\s*sitting|while\s*sitting|not\s*(being\s*)?active|lying\s*(down|flat)/i.test(text))
+        symptoms.chestAtRest = true;
+      if (/\b(while\s*being\s*active|during\s*activit|walking|exercis|moving|going\s*up|climbing)/i.test(text))
+        symptoms.chestDuringActivity = true;
+    }
 
     if (/faint(ing|ed)?|pass(ed)?\s*out|los(t|ing)\s*consciousness|blackout|collaps/i.test(text))
       symptoms.faintingOrLoss = true;
@@ -377,6 +459,167 @@ Format your response as JSON with fields: zone, urgency, reasoning, keySymptoms 
     if (hrMatch) symptoms.heartRateBpm = parseInt(hrMatch[1]);
 
     return symptoms;
+  }
+
+  /**
+   * Determine which follow-up questions are still needed before running rule-based triage.
+   * Questions are skipped when the patient already provided that information.
+   * Fix #4 & #5: ask follow-ups per traffic light logic, skip already-known info.
+   * @param {Object} extractedSymptoms - from extractSymptomsFromText
+   * @param {string} text - original patient text
+   * @returns {Array<{key: string, question: string}>}
+   */
+  getNeededFollowUps(extractedSymptoms, text) {
+    const questions = [];
+
+    // ── Leg swelling ──────────────────────────────────────────────────────
+    if (extractedSymptoms.swellingNewWorse) {
+      // Traffic light tool asks: did you take an extra water pill?
+      if (!/water\s*pill|diuretic|furosemide|torsemide|lasix|bumex|extra\s*pill/i.test(text)) {
+        questions.push({
+          key: "waterPill",
+          question: "Have you already tried taking an extra water pill (diuretic) as directed by your doctor? If yes, has the swelling improved, stayed the same, or gotten worse?"
+        });
+      }
+    }
+
+    // ── Shortness of breath ────────────────────────────────────────────────
+    if (/short(ness)?\s*of\s*breath|breathless|dyspnea|can'?t\s*breath/i.test(text)) {
+      // Ask severity only if not already rated
+      const alreadyRated = /\b([0-9]|10)\s*(out\s*of|\/)\s*10|\brate[sd]?\b.*\b[0-9]\b|\b[0-9]\b.*\bscale/i.test(text);
+      if (!alreadyRated && extractedSymptoms.sobScale < 4) {
+        questions.push({
+          key: "sobSeverity",
+          question: "On a scale of 0–10, how severe is your shortness of breath? (0 = none, 10 = worst ever)"
+        });
+      }
+      // Ask activity context only if NOT already mentioned (Fix #5)
+      const activityAlreadyMentioned = /at\s*rest|just\s*sitting|resting|walking|during\s*walk|with\s*activit|exert|getting\s*worse\s*when\s*(walk|mov|climb|stand)/i.test(text);
+      if (!activityAlreadyMentioned) {
+        questions.push({
+          key: "sobActivity",
+          question: "Does the breathlessness happen only during activity, or also when you are at rest?"
+        });
+      }
+    }
+
+    // ── Weight gain ────────────────────────────────────────────────────────
+    if (/weight\s*(gain|up|increase)|gained.*(?:pound|lb|kg)/i.test(text)) {
+      if (extractedSymptoms.weightGain1Day === 0 && extractedSymptoms.weightGain1Week === 0) {
+        questions.push({
+          key: "weightAmount",
+          question: "How many pounds (or kg) have you gained, and over what period — since yesterday, or over the past week?"
+        });
+      }
+    }
+
+    // ── Chest discomfort decision tree (traffic light tool — 3 questions) ──
+    // Only applies to "discomfort/ache" — clear cardiac pain goes straight to RED.
+    if (extractedSymptoms.chestDiscomfortOnly) {
+      // Q1 — Is it a new symptom? (skip if already stated)
+      const newAlreadyStated = /\b(new\s*symptom|first\s*time|never.*before|not\s*new|existing|had.*before|usual|chronic|same\s*as\s*before)\b/i.test(text);
+      if (!newAlreadyStated && extractedSymptoms.chestIsNew === null) {
+        questions.push({
+          key: "chestNew",
+          question: "Is this chest discomfort a new symptom for you, or is it something you have experienced before?"
+        });
+      }
+
+      // Q2 — Co-occurring symptoms? (skip if any already mentioned)
+      const coAlreadyMentioned =
+        extractedSymptoms.chestCoArmPain || extractedSymptoms.chestCoSOB ||
+        extractedSymptoms.chestCoRacingHeart || extractedSymptoms.chestCoSweating ||
+        extractedSymptoms.chestCoNausea || extractedSymptoms.chestCoRegurgitation ||
+        extractedSymptoms.chestCoNone;
+      if (!coAlreadyMentioned) {
+        questions.push({
+          key: "chestCoSymptoms",
+          question: "Are any of the following also happening alongside the chest discomfort? Please let me know which apply:\n" +
+            "• Shooting pain down your arm, or pain on the left side of your chest\n" +
+            "• Shortness of breath\n" +
+            "• Heart racing\n" +
+            "• Sweating\n" +
+            "• Nausea or vomiting\n" +
+            "• Regurgitation or heartburn\n" +
+            "• None of these"
+        });
+      }
+
+      // Q3 — At rest or during activity? (skip if already stated)
+      const activityAlreadyStated = /\bat\s*rest\b|resting|sitting|walking|exercis|during\s*activit|while\s*being\s*active/i.test(text);
+      if (!activityAlreadyStated && !extractedSymptoms.chestAtRest && !extractedSymptoms.chestDuringActivity) {
+        questions.push({
+          key: "chestActivity",
+          question: "Is the chest discomfort happening while you are physically active (e.g., walking, exercising), or does it also occur when you are at rest (e.g., just sitting or lying down)?"
+        });
+      }
+    }
+
+    return questions;
+  }
+
+  /**
+   * Summarise information already provided by the patient so follow-up
+   * questions can skip topics that have been addressed (Fix #5).
+   * @param {string} text
+   * @returns {string[]} plain-language list of known facts
+   */
+  extractAlreadyKnownInfo(text) {
+    const known = [];
+
+    if (/short(ness)?\s*of\s*breath|breathless/i.test(text)) {
+      if (/at\s*rest|just\s*sitting|resting|not\s*mov/i.test(text))
+        known.push("shortness of breath at rest");
+      if (/walk|activit|exert|mov|climb|going up/i.test(text))
+        known.push("shortness of breath worsens with activity or walking");
+      const scaleMatch = text.match(/\b(\d{1,2})\s*(?:out\s*of|\/)\s*10/i);
+      if (scaleMatch) known.push(`shortness of breath severity rated ${scaleMatch[1]}/10`);
+      if (/worse|worsening|getting worse/i.test(text))
+        known.push("symptoms are getting worse");
+    }
+
+    if (/swell(ing)?|edema/i.test(text)) {
+      if (/usual|my usual|always|chronic/i.test(text))
+        known.push("leg swelling is a known baseline symptom");
+      if (/worse|worsening|getting worse/i.test(text))
+        known.push("swelling is getting worse than usual");
+      if (/water\s*pill|diuretic|furosemide|lasix/i.test(text))
+        known.push("patient mentioned water pill / diuretic use");
+    }
+
+    if (/weight/i.test(text)) {
+      const lbsMatch = text.match(/(\d+(?:\.\d+)?)\s*(?:pound|lb)/i);
+      if (lbsMatch) known.push(`weight gain of ${lbsMatch[1]} lbs mentioned`);
+      if (/today|one\s*day|24\s*hour|overnight/i.test(text))
+        known.push("weight gain was within the last day");
+      if (/week|7\s*day/i.test(text))
+        known.push("weight gain was over the past week");
+    }
+
+    if (/chest/i.test(text)) {
+      if (/regurgitat|heartburn|indigestion|acid/i.test(text))
+        known.push("chest discomfort is accompanied by GI symptoms (regurgitation/heartburn) — likely non-cardiac");
+      if (/new\s*symptom|first\s*time|never.*before/i.test(text))
+        known.push("chest discomfort is a NEW symptom");
+      if (/not\s*new|existing|had.*before|usual|chronic/i.test(text))
+        known.push("chest discomfort is an existing/known symptom (not new)");
+      if (/shooting.*arm|arm.*pain|left\s*side.*chest/i.test(text))
+        known.push("concurrent shooting arm pain mentioned");
+      if (/racing.*heart|heart.*rac|palpitation/i.test(text))
+        known.push("concurrent racing heart mentioned");
+      if (/\bsweat(ing)?\b/i.test(text))
+        known.push("concurrent sweating mentioned");
+      if (/nausea|vomit/i.test(text))
+        known.push("concurrent nausea/vomiting mentioned");
+      if (/\bat\s*rest\b|resting|just\s*sitting/i.test(text))
+        known.push("chest discomfort occurs at rest");
+      if (/walking|exercis|during\s*activit|while\s*being\s*active/i.test(text))
+        known.push("chest discomfort occurs during activity");
+      if (/none\s*of\s*(these|the\s*above)|no\s*(other|concurrent)\s*symptoms/i.test(text))
+        known.push("patient confirmed no concurrent co-symptoms");
+    }
+
+    return known;
   }
 
   /**

@@ -50,19 +50,27 @@ class ChatEngine {
       !/heart|cardiac|chest|breath|swell|sodium|fluid|medication|edema/i.test(message);
 
     // First-person present-tense language signals the patient is describing
-    // their own current state (not asking a general education question)
-    const firstPerson = /\b(i'?m|i am|i have|i'?ve|i feel|i notice[d]?|i'?ve been|i started|i'?ve had|i gained|i woke)\b/i.test(message);
+    // their own current state (not asking a general education question).
+    // Fix #3: include "my/mine" possessive ownership so "My usual leg swelling is
+    // getting worse" is correctly treated as a personal symptom report.
+    const firstPerson = /\b(i'?m|i am|i have|i'?ve|i feel|i notice[d]?|i'?ve been|i started|i'?ve had|i gained|i woke|my|mine)\b/i.test(message);
 
-    // Specific traffic-light symptom patterns (per Cornell tool criteria)
+    // Specific traffic-light symptom patterns (per Cornell tool criteria).
+    // Fix #3: added "getting worse" + body-part patterns so worsening of known
+    // symptoms (e.g. "my usual leg swelling is getting worse") correctly triggers triage.
+    // Added fatigue pattern — it is listed on the traffic light symptom selector.
     const trafficLightPatterns = [
       /chest\s*(pain|discomfort|pressure|tightness)/i,
       /short(ness)?\s*of\s*breath|breathless|can'?t\s*breath|dyspnea/i,
       /swell(ing|en|ed)|edema|puffy\s*(leg|ankle|feet|foot)/i,
-      /weight\s*gain|gained\s*\d+\s*(lb|pound|kg)/i,
+      // catches "my usual leg swelling is getting worse"
+      /(?:leg|ankle|foot|feet|swell)\w*\s+(?:is\s+)?(?:getting\s+)?wors(?:e|ening)/i,
+      /weight\s*(gain|is\s+up|going\s+up)|gained\s*\d+\s*(lb|pound|kg)/i,
       /faint(ing)?|pass(ed)?\s*out|collaps|los(t|ing)\s*consciousness/i,
       /racing\s*heart|heart\s*rac|palpitation|irregular\s*(heart|beat|pulse)/i,
       /dizzy|lightheaded/i,
       /confus(ed|ion)|disoriented/i,
+      /fatigue|tired.*limit|exhaust.*activit/i,
       /pink\s*mucus|foamy\s*cough/i,
       /wak(e|ing)\s*up\s*(breathless|short\s*of\s*breath)|extra\s*pillow/i,
       /less\s*urin|not\s*urinat|decreased\s*urin/i,
@@ -83,7 +91,14 @@ class ChatEngine {
 
   // ─── System Prompt ───────────────────────────────────────────────────────
 
-  buildSystemPrompt(context, isTriageMode = false) {
+  /**
+   * @param {string} context - retrieved knowledge chunks
+   * @param {boolean} isTriageMode - patient is reporting current symptoms
+   * @param {Array<{key:string,question:string}>|null} followUpQuestions
+   *   - if set, AI should ask ONLY these questions (do not triage yet)
+   * @param {string[]} alreadyKnownInfo - facts patient already mentioned (don't re-ask)
+   */
+  buildSystemPrompt(context, isTriageMode = false, followUpQuestions = null, alreadyKnownInfo = []) {
     const basePrompt = `You are a compassionate, knowledgeable heart failure self-management assistant.
 Your purpose is to educate heart failure patients and caregivers about heart failure management only.
 
@@ -102,8 +117,7 @@ If a question is clearly outside this scope (e.g., taxes, weather, legal matters
 ## Triage Rules
 - ONLY perform triage if the patient is personally describing CURRENT symptoms they are experiencing right now.
 - Do NOT triage general/educational questions like "what are symptoms of HF?" or "what does chest pain mean?"
-- If symptom details are insufficient for a proper assessment, ask specific follow-up questions BEFORE concluding. Example: "To better assess your situation, could you tell me: (1) How severe is your shortness of breath on a scale of 0–10? (2) Have you noticed any weight gain in the past day or week? (3) Is this happening at rest or only with activity?"
-- When triage IS appropriate, clearly state the zone (🟢 GREEN / 🟡 YELLOW / 🔴 RED) and cite the Traffic Light Tool or guidelines as your basis.
+- When triage IS appropriate, clearly state the zone (🟢 GREEN / 🟡 YELLOW / 🔴 RED) and note that a triage assessment is shown below your response.
 
 ## Core Principles
 1. Cite sources INLINE using "According to [Name](URL), ..."
@@ -124,11 +138,38 @@ ${context}
 - End with a ## References section
 - End with an encouraging note when appropriate`;
 
-    if (isTriageMode) {
+    // ── Follow-up mode (Fix #4 & #5): AI asks specific missing questions ──────
+    // Do NOT provide a triage zone yet — just gather the needed information.
+    if (followUpQuestions && followUpQuestions.length > 0) {
+      const questionList = followUpQuestions
+        .map((q, i) => `${i + 1}. ${q.question}`)
+        .join("\n");
+      const knownSection = alreadyKnownInfo.length > 0
+        ? `\n\n**Already known — do NOT ask again:**\n${alreadyKnownInfo.map(k => `- ${k}`).join("\n")}`
+        : "";
       return basePrompt + `
 
-## THIS MESSAGE CONTAINS CURRENT SYMPTOM DESCRIPTIONS
-Acknowledge the specific symptoms mentioned, provide relevant education with inline citations, then note that a triage assessment is displayed below your response. Do not repeat the full triage logic in the text — it is shown in the triage panel.`;
+## FOLLOW-UP QUESTIONS NEEDED (Fix #4 / #5)
+The patient has described symptoms that need clarification before a full triage can be completed.
+Your task in this response is to:
+1. Briefly acknowledge what the patient described with empathy.
+2. Ask ONLY the following specific follow-up questions — number them clearly:
+${questionList}${knownSection}
+
+IMPORTANT: Do NOT provide a triage zone or final recommendation yet.
+Do NOT re-ask anything listed under "Already known" above.
+After the patient answers, a full triage assessment will be shown.`;
+    }
+
+    // ── Triage mode: patient answered follow-ups / enough info already present ─
+    if (isTriageMode) {
+      const knownSection = alreadyKnownInfo.length > 0
+        ? `\n\nAlready known from patient's description:\n${alreadyKnownInfo.map(k => `- ${k}`).join("\n")}\nDo NOT ask about these again.`
+        : "";
+      return basePrompt + `
+
+## THIS MESSAGE CONTAINS CURRENT SYMPTOM DESCRIPTIONS${knownSection}
+Acknowledge the specific symptoms mentioned, provide relevant education with inline citations, then note that a triage assessment is displayed below your response. Do not repeat the full triage logic in the text — it is shown in the triage card.`;
     }
 
     return basePrompt;
@@ -153,8 +194,14 @@ Acknowledge the specific symptoms mentioned, provide relevant education with inl
     const intent = this.detectIntent(userMessage);
     const isTriageMode = options.triageMode || intent.isTriage;
 
-    // Build messages for OpenAI API (system message goes in messages array)
-    const systemPrompt = this.buildSystemPrompt(context, isTriageMode);
+    // Build messages for OpenAI API (system message goes in messages array).
+    // Pass follow-up question context when provided (Fixes #4 & #5).
+    const systemPrompt = this.buildSystemPrompt(
+      context,
+      isTriageMode,
+      options.followUpQuestions || null,
+      options.alreadyKnownInfo || []
+    );
     const messages = [
       { role: "system", content: systemPrompt },
       ...this.conversationHistory.slice(-this.maxHistoryTurns * 2),
@@ -215,12 +262,14 @@ Acknowledge the specific symptoms mentioned, provide relevant education with inl
    * @param {Object|null} structuredSymptoms
    * @returns {Object} AI triage result
    */
-  async runAITriage(symptomDescription, structuredSymptoms = null) {
+  async runAITriage(symptomDescription) {
     if (!this.apiKey) {
       throw new Error("API key not set.");
     }
 
-    const triagePrompt = this.triage.buildAITriagePrompt(symptomDescription, structuredSymptoms);
+    // AI receives only the free-text description — no rule-based result injected.
+    // This keeps AI and rule-based systems fully independent (Fix #1).
+    const triagePrompt = this.triage.buildAITriagePrompt(symptomDescription);
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
