@@ -76,10 +76,11 @@
         <button class="triage-tab active" data-mode="both">Both</button>
         <button class="triage-tab" data-mode="ai">AI Only</button>
       </div>
-      <div style="font-size:11px; color:var(--gray-500);">
-        <strong>Rule-Based:</strong> Cornell Traffic Light Tool logic (deterministic)<br>
-        <strong>AI Reasoning:</strong> LLM clinical assessment (2022 AHA/ACC guidelines)<br>
-        <strong>Both:</strong> Side-by-side comparison
+      <div style="font-size:11px; color:var(--gray-500); line-height:1.6;">
+        <em>This setting affects <strong>symptom triage only</strong>. All modes use AI for educational responses.</em><br><br>
+        <strong>Rule-Based:</strong> Triage uses Cornell Traffic Light Tool — deterministic rules, no AI judgment<br>
+        <strong>AI Only:</strong> Triage uses LLM clinical reasoning — independent judgment, 2022 AHA/ACC guidelines<br>
+        <strong>Both (default):</strong> Shows rule-based + AI triage side-by-side for comparison; follow the more cautious result if they disagree
       </div>
     </div>
 

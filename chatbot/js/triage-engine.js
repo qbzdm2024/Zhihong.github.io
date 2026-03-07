@@ -39,28 +39,118 @@ class TriageEngine {
     const detected = [];
     const t = text;
 
-    if (/short(ness)?\s*of\s*breath|breathless|can'?t\s*breath|dyspnea|hard\s*to\s*breath/i.test(t))
+    // ── Shortness of breath ──────────────────────────────────────────────────
+    if (/short(ness)?\s*of\s*breath|breathless|can'?t\s*(catch\s*my\s*)?breath|dyspnea|hard\s*to\s*breath|difficulty\s*breath|trouble\s*breath|out\s*of\s*breath|winded|gasping|struggling\s*to\s*breath|labored\s*breath|can'?t\s*breathe|hard\s*to\s*breathe/i.test(t))
       detected.push("sob");
 
-    if (/chest\s*(discomfort|ache|pain|pressure|tightness|heaviness|hurt)/i.test(t))
+    // ── Chest discomfort ─────────────────────────────────────────────────────
+    if (/chest\s*(discomfort|ache|pain|pressure|tightness|heaviness|hurt)|tight(ness)?\s*(in|around)?\s*(my\s*)?chest|chest\s*feel(s|ing)?\s*(tight|heavy|weird|strange)|squeezing\s*(in|around|on)?\s*(my\s*)?chest|pressure\s*(in|on|around)\s*(my\s*)?chest/i.test(t))
       detected.push("chestDiscomfort");
 
-    if (/\b(fatigue|tired|exhausted|no\s*energy|worn\s*out|wiped\s*out)\b/i.test(t))
+    // ── Fatigue — broad synonyms ─────────────────────────────────────────────
+    // Covers "very tired", "too tired", "feeling weak", "no strength", etc.
+    if (/\b(fatigue|fatigued|tired|tiredness|exhausted|exhaustion|no\s*energy|worn\s*out|wiped\s*out|weak(?:ness)?|lethargic|lethargy|sluggish|drained|run\s*down|burned?\s*out|no\s*strength|can'?t\s*keep\s*up|feel(ing)?\s*(so\s*)?(weak|tired|exhausted|run\s*down))\b/i.test(t))
       detected.push("fatigue");
 
-    if (/weight\s*(gain|loss|change|up|down|increase|decrease)|gained\s*\d+\s*(lb|pound|kg)|lost\s*\d+\s*(lb|pound|kg)/i.test(t))
+    // ── Weight change ─────────────────────────────────────────────────────────
+    // Covers "gained some weight", "put on weight", "heavier", "scale went up"
+    if (/weight\s*(gain|loss|change|up|down|increase|decrease|going\s*(up|down)|went\s*up|is\s*up)|gained\s*(?:some|a\s*(?:bit|few|lot|couple)|about|\d+)?\s*(?:weight|pounds?|lbs?|kg)|put\s*on\s*(?:some|a\s*(?:bit|few))?\s*(?:weight|pounds?)|lost\s*(?:some|\d+)\s*(?:weight|pounds?|lbs?|kg)|scale\s*(?:is|went|has\s*gone|shows?)\s*(?:up|higher|more)|heavier\s*than\s*(usual|before|yesterday|normal)/i.test(t))
       detected.push("weightChange");
 
-    if (/confus(ed|ion)|disoriented|not\s*think(ing)?\s*clearly|mental\s*status|foggy|foggy\s*brain/i.test(t))
+    // ── Confusion / mental fogginess ─────────────────────────────────────────
+    if (/confus(ed|ion)|disoriented|not\s*think(ing)?\s*clearly|mental\s*status|foggy|brain\s*fog|muddled|can'?t\s*think|trouble\s*think|hard\s*to\s*think|forgetful|memory\s*(loss|problem|issue)|mind\s*blank|unclear\s*thinking/i.test(t))
       detected.push("confusion");
 
-    if (/swell(ing|en|ed)|edema|puffy\s*(leg|ankle|feet|foot)|(?:leg|ankle|foot|feet)\s*(?:is\s*)?(?:getting\s*)?worse/i.test(t))
+    // ── Leg / ankle / foot swelling ───────────────────────────────────────────
+    // Covers "puffier", "look swollen", "my ankles look bigger", etc.
+    if (/swell(ing|en|ed)|edema|puffy\s*(leg|ankle|feet|foot)|puffier|(?:leg|ankle|foot|feet|lower\s*leg)\s*(?:look|feel|are|is)?\s*(?:puff|swoll|bigger|larger|blow|heavier|worse)|swollen\s*(ankle|leg|feet|foot)|bloated.*(leg|ankle|feet)/i.test(t))
       detected.push("legSwelling");
 
-    if (/dizzy|dizziness|lightheaded|light-headed/i.test(t))
+    // ── Lightheadedness / dizziness / falls ──────────────────────────────────
+    if (/dizzy|dizziness|lightheaded|light-headed|vertigo|feel\s*(faint|like\s*(?:i'?m\s*)?(?:faint|pass(?:ing)?\s*out|going\s*to\s*faint))|nearly\s*faint|almost\s*faint|unsteady|balance\s*(problem|issue|off)|fell\s*down|fall(?:ing)?\s*(down|over)|los(?:t|ing)\s*(?:my\s*)?balance/i.test(t))
       detected.push("lightheaded");
 
     return detected;
+  }
+
+  /**
+   * LLM-based symptom detection: send the patient message to the LLM and ask it to
+   * classify which of the 7 traffic light categories are present and whether it's a
+   * personal symptom report. Far more robust than regex for colloquial language.
+   *
+   * @param {string} text - patient message
+   * @param {string} apiKey - OpenAI API key
+   * @param {string} model - model ID (defaults to gpt-4o-mini for speed)
+   * @returns {Promise<{categories: string[], isPersonalReport: boolean}>}
+   */
+  async detectSymptomsWithLLM(text, apiKey, model = "gpt-4o-mini") {
+    const prompt = `You are a clinical symptom classifier for a heart failure triage tool.
+Given a patient message, identify which of these 7 symptom categories are mentioned and whether it is a first-person report of currently experienced symptoms.
+
+Categories (use these exact keys):
+- sob: Shortness of breath, breathlessness, difficulty breathing, can't catch breath, winded, gasping
+- chestDiscomfort: Chest pain, pressure, tightness, heaviness, chest ache, squeezing in chest
+- fatigue: Fatigue, exhaustion, tiredness, weakness, no energy, worn out, wiped out, drained, can't keep up
+- weightChange: Weight gain or loss, scale went up or down, heavier than usual, put on weight/pounds/lbs, gained weight
+- confusion: Confusion, disorientation, foggy thinking, can't think clearly, memory problems, muddled
+- legSwelling: Leg, ankle, or foot swelling, puffiness, edema, ankles look bigger/puffy
+- lightheaded: Dizziness, lightheadedness, nearly fainted, unsteady, fell, balance problems, vertigo
+
+Patient message:
+"""
+${text}
+"""
+
+Return ONLY valid JSON — no explanation, no markdown:
+{"categories": ["sob", "fatigue"], "isPersonalReport": true}
+
+Rules:
+- categories: array of matched category keys (empty array [] if none match)
+- isPersonalReport: true ONLY if the patient is describing symptoms they personally experience (uses "I", "my", "I've", "I'm", "I notice", "I feel", "I gained", "my weight", etc.) — false for general questions like "what causes fatigue?" or "how is leg swelling treated?"
+- Include a category whenever the concept is mentioned in ANY natural phrasing: "gained a few pounds" → weightChange, "feel wiped out" → fatigue, "ankles look bigger" → legSwelling, "can't catch my breath" → sob`;
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: 120,
+        temperature: 0,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error?.message || `API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const raw = data.choices[0]?.message?.content || "{}";
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      return {
+        categories:      Array.isArray(parsed.categories) ? parsed.categories.filter(c => this.CATEGORY_LABELS[c]) : [],
+        isPersonalReport: parsed.isPersonalReport === true
+      };
+    }
+    return { categories: [], isPersonalReport: false };
+  }
+
+  /**
+   * Detect cardiac-related queries that aren't in the 7 traffic light categories
+   * (e.g. fast heartbeat, palpitations without chest discomfort or SOB context).
+   * Used to ask a clarifying HF-diagnosis question in education mode.
+   * @param {string} text
+   * @returns {boolean}
+   */
+  detectCardiacNonTriageQuery(text) {
+    const cardiacPatterns =
+      /heart\s*(beat(ing)?|racing|pounding|flutter|skip|pound|thump)|rapid\s*(heart|pulse|beat)|palpitation|tachycardia|arrhythmia|afib|irregular\s*(heart|beat|rhythm|pulse)|my\s*heart\s*(was|is|has\s*been)\s*(beat|racing|pound|flutter|going\s*fast|skipping)/i;
+    const hfAlreadyMentioned =
+      /heart\s*failure|hf\b|cardiomyopathy|ejection\s*fraction|cardiologist|home\s*care.*heart|heart.*home\s*care/i;
+    return cardiacPatterns.test(text) && !hfAlreadyMentioned.test(text);
   }
 
   /**
@@ -113,7 +203,9 @@ class TriageEngine {
     else if (/chest\s*(pain|pressure|tightness|heaviness)/i.test(text))
       a.coSymptoms.push("chest_pain:not_severe");
 
-    if (/\bfever\b/i.test(text))              a.coSymptoms.push("fever");
+    // Fever: catch both the word "fever" AND numeric temperature (e.g. "temperature of 101.8°F", "38.5°C", "temp 100.4")
+    if (/\bfever\b|\btemp(erature)?\s*(of\s*)?(?:1(?:0[0-9]|[1-9]\d)(\.\d+)?)\s*°?[Ff]|\btemp(erature)?\s*(of\s*)?(?:3[89]|4[0-1])(\.\d+)?\s*°?[Cc]/i.test(text))
+      a.coSymptoms.push("fever");
     if (/\bcough(ing)?\b/i.test(text))        a.coSymptoms.push("cough");
     if (/swell(ing|en)?|edema/i.test(text))   a.coSymptoms.push("leg_swelling");
     if (/mucus|phlegm|sputum/i.test(text))    a.coSymptoms.push("mucus");
@@ -197,8 +289,9 @@ class TriageEngine {
     const a = { changeType: null, isExpected: null, coSymptoms: [] };
 
     // [0] type: day_gain | week_gain | loss | other
-    const isGain = /weight\s*(gain|up|increase|going\s*up)|gained/i.test(text);
-    const isLoss = /weight\s*(loss|down|decrease|going\s*down)|lost/i.test(text);
+    // isGain catches both explicit "gained X lbs" and vague "gained some weight"
+    const isGain = /weight\s*(gain|up|increase|going\s*up|went\s*up|is\s*up)|gained|put\s*on\s*(weight|pound)|heavier|scale\s*(is|went|shows?)\s*(up|higher|more)/i.test(text);
+    const isLoss = /weight\s*(loss|down|decrease|going\s*down)|lost\s*(weight|pound|lb|kg)/i.test(text);
     const isWeek = /week|7\s*day/i.test(text);
     const isDay  = /today|one\s*day|24\s*hour|overnight|yesterday|since\s*yesterday/i.test(text);
 
@@ -209,9 +302,12 @@ class TriageEngine {
     if (isLoss) {
       a.changeType = "loss";
     } else if (isGain) {
-      if (isDay)  a.changeType = (amount !== null && amount >= 2) ? "day_gain" : "day_gain";
-      else if (isWeek) a.changeType = (amount !== null && amount >= 5) ? "week_gain" : "week_gain";
-      else a.changeType = "other";
+      // Classify by timeframe + amount; default to "other" when timeframe/amount unclear
+      if (isDay && amount !== null && amount >= 2) a.changeType = "day_gain";
+      else if (isWeek && amount !== null && amount >= 5) a.changeType = "week_gain";
+      else if (isDay)  a.changeType = "day_gain";   // timeframe known, amount unclear
+      else if (isWeek) a.changeType = "week_gain";  // timeframe known, amount unclear
+      else a.changeType = "other";                  // vague — ask follow-up
     }
 
     // [1] expected / planned?
