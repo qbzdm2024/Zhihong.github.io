@@ -666,11 +666,21 @@ class App {
       }
 
       // ── Detect whether this is a personal symptom report ─────────────────
-      // Only the 7 traffic light tool categories can trigger triage.
-      // General education questions ("what are symptoms of HF?") never trigger triage.
-      const detectedSymptoms = this.triageEngine.detectSymptoms(message);
-      const isPersonalReport  = this.triageEngine.isPersonalSymptomReport(message);
-      const shouldTriage      = detectedSymptoms.length > 0 && isPersonalReport && this.triageMode !== "none";
+      // LLM-based detection understands colloquial phrasing ("gained a few pounds",
+      // "feel wiped out", etc.) far better than regex. Fall back to regex if LLM fails.
+      let detectedSymptoms, isPersonalReport;
+      try {
+        const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
+          message, this.chatEngine.apiKey, this.chatEngine.model
+        );
+        detectedSymptoms = llmDetection.categories;
+        isPersonalReport = llmDetection.isPersonalReport;
+      } catch (e) {
+        console.warn("LLM symptom detection failed, using regex fallback:", e.message);
+        detectedSymptoms = this.triageEngine.detectSymptoms(message);
+        isPersonalReport = this.triageEngine.isPersonalSymptomReport(message);
+      }
+      const shouldTriage = detectedSymptoms.length > 0 && isPersonalReport && this.triageMode !== "none";
 
       // ── Case B: Symptom report detected — check if follow-ups are needed ──
       if (shouldTriage) {
