@@ -956,11 +956,19 @@ textarea.settings-input {
 .inline-triage-note {
   margin: 4px 14px 6px;
   font-size: 12px;
+  border-radius: 6px;
+  padding: 8px 10px;
+  line-height: 1.5;
+}
+.inline-triage-note.disagree {
   color: #744210;
   background: var(--yellow-bg);
   border: 1px solid var(--yellow-border);
-  border-radius: 6px;
-  padding: 6px 10px;
+}
+.inline-triage-note.agree {
+  color: #276749;
+  background: var(--green-bg);
+  border: 1px solid var(--green-border, #9ae6b4);
 }
 
 /* Triage reasoning toggle */
