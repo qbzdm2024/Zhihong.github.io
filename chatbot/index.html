@@ -71,16 +71,18 @@
       <div class="sidebar-section-header">
         <span class="sidebar-section-title">🚦 Triage Mode</span>
       </div>
-      <div class="triage-toggle" style="margin-bottom:10px;">
+      <div class="triage-toggle" style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:4px;">
         <button class="triage-tab" data-mode="rule">Rule-Based</button>
         <button class="triage-tab active" data-mode="both">Both</button>
-        <button class="triage-tab" data-mode="ai">AI Only</button>
+        <button class="triage-tab" data-mode="ai">AI (Traffic Light)</button>
+        <button class="triage-tab" data-mode="ai-independently">AI Independent</button>
       </div>
       <div style="font-size:11px; color:var(--gray-500); line-height:1.6;">
         <em>This setting affects <strong>symptom triage only</strong>. All modes use AI for educational responses.</em><br><br>
-        <strong>Rule-Based:</strong> Triage uses Cornell Traffic Light Tool — deterministic rules, no AI judgment<br>
-        <strong>AI Only:</strong> Triage uses LLM clinical reasoning — independent judgment, 2022 AHA/ACC guidelines<br>
-        <strong>Both (default):</strong> Shows rule-based + AI triage side-by-side for comparison; follow the more cautious result if they disagree
+        <strong>Rule-Based:</strong> Cornell Traffic Light Tool — deterministic rules, no AI judgment<br>
+        <strong>AI (Traffic Light):</strong> LLM uses traffic light question framework for follow-ups, then applies its own zone judgment<br>
+        <strong>Both (default):</strong> Rule-based + AI (Traffic Light) side-by-side; follow the more cautious result<br>
+        <strong>AI Independent:</strong> LLM decides its own follow-up questions and triages using its own clinical reasoning — not bound by the traffic light framework
       </div>
     </div>
 

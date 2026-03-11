@@ -259,6 +259,37 @@ Do NOT provide a triage zone. Provide concise, evidence-based educational inform
     const aiResponse = data.choices[0]?.message?.content || "";
     return this.triage.parseAITriageResponse(aiResponse, symptomDescription);
   }
+
+  /**
+   * Run AI-independent triage — the AI uses its own clinical framework,
+   * decides if follow-up questions are needed, then provides a zone.
+   * @param {string} symptomText - patient symptom description (may include follow-up answers)
+   * @returns {Object} - { isFollowUp, acknowledgment, questions } OR standard triage result
+   */
+  async runAIIndependentTriage(symptomText) {
+    if (!this.apiKey) throw new Error("API key not set.");
+
+    const prompt = this.triage.buildAIIndependentTriagePrompt(symptomText);
+
+    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${this.apiKey}` },
+      body: JSON.stringify({
+        model: this.model,
+        max_tokens: 800,
+        messages: [{ role: "user", content: prompt }]
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error?.message || `API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const aiResponse = data.choices[0]?.message?.content || "";
+    return this.triage.parseAIIndependentTriageResponse(aiResponse);
+  }
 }
 
 window.ChatEngine = ChatEngine;

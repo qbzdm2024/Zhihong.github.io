@@ -1018,6 +1018,115 @@ Format as JSON with fields: zone (GREEN/YELLOW/RED), urgency, reasoning, keySymp
     };
   }
 
+  // ─── AI-Independent Triage ────────────────────────────────────────────────
+
+  /**
+   * Build a prompt for the AI-independent triage mode.
+   * The AI uses its own clinical framework — NOT the traffic light categories —
+   * to decide whether follow-up questions are needed, and to assign a zone.
+   * @param {string} symptomText - patient's full symptom description (may include follow-up answers)
+   * @returns {string}
+   */
+  buildAIIndependentTriagePrompt(symptomText) {
+    return `You are a clinical expert specializing in heart failure management. A patient has described their symptoms to you.
+
+Your task: decide whether you need more information before triaging, OR if you have enough detail to triage now.
+
+Patient's description:
+"${symptomText}"
+
+STEP 1 — Decide if you need more information:
+- If the description is too vague to assess severity confidently → ask 1–3 focused clinical follow-up questions
+- If you have sufficient detail to assess severity → proceed directly to triage
+
+STEP 2 — Respond ONLY with one of these two JSON formats:
+
+Option A — Need more information:
+{
+  "action": "follow_up",
+  "acknowledgment": "Brief empathetic acknowledgment of what they shared (1-2 sentences)",
+  "questions": ["Question 1?", "Question 2?", "Question 3?"]
+}
+
+Option B — Ready to triage:
+{
+  "action": "triage",
+  "zone": "GREEN" | "YELLOW" | "RED",
+  "urgency": "short urgency label (e.g. Stable, Call today, Emergency — call 911)",
+  "reasoning": "2-4 sentence clinical reasoning based on heart failure pathophysiology",
+  "keySymptoms": ["symptom 1", "symptom 2"],
+  "immediateActions": ["Action 1", "Action 2"],
+  "disclaimer": "This AI assessment is for educational purposes only and does not replace medical advice."
+}
+
+RULES:
+- Output ONLY valid JSON — no text outside the JSON object
+- Zone: GREEN = stable (continue monitoring at home), YELLOW = contact care team today, RED = emergency (call 911 / go to ER now)
+- Be conservative: when uncertain, choose the more urgent zone
+- Never use UNKNOWN — always commit to GREEN, YELLOW, or RED
+- Follow-up questions: ask at most 3, focused on what would change your zone assignment
+- Triage reasoning: use heart failure clinical knowledge (fluid overload, decompensation, hemodynamic instability, arrhythmia)`;
+  }
+
+  /**
+   * Parse the AI-independent triage JSON response.
+   * @param {string} aiResponse
+   * @returns {Object} - either { isFollowUp: true, acknowledgment, questions }
+   *                     or a standard triage result object
+   */
+  parseAIIndependentTriageResponse(aiResponse) {
+    try {
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+
+        if (parsed.action === "follow_up") {
+          return {
+            isFollowUp:      true,
+            acknowledgment:  parsed.acknowledgment || "",
+            questions:       Array.isArray(parsed.questions) ? parsed.questions : []
+          };
+        }
+
+        if (parsed.action === "triage") {
+          const zoneColors = { GREEN: "#38a169", YELLOW: "#d69e2e", RED: "#e53e3e" };
+          return {
+            isFollowUp:   false,
+            method:       "ai_independent",
+            zone:         parsed.zone || "UNKNOWN",
+            color:        zoneColors[parsed.zone] || "#718096",
+            urgency:      parsed.urgency || parsed.zone,
+            reasoning:    parsed.reasoning || "",
+            keySymptoms:  parsed.keySymptoms || [],
+            action:       Array.isArray(parsed.immediateActions)
+              ? parsed.immediateActions.join("; ")
+              : (parsed.immediateActions || ""),
+            disclaimer:   parsed.disclaimer || "This AI assessment is for educational purposes only and does not replace medical advice.",
+            rawResponse:  aiResponse,
+            timestamp:    new Date().toISOString(),
+            sources: [{ name: "2022 AHA/ACC/HFSA Heart Failure Guidelines", url: "https://www.ahajournals.org/doi/10.1161/CIR.0000000000001063" }]
+          };
+        }
+      }
+    } catch (e) { /* fall through */ }
+
+    // Fallback: extract zone from text
+    const u = aiResponse.toUpperCase();
+    let zone = "YELLOW"; // conservative default
+    if (u.includes("RED ZONE") || u.includes("🔴") || u.includes("EMERGENCY")) zone = "RED";
+    else if (u.includes("GREEN ZONE") || u.includes("🟢") || u.includes("STABLE"))  zone = "GREEN";
+
+    const zoneColors = { GREEN: "#38a169", YELLOW: "#d69e2e", RED: "#e53e3e" };
+    return {
+      isFollowUp:  false,
+      method:      "ai_independent",
+      zone, color: zoneColors[zone], urgency: zone,
+      reasoning:   aiResponse, keySymptoms: [], action: "",
+      disclaimer:  "This AI assessment is for educational purposes only and does not replace medical advice.",
+      rawResponse: aiResponse, timestamp: new Date().toISOString()
+    };
+  }
+
   /**
    * Generate a comparison summary between rule-based and AI triage results.
    */
