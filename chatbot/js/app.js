@@ -608,6 +608,70 @@ class App {
     // Confirm add source
     document.getElementById("modal-confirm-btn").addEventListener("click", () => this._handleAddSource());
 
+    // URL fetch button
+    document.getElementById("fetch-url-btn").addEventListener("click", async () => {
+      const url = document.getElementById("new-source-url").value.trim();
+      const statusEl = document.getElementById("fetch-url-status");
+      if (!url) { statusEl.textContent = "Enter a URL first."; statusEl.style.display = "block"; return; }
+      statusEl.textContent = "Fetching…"; statusEl.style.color = "var(--gray-400)"; statusEl.style.display = "block";
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const html = await resp.text();
+        const tmp = document.createElement("div");
+        tmp.innerHTML = html;
+        // Remove script/style nodes
+        tmp.querySelectorAll("script,style,nav,footer,header").forEach(n => n.remove());
+        const text = (tmp.textContent || tmp.innerText || "").replace(/\s+/g, " ").trim();
+        if (text.length < 50) throw new Error("No readable content found");
+        document.getElementById("new-source-content").value = text.slice(0, 25000);
+        statusEl.textContent = `✓ Fetched ${text.length.toLocaleString()} characters`;
+        statusEl.style.color = "var(--green)";
+      } catch (err) {
+        statusEl.textContent = `⚠ Could not fetch (${err.message}). CORS may block direct fetches — paste content manually.`;
+        statusEl.style.color = "var(--red)";
+      }
+    });
+
+    // File upload (PDF / text)
+    document.getElementById("new-source-file").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      const nameEl  = document.getElementById("new-source-file-name");
+      const statusEl = document.getElementById("file-load-status");
+      if (!file) return;
+      nameEl.textContent = file.name;
+      statusEl.textContent = "Reading file…"; statusEl.style.color = "var(--gray-400)"; statusEl.style.display = "block";
+
+      const reader = new FileReader();
+
+      if (file.type === "text/plain" || file.name.match(/\.(txt|md)$/i)) {
+        reader.onload = (ev) => {
+          document.getElementById("new-source-content").value = ev.target.result;
+          statusEl.textContent = `✓ Loaded ${ev.target.result.length.toLocaleString()} characters`;
+          statusEl.style.color = "var(--green)";
+        };
+        reader.readAsText(file);
+      } else if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+        reader.onload = (ev) => {
+          try {
+            const text = this._extractTextFromPDF(ev.target.result);
+            if (text.length > 80) {
+              document.getElementById("new-source-content").value = text;
+              statusEl.textContent = `✓ Extracted ~${text.length.toLocaleString()} characters from PDF`;
+              statusEl.style.color = "var(--green)";
+            } else {
+              statusEl.textContent = "⚠ PDF text extraction limited (encrypted or image-based). Please paste content manually.";
+              statusEl.style.color = "var(--red)";
+            }
+          } catch (err) {
+            statusEl.textContent = "⚠ Could not read PDF. Please paste content manually.";
+            statusEl.style.color = "var(--red)";
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      }
+    });
+
     // Run triage button
     document.getElementById("run-triage-btn").addEventListener("click", () => this._handleRunTriage());
 
@@ -693,9 +757,10 @@ class App {
           extractedAnswers = this._extractAllAnswers(combinedText, detectedSymptoms);
         }
 
-        // Run triage directly — no educational response before showing the triage result
+        // Educational response + triage card
+        const chatResult = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
+        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources);
         await this._runAutoTriage(combinedText, detectedSymptoms, extractedAnswers, msgEl);
         this.triageFollowUpState = null;
         return;
@@ -713,24 +778,24 @@ class App {
           ? combinedText + "\n[Please provide your final triage assessment now — do not ask for any more follow-up questions.]"
           : combinedText;
 
+        // Educational response first, then AI triage
+        const chatResult = await this.chatEngine.chat(message, { triageMode: true });
+        this._removeTypingIndicator();
+        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources);
+
         this._setLoading(true, "Running AI independent triage...");
         let aiIndResult;
         try {
           aiIndResult = await this.chatEngine.runAIIndependentTriage(promptText);
         } catch (err) {
-          this._removeTypingIndicator();
           this._setLoading(false);
-          const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
           this._appendInlineTriage(msgEl, null, null, err.message, null);
           this.aiIndependentFollowUpState = null;
           return;
         }
-        this._removeTypingIndicator();
         this._setLoading(false);
 
         if (!aiIndResult.isFollowUp || currentRound >= 3) {
-          // Show triage result (or error if AI still returned follow-up despite force instruction)
-          const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
           if (!aiIndResult.isFollowUp) {
             this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
           } else {
@@ -738,7 +803,6 @@ class App {
           }
           this.aiIndependentFollowUpState = null;
         } else {
-          // Ask another round of follow-up questions (still within limit)
           this.aiIndependentFollowUpState = { originalText: combinedText, answered: false, roundCount: currentRound + 1 };
           const qText = (aiIndResult.acknowledgment ? aiIndResult.acknowledgment + "\n\n" : "") +
             "A few more questions:\n\n" +
@@ -766,29 +830,29 @@ class App {
       // ── AI-independently mode: bypass traffic light entirely ──────────────
       // AI decides its own follow-up questions (max 3 rounds) and triage zone.
       if (this.triageMode === "ai-independently" && isPersonalReport) {
+        // Educational response first
+        const chatResult = await this.chatEngine.chat(message, { triageMode: false });
+        this._removeTypingIndicator();
+        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources);
+
         this._setLoading(true, "Running AI independent triage...");
         let aiIndResult;
         try {
           aiIndResult = await this.chatEngine.runAIIndependentTriage(message);
         } catch (err) {
-          this._removeTypingIndicator();
           this._setLoading(false);
-          const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
           this._appendInlineTriage(msgEl, null, null, err.message, null);
           return;
         }
-        this._removeTypingIndicator();
         this._setLoading(false);
 
         if (aiIndResult.isFollowUp) {
-          // Save state (round 1); triage runs in Case A' after patient answers
           this.aiIndependentFollowUpState = { originalText: message, answered: false, roundCount: 1 };
           const qText = (aiIndResult.acknowledgment ? aiIndResult.acknowledgment + "\n\n" : "") +
             "To assess your symptoms, please answer:\n\n" +
             aiIndResult.questions.map((q, i) => `**${i + 1}.** ${q}`).join("\n\n");
           this._addMessage("assistant", qText, []);
         } else {
-          const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
           this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
         }
         return;
@@ -808,20 +872,22 @@ class App {
         const neededFollowUps = this.triageEngine.getNeededFollowUps(message, detectedSymptoms, regexAnswers);
 
         if (neededFollowUps.length > 0) {
-          // Case B: missing info — ask follow-up questions directly; triage runs in Case A after reply
+          // Case B: missing info — educational response + follow-up questions; triage runs in Case A
           this.triageFollowUpState = {
             originalText:     message,
             detectedSymptoms: detectedSymptoms,
             answered:         false
           };
+          const result = await this.chatEngine.chat(message, {
+            triageMode:        false,
+            followUpQuestions: neededFollowUps
+          });
           this._removeTypingIndicator();
-          const qText = "To assess your symptoms, I need a few more details:\n\n" +
-            neededFollowUps.map((q, i) => `**${i + 1}.** ${q.question}`).join("\n\n");
-          this._addMessage("assistant", qText, []);
+          this._addMessage("assistant", result.content, result.sources);
           return;
         }
 
-        // Case C: All info explicitly present — run triage directly, no educational response.
+        // Case C: All info present — educational response + triage card.
         let extractedAnswers = regexAnswers;
         try {
           extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
@@ -830,8 +896,9 @@ class App {
         } catch (e) {
           console.warn("LLM answer extraction failed, using regex answers:", e.message);
         }
+        const result = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
+        const msgEl = this._addMessage("assistant", result.content, result.sources);
         await this._runAutoTriage(message, detectedSymptoms, extractedAnswers, msgEl);
         return;
       }
@@ -1156,26 +1223,75 @@ class App {
     return Object.values(data).some((v) => v === true || (typeof v === "number" && v > 0));
   }
 
-  async _handleAddSource() {
-    const name = document.getElementById("new-source-name").value.trim();
-    const url = document.getElementById("new-source-url").value.trim();
-    const content = document.getElementById("new-source-content").value.trim();
-    const type = document.getElementById("new-source-type").value;
+  /**
+   * Minimal PDF text extraction using BT...ET stream parsing.
+   * Works for simple text-based PDFs; complex/encrypted PDFs may yield sparse results.
+   */
+  _extractTextFromPDF(arrayBuffer) {
+    const raw = new TextDecoder("latin1").decode(new Uint8Array(arrayBuffer));
+    const lines = [];
 
-    if (!name || !content) {
-      this._showToast("Source name and content are required", "warning");
+    // Extract text from BT...ET blocks (Tj and TJ operators)
+    const btBlocks = raw.match(/BT[\s\S]*?ET/g) || [];
+    for (const block of btBlocks) {
+      // Parenthesised strings: (text) Tj
+      const parenMatches = block.match(/\(([^)]*)\)\s*(?:Tj|T\*|'|")/g) || [];
+      for (const m of parenMatches) {
+        const inner = m.match(/\(([^)]*)\)/);
+        if (inner) lines.push(inner[1]);
+      }
+      // Array form: [(text) ...] TJ
+      const arrMatches = block.match(/\[([^\]]*)\]\s*TJ/g) || [];
+      for (const m of arrMatches) {
+        const parts = m.match(/\(([^)]*)\)/g) || [];
+        lines.push(parts.map(p => p.slice(1, -1)).join(""));
+      }
+    }
+
+    // Fallback: extract any parenthesised sequences not caught above
+    if (lines.length === 0) {
+      const fallback = raw.match(/\(([^\x00-\x08\x0e-\x1f\x80-\x9f]{3,})\)/g) || [];
+      for (const m of fallback) lines.push(m.slice(1, -1));
+    }
+
+    return lines.join(" ").replace(/\s+/g, " ").trim();
+  }
+
+  async _handleAddSource() {
+    const name    = document.getElementById("new-source-name").value.trim();
+    const url     = document.getElementById("new-source-url").value.trim();
+    const content = document.getElementById("new-source-content").value.trim();
+    const type    = document.getElementById("new-source-type").value;
+
+    if (!name) {
+      this._showToast("Source name is required", "warning");
+      return;
+    }
+    if (!content && !url) {
+      this._showToast("Provide content text, fetch from a URL, or upload a file", "warning");
       return;
     }
 
+    // If no text content but URL is given, store a minimal placeholder so the source is searchable
+    const effectiveContent = content || `[Source: ${url}] — No text content extracted. Visit the URL for full details.`;
+
     try {
-      this.kb.addCustomSource({ name, url, type, description: name }, content);
+      this.kb.addCustomSource({ name, url, type, description: name }, effectiveContent);
       this._renderSources();
       this._updateKBStats();
       document.getElementById("add-source-modal").classList.add("hidden");
 
-      // Clear form
+      // Clear form fields
       ["new-source-name", "new-source-url", "new-source-content"].forEach((id) => {
         document.getElementById(id).value = "";
+      });
+      const fileInput = document.getElementById("new-source-file");
+      if (fileInput) fileInput.value = "";
+      const nameEl = document.getElementById("new-source-file-name");
+      if (nameEl) nameEl.textContent = "No file chosen";
+      ["fetch-url-status", "file-load-status"].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = "none";
       });
 
       this._showToast(`Source "${name}" added successfully`, "success");

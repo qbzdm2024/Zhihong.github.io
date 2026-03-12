@@ -195,9 +195,9 @@ Rules:
       },
       lightheaded: {
         desc: "Dizziness / Lightheadedness / Falls",
-        fields: `- isNew: "yes" | "no" | null
-- isWorseUsual: "yes" | "no" | null
-- changedLastDay: "yes" | null (changed or worsened in past 24 hours)`
+        fields: `- isNew: "yes" | "no" | null (is this a new symptom the patient has not had before?)
+- fellToday: "yes" | "no" | "unsure" | null (did the patient fall today?)
+- bloodPressure: "yes" | "no" | "unsure" | null (does patient have high or low blood pressure?)`
       }
     };
 
@@ -208,7 +208,7 @@ Rules:
       weightChange:   { changeType: null, tookDiuretic: null, coSymptoms: [] },
       confusion:      { isNew: null, coSymptoms: [] },
       legSwelling:    { isNewOrWorse: null, legs: null, tookDiuretic: null },
-      lightheaded:    { isNew: null, isWorseUsual: null, changedLastDay: null }
+      lightheaded:    { isNew: null, fellToday: null, bloodPressure: null }
     };
 
     const relevantCats = categories.filter(c => catSpecs[c]);
@@ -497,24 +497,26 @@ ${JSON.stringify(skeleton, null, 2)}`;
   }
 
   _extractLightheadedAnswers(text) {
-    // answer_list: [isNew, isWorseUsual, changedLastDay]
-    const a = { isNew: null, isWorseUsual: null, changedLastDay: null };
+    // answer_list: [isNew, fellToday, bloodPressure]
+    const a = { isNew: null, fellToday: null, bloodPressure: null };
 
-    // [0] new?
+    // [0] new symptom?
     if (/\b(new\b|first\s*time|never.*before|just\s*started)\b/i.test(text))
       a.isNew = "yes";
     else if (/\b(not\s*new|existing|always|chronic|usual|same\s*as\s*before)\b/i.test(text))
       a.isNew = "no";
 
-    // [1] worse than usual?
-    if (/worse\s*(than\s*usual|than\s*normal)|worsening|getting\s*worse/i.test(text))
-      a.isWorseUsual = "yes";
-    else if (/same\s*as\s*usual|not\s*worse|no\s*change/i.test(text))
-      a.isWorseUsual = "no";
+    // [1] fell today?
+    if (/\b(fell|fall(?:en|ing)?|tripp?ed|stumbled|lost.*balance|dropped.*floor)\b/i.test(text))
+      a.fellToday = "yes";
+    else if (/no.*fall|didn.?t\s*fall|haven.?t\s*fall|did\s*not\s*fall/i.test(text))
+      a.fellToday = "no";
 
-    // [2] changed in last day?
-    if (/today|this\s*morning|overnight|last\s*night|just\s*now|within\s*(a\s*)?day|24\s*hour/i.test(text))
-      a.changedLastDay = "yes";
+    // [2] high or low blood pressure?
+    if (/\b(high|low|elevated|abnormal)\s*blood\s*pressure\b|\bhypertension\b|\bhypotension\b|bp\s*(is|was|running)?\s*(high|low)/i.test(text))
+      a.bloodPressure = "yes";
+    else if (/normal.*blood.*pressure|bp.*normal|blood.*pressure.*normal|no.*blood.*pressure.*problem/i.test(text))
+      a.bloodPressure = "no";
 
     return a;
   }
@@ -604,11 +606,11 @@ ${JSON.stringify(skeleton, null, 2)}`;
 
       case "lightheaded":
         if (answers.isNew === null)
-          q.push({ key: "lh_new", question: "Is this dizziness or lightheadedness **new** for you, or something you have had before?" });
-        if (answers.isWorseUsual === null)
-          q.push({ key: "lh_worse", question: "Is it **worse than your usual level**?" });
-        if (answers.changedLastDay === null)
-          q.push({ key: "lh_day", question: "Has it changed or gotten worse in the **last 24 hours**?" });
+          q.push({ key: "lh_new", question: "Is this lightheadedness (or feeling faint) a **new symptom** for you?\n• Yes\n• No\n• Unsure" });
+        if (answers.fellToday === null)
+          q.push({ key: "lh_fell", question: "Did you **fall today**?\n• Yes\n• No\n• Unsure" });
+        if (answers.bloodPressure === null)
+          q.push({ key: "lh_bp", question: "Do you have **high or low blood pressure**?\n• Yes\n• No\n• Unsure" });
         break;
     }
     return q;
@@ -874,9 +876,9 @@ ${JSON.stringify(skeleton, null, 2)}`;
 
         case "lightheaded":
           answerList = [
-            ans.isNew || "no",
-            ans.isWorseUsual || "no",
-            ans.changedLastDay || "no"
+            ans.isNew     !== null ? ans.isNew     : "no",
+            ans.fellToday !== null ? ans.fellToday : "no",
+            ans.bloodPressure !== null ? ans.bloodPressure : "no"
           ];
           result = this.getResultLightheaded(answerList);
           break;
@@ -1028,7 +1030,7 @@ Format as JSON with fields: zone (GREEN/YELLOW/RED), urgency, reasoning, keySymp
    * @returns {string}
    */
   buildAIIndependentTriagePrompt(symptomText) {
-    return `You are a clinical expert specializing in heart failure management. A patient has described their symptoms to you.
+    return `You are a clinical expert specializing in heart failure management. This chatbot is designed exclusively for patients with confirmed heart failure — do NOT ask about HF diagnosis, history, or whether the patient has heart failure. Assume they do.
 
 Your task: decide whether you need more information before triaging, OR if you have enough detail to triage now.
 

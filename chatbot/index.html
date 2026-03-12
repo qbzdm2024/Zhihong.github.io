@@ -294,13 +294,30 @@
       </div>
 
       <div class="settings-group">
-        <label class="settings-label" for="new-source-url">Source URL (optional)</label>
-        <input
-          type="url"
-          id="new-source-url"
-          class="settings-input"
-          placeholder="https://..."
-        />
+        <label class="settings-label" for="new-source-url">Source URL <span style="font-weight:400; color:var(--gray-400)">(optional — paste link to auto-fetch content)</span></label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <input
+            type="url"
+            id="new-source-url"
+            class="settings-input"
+            placeholder="https://..."
+            style="flex:1;"
+          />
+          <button class="btn btn-sm btn-secondary" id="fetch-url-btn" title="Fetch content from URL">Fetch</button>
+        </div>
+        <div id="fetch-url-status" style="font-size:11px; color:var(--gray-400); margin-top:3px; display:none;"></div>
+      </div>
+
+      <div class="settings-group">
+        <label class="settings-label">Upload File <span style="font-weight:400; color:var(--gray-400)">(optional — PDF or text file)</span></label>
+        <div style="display:flex; gap:6px; align-items:center;">
+          <label class="btn btn-sm btn-secondary" style="cursor:pointer; margin:0;">
+            📎 Choose file
+            <input type="file" id="new-source-file" accept=".pdf,.txt,.md" style="display:none;" />
+          </label>
+          <span id="new-source-file-name" style="font-size:12px; color:var(--gray-500); flex:1;">No file chosen</span>
+        </div>
+        <div id="file-load-status" style="font-size:11px; color:var(--gray-400); margin-top:3px; display:none;"></div>
       </div>
 
       <div class="settings-group">
@@ -316,20 +333,20 @@
 
       <div class="settings-group">
         <label class="settings-label" for="new-source-content">
-          Knowledge Content <span style="color:var(--red)">*</span>
-          <span style="font-weight:400; color:var(--gray-400)">(paste text from the source)</span>
+          Knowledge Content
+          <span style="font-weight:400; color:var(--gray-400)">(optional if URL or file provided — or paste text directly)</span>
         </label>
         <textarea
           id="new-source-content"
           class="settings-input"
-          rows="8"
-          placeholder="Paste the relevant text content from this knowledge source here. It will be chunked and indexed for retrieval. You can include guidelines, educational text, symptom lists, medication info, etc."
+          rows="6"
+          placeholder="Paste text here, or use URL fetch / file upload above to auto-fill..."
         ></textarea>
       </div>
 
       <div style="font-size:12px; color:var(--gray-500); background:var(--gray-50); padding:8px 10px; border-radius:6px;">
-        💡 <strong>Tips:</strong> You can paste content from published guidelines, AHA patient handouts, your institution's protocols, or any heart failure educational material.
-        The content will be split into searchable chunks and cited in responses.
+        💡 <strong>Tips:</strong> Use URL fetch, upload a PDF/text file, or paste content directly. For PDFs, text extraction is automatic but may be imperfect — paste the text for best accuracy.
+        Content will be split into searchable chunks and cited in responses.
       </div>
     </div>
     <div class="modal-footer">
