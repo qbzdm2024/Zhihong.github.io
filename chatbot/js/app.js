@@ -9,17 +9,16 @@ class App {
     this.chatEngine = null;
     this.isLoading = false;
     this.lastTriageResults = null;
-    this.triageMode = "both"; // "rule", "ai", or "both"
+    this.triageMode = "rule"; // "rule" | "ai-rule" | "ai-independently"
+    // Triage only fires when ≥1 of the 7 HF triage symptoms is present in the message.
 
-    // Fix #4 & #5: track pending follow-up conversations.
-    // When the AI has asked follow-up questions, we wait for the patient's answer
-    // before running the rule-based triage.
+    // Traffic-light follow-up state (rule / ai-rule modes)
     this.triageFollowUpState = null;
-    // Structure: { originalText: string, pendingQuestions: Array, answered: boolean }
+    // Structure: { originalText: string, detectedSymptoms: string[], answered: boolean }
 
     // AI-independent mode follow-up state (separate from traffic-light follow-ups)
     this.aiIndependentFollowUpState = null;
-    // Structure: { originalText: string, answered: boolean }
+    // Structure: { originalText: string, answered: boolean, roundCount: number }
   }
 
   async initialize() {
@@ -350,7 +349,10 @@ class App {
 
     // AI card
     if (aiResult) {
-      const card = this._buildTriageCard("ai", "🤖 AI Reasoning", aiResult);
+      const label = aiResult.method === "ai_independent"
+        ? "🧠 AI Independent Assessment"
+        : "🤖 AI Rule-Based Reasoning";
+      const card = this._buildTriageCard("ai", label, aiResult);
       comparisonDiv.appendChild(card);
     }
 
@@ -691,15 +693,10 @@ class App {
           extractedAnswers = this._extractAllAnswers(combinedText, detectedSymptoms);
         }
 
-        // AI acknowledges answer and provides education
-        const result = await this.chatEngine.chat(message, { triageMode: true });
+        // Run triage directly — no educational response before showing the triage result
         this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", result.content, result.sources);
-
-        // Run triage with fully combined context
-        if (this.triageMode !== "none") {
-          await this._runAutoTriage(combinedText, detectedSymptoms, extractedAnswers, msgEl);
-        }
+        const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
+        await this._runAutoTriage(combinedText, detectedSymptoms, extractedAnswers, msgEl);
         this.triageFollowUpState = null;
         return;
       }
@@ -707,33 +704,46 @@ class App {
       // ── Case A': Patient answering AI-independent follow-up questions ──────
       if (this.aiIndependentFollowUpState && !this.aiIndependentFollowUpState.answered) {
         this.aiIndependentFollowUpState.answered = true;
+        const currentRound = this.aiIndependentFollowUpState.roundCount || 1;
         const combinedText = this.aiIndependentFollowUpState.originalText +
           "\nPatient's answers to follow-up questions: " + message;
 
-        const result = await this.chatEngine.chat(message, { triageMode: true });
-        this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", result.content, result.sources);
+        // After 3 rounds, force triage — no more follow-up questions allowed
+        const promptText = currentRound >= 3
+          ? combinedText + "\n[Please provide your final triage assessment now — do not ask for any more follow-up questions.]"
+          : combinedText;
 
         this._setLoading(true, "Running AI independent triage...");
+        let aiIndResult;
         try {
-          const aiIndResult = await this.chatEngine.runAIIndependentTriage(combinedText);
-          if (aiIndResult.isFollowUp) {
-            // Still needs more info — ask one more round
-            this.aiIndependentFollowUpState = { originalText: combinedText, answered: false };
-            const qText = (aiIndResult.acknowledgment ? aiIndResult.acknowledgment + "\n\n" : "") +
-              "A few more questions to help me assess your situation:\n\n" +
-              aiIndResult.questions.map((q, i) => `${i + 1}. ${q}`).join("\n");
-            this._addMessage("assistant", qText, []);
-          } else {
-            this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
-            this.aiIndependentFollowUpState = null;
-          }
+          aiIndResult = await this.chatEngine.runAIIndependentTriage(promptText);
         } catch (err) {
-          console.error("AI independent triage error:", err);
+          this._removeTypingIndicator();
+          this._setLoading(false);
+          const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
           this._appendInlineTriage(msgEl, null, null, err.message, null);
           this.aiIndependentFollowUpState = null;
-        } finally {
-          this._setLoading(false);
+          return;
+        }
+        this._removeTypingIndicator();
+        this._setLoading(false);
+
+        if (!aiIndResult.isFollowUp || currentRound >= 3) {
+          // Show triage result (or error if AI still returned follow-up despite force instruction)
+          const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
+          if (!aiIndResult.isFollowUp) {
+            this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
+          } else {
+            this._appendInlineTriage(msgEl, null, null, "Could not complete assessment with available information.", null);
+          }
+          this.aiIndependentFollowUpState = null;
+        } else {
+          // Ask another round of follow-up questions (still within limit)
+          this.aiIndependentFollowUpState = { originalText: combinedText, answered: false, roundCount: currentRound + 1 };
+          const qText = (aiIndResult.acknowledgment ? aiIndResult.acknowledgment + "\n\n" : "") +
+            "A few more questions:\n\n" +
+            aiIndResult.questions.map((q, i) => `**${i + 1}.** ${q}`).join("\n\n");
+          this._addMessage("assistant", qText, []);
         }
         return;
       }
@@ -754,30 +764,32 @@ class App {
         isPersonalReport = this.triageEngine.isPersonalSymptomReport(message);
       }
       // ── AI-independently mode: bypass traffic light entirely ──────────────
-      // Uses its own clinical framework — may ask its own follow-ups then triage.
+      // AI decides its own follow-up questions (max 3 rounds) and triage zone.
       if (this.triageMode === "ai-independently" && isPersonalReport) {
-        const result = await this.chatEngine.chat(message, { triageMode: true });
-        this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", result.content, result.sources);
-
         this._setLoading(true, "Running AI independent triage...");
+        let aiIndResult;
         try {
-          const aiIndResult = await this.chatEngine.runAIIndependentTriage(message);
-          if (aiIndResult.isFollowUp) {
-            // Save state; AI will triage after patient answers
-            this.aiIndependentFollowUpState = { originalText: message, answered: false };
-            const qText = (aiIndResult.acknowledgment ? aiIndResult.acknowledgment + "\n\n" : "") +
-              "To help me assess your symptoms accurately, could you please answer:\n\n" +
-              aiIndResult.questions.map((q, i) => `${i + 1}. ${q}`).join("\n");
-            this._addMessage("assistant", qText, []);
-          } else {
-            this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
-          }
+          aiIndResult = await this.chatEngine.runAIIndependentTriage(message);
         } catch (err) {
-          console.error("AI independent triage error:", err);
-          this._appendInlineTriage(msgEl, null, null, err.message, null);
-        } finally {
+          this._removeTypingIndicator();
           this._setLoading(false);
+          const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
+          this._appendInlineTriage(msgEl, null, null, err.message, null);
+          return;
+        }
+        this._removeTypingIndicator();
+        this._setLoading(false);
+
+        if (aiIndResult.isFollowUp) {
+          // Save state (round 1); triage runs in Case A' after patient answers
+          this.aiIndependentFollowUpState = { originalText: message, answered: false, roundCount: 1 };
+          const qText = (aiIndResult.acknowledgment ? aiIndResult.acknowledgment + "\n\n" : "") +
+            "To assess your symptoms, please answer:\n\n" +
+            aiIndResult.questions.map((q, i) => `**${i + 1}.** ${q}`).join("\n\n");
+          this._addMessage("assistant", qText, []);
+        } else {
+          const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
+          this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
         }
         return;
       }
@@ -796,23 +808,20 @@ class App {
         const neededFollowUps = this.triageEngine.getNeededFollowUps(message, detectedSymptoms, regexAnswers);
 
         if (neededFollowUps.length > 0) {
-          // Case B: missing info — ask follow-up questions; triage runs in Case A after reply
+          // Case B: missing info — ask follow-up questions directly; triage runs in Case A after reply
           this.triageFollowUpState = {
             originalText:     message,
             detectedSymptoms: detectedSymptoms,
             answered:         false
           };
-          const result = await this.chatEngine.chat(message, {
-            triageMode:        false,
-            followUpQuestions: neededFollowUps
-          });
           this._removeTypingIndicator();
-          this._addMessage("assistant", result.content, result.sources);
+          const qText = "To assess your symptoms, I need a few more details:\n\n" +
+            neededFollowUps.map((q, i) => `**${i + 1}.** ${q.question}`).join("\n\n");
+          this._addMessage("assistant", qText, []);
           return;
         }
 
-        // Case C: All info explicitly present.
-        // Now use LLM extraction for accurate triage (understands natural phrasing).
+        // Case C: All info explicitly present — run triage directly, no educational response.
         let extractedAnswers = regexAnswers;
         try {
           extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
@@ -821,9 +830,8 @@ class App {
         } catch (e) {
           console.warn("LLM answer extraction failed, using regex answers:", e.message);
         }
-        const result = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", result.content, result.sources);
+        const msgEl = this._addMessage("assistant", "Symptom assessment:", []);
         await this._runAutoTriage(message, detectedSymptoms, extractedAnswers, msgEl);
         return;
       }
@@ -862,12 +870,12 @@ class App {
     let aiError    = null;
 
     // Rule-based: exact traffic light logic — synchronous, never fails
-    if (this.triageMode !== "ai") {
+    if (this.triageMode !== "ai-rule") {
       ruleResult = this.triageEngine.ruleBasedTriage(extractedAnswers, detectedSymptoms);
     }
 
-    // AI triage: independent clinical reasoning (no rule result injected)
-    if (this.triageMode === "ai" || this.triageMode === "both") {
+    // AI rule-based: traffic light follow-up questions + AI zone decision
+    if (this.triageMode === "ai-rule") {
       this._setLoading(true, "Running AI triage assessment...");
       try {
         aiResult = await this.chatEngine.runAITriage(symptomText, detectedSymptoms);
@@ -928,7 +936,7 @@ class App {
         textExtractedAnswers = this._extractAllAnswers(symptomText, textDetectedSymptoms);
       }
 
-      if (this.triageMode !== "ai" && this.triageMode !== "ai-independently") {
+      if (this.triageMode !== "ai-rule" && this.triageMode !== "ai-independently") {
         if (symptomText && textDetectedSymptoms.length > 0) {
           // Text input takes priority — same pipeline as chat
           ruleResult = this.triageEngine.ruleBasedTriage(textExtractedAnswers, textDetectedSymptoms);
@@ -963,13 +971,13 @@ class App {
             this._renderTriageResults(null, aiIndResult);
           }
         }
-      } else if ((this.triageMode === "ai" || this.triageMode === "both") && this.chatEngine.apiKey) {
+      } else if (this.triageMode === "ai-rule" && this.chatEngine.apiKey) {
         const detectedForAI = textDetectedSymptoms.length > 0
           ? textDetectedSymptoms
           : Object.keys(this._formDataToCategories(formData).extractedAnswers);
         aiResult = await this.chatEngine.runAITriage(triageText, detectedForAI);
-      } else if (this.triageMode === "ai" && !this.chatEngine.apiKey) {
-        this._showToast("API key required for AI triage", "warning");
+      } else if (this.triageMode === "ai-rule" && !this.chatEngine.apiKey) {
+        this._showToast("API key required for AI rule-based triage", "warning");
       }
 
       if (this.triageMode !== "ai-independently") {
