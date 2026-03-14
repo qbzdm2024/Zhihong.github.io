@@ -225,15 +225,41 @@ def load_omaha_system(bucket: str, key: str) -> tuple[pd.DataFrame, pd.DataFrame
     return ss_df, int_df
 
 
+def _find_col(columns: list[str], *keywords: str, exclude: list[str] = None) -> str:
+    """Return first column whose name contains ALL keywords (case-insensitive),
+    excluding any that contain an exclude keyword. Raises clear error if not found."""
+    exclude = [e.lower() for e in (exclude or [])]
+    for c in columns:
+        cl = c.lower()
+        if all(k.lower() in cl for k in keywords):
+            if not any(e in cl for e in exclude):
+                return c
+    raise ValueError(
+        f"Could not find column matching keywords={keywords}, exclude={exclude}. "
+        f"Available columns: {columns}"
+    )
+
+
 def build_ss_documents(ss_df: pd.DataFrame) -> list[dict]:
     """
     Each document represents one (Problem, Sign/Symptom) pair.
     The text field is used for embedding.
     """
     docs = []
-    prob_col = next(c for c in ss_df.columns if "Problem" in c and "definition" not in c.lower() and "Classification" not in c)
-    ss_col   = next(c for c in ss_df.columns if "SIGNS" in c.upper() or "SYMPTOM" in c.upper())
-    def_col  = next((c for c in ss_df.columns if "Definition" in c or "definition" in c), None)
+    log.info(f"Sign/symptom sheet columns: {list(ss_df.columns)}")
+
+    # "Problems of the Problem Classification Scheme" — matches "problem" but
+    # exclude "domain definition" and "problem definition" (not "classification")
+    prob_col = _find_col(ss_df.columns, "problem", exclude=["definition"])
+    ss_col   = _find_col(ss_df.columns, "signs")
+    # Definition column — prefer the first one found, skip "domain definition"
+    def_col  = next(
+        (c for c in ss_df.columns
+         if "definition" in c.lower() and "domain" not in c.lower()
+         and "problem" not in c.lower()),
+        None
+    )
+    log.info(f"Using columns → problem: '{prob_col}' | ss: '{ss_col}' | def: '{def_col}'")
 
     for _, row in ss_df.iterrows():
         domain  = str(row.get("Domain", "")).strip()
