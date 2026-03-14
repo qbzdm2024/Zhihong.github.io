@@ -1,1 +1,2368 @@
 
+import pandas as pd
+import torch
+from haystack import Pipeline, Document, component
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.components.embedders import SentenceTransformersTextEmbedder, SentenceTransformersDocumentEmbedder
+from haystack.components.writers import DocumentWriter
+from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
+from haystack.components.builders import PromptBuilder
+from haystack.components.generators import OpenAIGenerator
+from haystack.utils import ComponentDevice
+from google.colab import drive, userdata
+from haystack.utils import Secret
+from typing import List
+from haystack.components.embedders import OpenAIDocumentEmbedder
+
+# Set OpenAI API key
+api_key = Secret.from_token(userdata.get('CU_OPENAI_API_KEY'))
+
+# Configuration
+FILE_PATH = '/content/drive/MyDrive/Omaha.xlsx'
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+#EMBEDDING_MODEL = "Snowflake/snowflake-arctic-embed-l"
+LLM_MODEL = "o3-mini"
+
+# Initialize document store
+problem_document_store = InMemoryDocumentStore()
+
+# 1️⃣ Load Data
+def load_data(file_path):
+    problem_data = pd.read_excel(file_path, sheet_name='Sheet1')
+    conversation_data = pd.read_excel(file_path, sheet_name='Sheet3')
+    return problem_data, conversation_data
+
+problem_data, conversation_data = load_data(FILE_PATH)
+
+# 2️⃣ Prepare Documents with Metadata
+def prepare_problem_documents(problem_data):
+    problem_documents = []
+    for _, row in problem_data.iterrows():
+        doc = Document(
+            content=f"""Domain: {row['Domain']}
+Domain Definition: {row['Domain definition']}
+Problem: {row['Problems of the Problem Classification Scheme']}
+Problem Definition: {row['Problem definition']}
+Signs/Symptoms: {row['SIGNS/SYMPTOMS OF ACTUAL']}""",
+            meta={
+                "type": "problem",
+                "domain": row["Domain"],
+                "domain_definition": row["Domain definition"],
+                "problem": row["Problems of the Problem Classification Scheme"],
+                "problem_definition": row["Problem definition"],
+                "signs_or_symptoms": row["SIGNS/SYMPTOMS OF ACTUAL"],
+                "sign/symptom_definition": row['Definition/example of signs/symptoms']
+            }
+        )
+        problem_documents.append(doc)
+    return problem_documents
+
+problem_documents = prepare_problem_documents(problem_data)
+
+
+# Define a simple function to generate embeddings using OpenAI's API
+def generate_openai_embeddings(documents, model="text-embedding-3-small"):
+    for doc in documents:
+        text = doc.content.replace("\n", " ")  # Ensure the text is clean
+        embedding = openai.Embedding.create(input=[text], model=model)['data'][0]['embedding']
+        doc.embedding = embedding  # Store the embedding in the document object
+    return documents
+
+# Indexing pipeline with OpenAI embeddings
+def index_documents(document_store, documents):
+    indexing_pipeline = Pipeline()
+
+    # Embed documents using the simple function
+    print("🔄 Generating embeddings for documents...")
+    documents = generate_openai_embeddings(documents)
+
+    # Write documents to the document store
+    writer = DocumentWriter(document_store=document_store)
+    indexing_pipeline.add_component("writer", writer)
+    indexing_pipeline.run({"writer": {"documents": documents}})
+
+    print("✅ Indexing completed.")
+
+# 3️⃣ Indexing Pipeline with Embeddings
+def index_documents(document_store, documents):
+    indexing_pipeline = Pipeline()
+
+    document_embedder = SentenceTransformersDocumentEmbedder(
+        model=EMBEDDING_MODEL,
+        device=ComponentDevice.from_str('cuda' if torch.cuda.is_available() else 'cpu'),
+        trust_remote_code=True
+    )
+
+    writer = DocumentWriter(document_store=document_store)
+
+    indexing_pipeline.add_component("embedder", document_embedder)
+    indexing_pipeline.add_component("writer", writer)
+    indexing_pipeline.connect("embedder", "writer")
+
+    #print("🔄 Indexing documents with embeddings...")
+
+    # Embed and store documents
+    indexing_pipeline.run({"embedder": {"documents": documents}})
+
+    #print("✅ Indexing completed.")
+
+# Index documents with embeddings
+index_documents(problem_document_store, problem_documents)
+
+# Verify documents are indexed
+#print("✅ Total documents in store:", problem_document_store.count_documents())
+
+# 4️⃣ Prompt Template for Generator
+
+problem_prompt_template = """
+Analyze the healthcare query provided and identify the MOST RELEVANT Omaha System classification.
+
+Instructions:
+1. Carefully review the query for healthcare-related issues.
+2. Select the MOST RELEVANT options from the provided Omaha System classifications that best matches the query's domain, problem, and signs/symptoms.
+3. Use ONLY the exact terminology from the chosen Omaha System option.
+4. If no healthcare problem is evident or if the query doesn't closely align with any option, respond with "No sufficient information available."
+
+Query: {{query}}
+
+Options:
+{% for doc in documents %}
+{{loop.index}}.
+- Domain: {{ doc.meta.get('domain', 'N/A') }}
+- Problem: {{ doc.meta.get('problem', 'N/A') }}
+- Signs/Symptoms: {{ doc.meta.get('signs_or_symptoms', 'N/A') }}
+{% endfor %}
+
+Response format:
+If a relevant match is found, provide ONLY ONE classification:
+Domain: [Exact match]
+Problem: [Exact match]
+Signs/Symptoms: [Exact match]
+
+If no healthcare problem is identified or no close match is found:
+No sufficient information available
+
+"""
+
+
+
+# 5️⃣ Create Generator
+#def create_generator(temperature=0.1, top_p=0.7):
+#    return OpenAIGenerator(
+#        model=LLM_MODEL,
+#        api_key=api_key,
+#        generation_kwargs={"temperature": temperature, "top_p": top_p}
+#    )
+
+#generator = create_generator(temperature=0.1, top_p=0.6)
+# 5️⃣ Create Generator (or Embedder)
+def create_generator():
+    return OpenAIGenerator(
+        model=LLM_MODEL,
+        api_key=api_key
+    )
+
+# Initialize the generator
+generator = create_generator()
+
+
+
+# 6️⃣ Create Query Pipeline with Debug Component
+@component
+class DebugComponent:
+    def __init__(self, name):
+        self.name = name
+
+    @component.output_types(documents=List[Document], embedding=List[float], prompt=str)
+    def run(self, documents: List[Document] = None, embedding: List[float] = None, prompt: str = None, **kwargs):
+        # Removing print statements to silence the debugging output
+        # if documents:
+        #     print(f"Number of documents: {len(documents)}")
+        #     for i, doc in enumerate(documents, 1):
+        #         print(f"\nDocument {i} Full Content:")
+        #         print(f"Content: {doc.content}")
+        #         print("Metadata:")
+        #         for key, value in doc.meta.items():
+        #             print(f"  {key}: {value}")
+        # if embedding:
+        #     print(f"\nEmbedding: {embedding[:5]}... (truncated)")
+        # if prompt:
+        #     print(f"\nPrompt: {prompt}")
+        # for key, value in kwargs.items():
+        #     print(f"\n{key}: {value}")
+        return {"documents": documents, "embedding": embedding, "prompt": prompt, **kwargs}
+
+
+def create_debug_pipeline(document_store):
+    pipeline = Pipeline()
+
+    text_embedder = SentenceTransformersTextEmbedder(model=EMBEDDING_MODEL)
+    retriever = InMemoryEmbeddingRetriever(document_store=document_store, top_k=15)
+    prompt_builder = PromptBuilder(template=problem_prompt_template)
+    generator = create_generator()
+
+    pipeline.add_component("text_embedder", text_embedder)
+    pipeline.add_component("debug_embedder", DebugComponent("Embedder"))
+    pipeline.add_component("retriever", retriever)
+    pipeline.add_component("debug_retriever", DebugComponent("Retriever"))
+    pipeline.add_component("prompt_builder", prompt_builder)
+    pipeline.add_component("debug_prompt_builder", DebugComponent("Prompt Builder"))
+    pipeline.add_component("generator", generator)
+
+    pipeline.connect("text_embedder", "debug_embedder")
+    pipeline.connect("debug_embedder", "retriever")
+    pipeline.connect("retriever", "debug_retriever")
+    pipeline.connect("debug_retriever", "prompt_builder")
+    pipeline.connect("prompt_builder", "debug_prompt_builder")
+    pipeline.connect("debug_prompt_builder", "generator")
+
+    return pipeline, retriever
+
+
+
+
+debug_pipeline, retriever = create_debug_pipeline(problem_document_store)
+
+
+# 7️⃣ Test the Full Pipeline
+def test_debug_pipeline(query):
+    result = debug_pipeline.run({"text_embedder": {"text": query}, "prompt_builder": {"query": query}})
+
+    # Check if any documents were retrieved
+    if 'debug_retriever' in result and 'documents' in result['debug_retriever']:
+        retrieved_documents = result['debug_retriever']['documents']
+        if not retrieved_documents:
+            # No documents retrieved, but no output is printed
+            pass
+        for i, doc in enumerate(retrieved_documents, 1):
+            # This loop now contains a pass, which is a placeholder
+            pass
+    else:
+        # No documents found in debug_retriever output, but no output is printed
+        pass
+
+    # Check for replies from the generator
+    if 'generator' in result and 'replies' in result['generator'] and result['generator']['replies']:
+        # A reply is available, but it's not printed
+        pass
+    else:
+        # No answer generated, but no output is printed
+        pass
+
+    return result
+
+import pandas as pd
+import torch
+from haystack import Pipeline, Document, component
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.components.embedders import SentenceTransformersTextEmbedder, SentenceTransformersDocumentEmbedder
+from haystack.components.writers import DocumentWriter
+from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
+from haystack.components.builders import PromptBuilder
+from haystack.components.generators import OpenAIGenerator
+from haystack.utils import ComponentDevice
+from google.colab import drive, userdata
+from haystack.utils import Secret
+from typing import List
+from haystack.components.embedders import OpenAIDocumentEmbedder
+
+# Set OpenAI API key - Only needed for the generator
+api_key = Secret.from_token(userdata.get('CU_OPENAI_API_KEY'))
+
+# Configuration
+FILE_PATH = '/content/drive/MyDrive/Omaha/Omaha.xlsx'
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2" # Use Sentence Transformers
+LLM_MODEL = "gpt-4o-mini"
+
+# Initialize document store - No embedding_dim needed here
+problem_document_store = InMemoryDocumentStore()
+
+# 1️⃣ Load Data
+def load_data(file_path):
+    problem_data = pd.read_excel(file_path, sheet_name='Sheet1')
+    conversation_data = pd.read_excel(file_path, sheet_name='Sheet3')
+    return problem_data, conversation_data
+
+problem_data, conversation_data = load_data(FILE_PATH)
+
+# 2️⃣ Prepare Documents with Metadata
+def prepare_problem_documents(problem_data):
+    problem_documents = []
+    for _, row in problem_data.iterrows():
+        doc = Document(
+            content=f"""Domain: {row['Domain']}
+Domain Definition: {row['Domain definition']}
+Problem: {row['Problems of the Problem Classification Scheme']}
+Problem Definition: {row['Problem definition']}
+Signs/Symptoms: {row['SIGNS/SYMPTOMS OF ACTUAL']}""",
+            meta={
+                "type": "problem",
+                "domain": row["Domain"],
+                "domain_definition": row["Domain definition"],
+                "problem": row["Problems of the Problem Classification Scheme"],
+                "problem_definition": row["Problem definition"],
+                "signs_or_symptoms": row["SIGNS/SYMPTOMS OF ACTUAL"],
+                "sign/symptom_definition": row['Definition/example of signs/symptoms']
+            }
+        )
+        problem_documents.append(doc)
+    return problem_documents
+
+problem_documents = prepare_problem_documents(problem_data)
+
+
+# 3️⃣ Indexing Pipeline with Embeddings - Use Sentence Transformers
+def index_documents(document_store, documents):
+    indexing_pipeline = Pipeline()
+
+    # Use SentenceTransformersDocumentEmbedder for indexing
+    document_embedder = SentenceTransformersDocumentEmbedder(
+        model=EMBEDDING_MODEL,
+        device=ComponentDevice.from_str('cuda' if torch.cuda.is_available() else 'cpu'),
+        trust_remote_code=True
+    )
+
+    writer = DocumentWriter(document_store=document_store)
+
+    indexing_pipeline.add_component("embedder", document_embedder)
+    indexing_pipeline.add_component("writer", writer)
+    indexing_pipeline.connect("embedder.documents", "writer.documents")
+
+    print("🔄 Indexing documents with embeddings...")
+
+    indexing_pipeline.run({"embedder": {"documents": documents}})
+
+    print("✅ Indexing completed.")
+
+
+# Index documents with embeddings
+index_documents(problem_document_store, problem_documents)
+
+
+# 4️⃣ Prompt Template for Generator
+
+
+
+
+# 5️⃣ Create Generator
+#def create_generator():
+#    return OpenAIGenerator(
+#        model=LLM_MODEL,
+#        api_key=api_key  # Pass the API key here
+#    )
+#generator = create_generator()
+# 5️⃣ Create Generator
+def create_generator(temperature=0.1, top_p=0.7):
+    return OpenAIGenerator(
+        model=LLM_MODEL,
+        api_key=api_key,
+        generation_kwargs={"temperature": temperature, "top_p": top_p}
+    )
+# Initialize the generator
+generator = create_generator(temperature=0.05, top_p=0.6)
+# Initialize the generator
+problem_prompt_template = """
+Analyze the healthcare query provided below and identify the MOST RELEVANT Omaha System classification.
+
+Instructions:
+1. Review the query for any direct mentions of healthcare-related issues across these domains:
+   - Environmental Domain (e.g., environment safety, insurance)
+   - Psychological Domain (e.g., feelings of fatigue, low mood)
+   - Physiological Domain
+   - Health-related Behaviors Domain (e.g., nutrition, medication regimen)
+2. If the problem pertains to issues affecting others (e.g., family members, children) or describes general environmental or administrative issues (e.g., insurance paperwork, scheduling, date inquiries) that do not directly affect the patient him/herself, ignore it.
+3. From the provided options, select the single MOST RELEVANT classification that best matches the query’s domain, problem, and signs/symptoms.
+4. IMPORTANT: Your final answer MUST USE THE EXACT WORDING from one of the provided options without any modifications, rephrasing, or synonyms. For example, if the query uses a synonym like "swollen," you MUST map it to "edema" exactly as it appears in the options.
+5. EXTRA RULE: If the query contains "swollen" or any variant (e.g., "swelling"), choose the option that lists "edema" with the "Circulation" problem in the Signs/Symptoms field. Do not substitute any other term such as "inflammation."
+6. DO NOT OVERINFER. If the query does not clearly describe a healthcare problem, lacks sufficient information to support the presence of a healthcare issue, or if no option closely aligns with the query, respond with "No sufficient information available." For example, vague or ambiguous statements such as "I didn't know. I heard voices." should not be interpreted as a healthcare problem.
+7. If the query is phrased as a question, assume that no healthcare problem can be confirmed and respond with "No sufficient information available."
+8. If the query includes a blood pressure reading, glucose level, or any other medical measurement, determine whether the value is abnormal. If abnormal, respond with the corresponding problem mapped to the Omaha System; if normal, respond with "No sufficient information available."
+9. NORMAL BEHAVIOR RULE: If the query describes typical, expected behavior or general administrative/healthcare information (e.g., exercising, working late, needing rest or sleep, test costs, scheduling, date inquiries, availability, payment details) without any indication of abnormal symptoms, distress, or dysfunction, then no healthcare problem is identified. However, if the query simply states a symptom (e.g., "I am tired today") without additional context indicating normal behavior, treat it as a potential healthcare problem only if supported by corresponding classification options.
+10. NEGATIVE QUERY RULE: If the overall tone or content of the query is purely administrative, factual, or routine (e.g., inquiries about dates, insurance paperwork, normal vital sign values, casual remarks about sleep or work schedules) or includes negative phrasing that does not describe a specific abnormal health condition, respond with "No sufficient information available."
+
+11. CHAIN-OF-THOUGHT: In your final output, include a brief chain-of-thought explanation immediately following your classification. This explanation should outline the key reasoning steps without revealing sensitive internal processing details.
+
+Query: {{query}}
+
+Options:
+{% for doc in documents %}
+{{ loop.index }}.
+- Domain: {{ doc.meta.get('domain', 'N/A') }}
+- Problem: {{ doc.meta.get('problem', 'N/A') }}
+- Signs/Symptoms: {{ doc.meta.get('signs_or_symptoms', 'N/A') }}
+{% endfor %}
+
+Response format:
+If a relevant match is found, provide ONLY ONE classification using the exact wording from the selected option in this format:
+Domain: [Exact match as provided]
+Problem: [Exact match as provided]
+Signs/Symptoms: [Exact match as provided]
+Chain-of-Thought: [A brief explanation of the reasoning process.]
+
+If no healthcare problem is identified or no close match is found:
+No sufficient information available
+
+Example Queries and Responses:
+Example 1:
+Query: "when I got back from my walk today; it is 145/92."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal blood pressure reading
+Chain-of-Thought: The query mentioned a high blood pressure reading (145/92, which is above the normal range), directly mapping to "abnormal blood pressure reading" under the Circulation option.
+
+Example 2:
+Query: "You have the shower?"
+Response:
+No sufficient information available
+Chain-of-Thought: The query is phrased as a question, so no specific healthcare-related information can be confirmed.
+
+Example 3:
+Query: "I can not breath at night."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal breath pattern
+Chain-of-Thought: "cannot breath" here is interpreted as an irregular or abnormal breathing pattern rather than a complete inability to breathe independently (which would typically require mechanical assistance). Therefore, the best matching option is "abnormal breath pattern." Do not change the wording.
+
+
+"""
+
+
+# 6️⃣ Create Query Pipeline with Debug Component
+@component
+class DebugComponent:
+    def __init__(self, name):
+        self.name = name
+
+    @component.output_types(documents=List[Document], embedding=List[float], prompt=str)
+    def run(self, documents: List[Document] = None, embedding: List[float] = None, prompt: str = None, **kwargs):
+        return {"documents": documents, "embedding": embedding, "prompt": prompt, **kwargs}
+
+
+def create_debug_pipeline(document_store):
+    pipeline = Pipeline()
+
+    # Use SentenceTransformersTextEmbedder for queries
+    text_embedder = SentenceTransformersTextEmbedder(model=EMBEDDING_MODEL,
+        device=ComponentDevice.from_str('cuda' if torch.cuda.is_available() else 'cpu'),
+        trust_remote_code=True)
+    retriever = InMemoryEmbeddingRetriever(document_store=document_store, top_k=15)
+    prompt_builder = PromptBuilder(template=problem_prompt_template)
+    generator = create_generator()
+
+    pipeline.add_component("text_embedder", text_embedder)
+    pipeline.add_component("debug_embedder", DebugComponent("Embedder"))
+    pipeline.add_component("retriever", retriever)
+    pipeline.add_component("debug_retriever", DebugComponent("Retriever"))
+    pipeline.add_component("prompt_builder", prompt_builder)
+    pipeline.add_component("debug_prompt_builder", DebugComponent("Prompt Builder"))
+    pipeline.add_component("generator", generator)
+
+    pipeline.connect("text_embedder.embedding", "debug_embedder")
+    pipeline.connect("debug_embedder", "retriever")
+    pipeline.connect("retriever", "debug_retriever")
+    pipeline.connect("debug_retriever", "prompt_builder")
+    pipeline.connect("prompt_builder", "debug_prompt_builder")
+    pipeline.connect("debug_prompt_builder", "generator")
+
+    return pipeline, retriever
+
+debug_pipeline, retriever = create_debug_pipeline(problem_document_store)
+
+
+# 7️⃣ Test the Full Pipeline
+def test_debug_pipeline(query):
+    result = debug_pipeline.run({"text_embedder": {"text": query}, "prompt_builder": {"query": query}})
+    return result
+
+
+import pandas as pd
+import torch
+from haystack import Pipeline, Document, component
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.components.embedders import SentenceTransformersTextEmbedder, SentenceTransformersDocumentEmbedder
+from haystack.components.writers import DocumentWriter
+from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
+from haystack.components.builders import PromptBuilder
+from haystack.components.generators import OpenAIGenerator
+from haystack.utils import ComponentDevice
+from google.colab import drive, userdata
+from haystack.utils import Secret
+from typing import List
+from haystack.components.embedders import OpenAIDocumentEmbedder
+
+# Set OpenAI API key - Only needed for the generator
+api_key = Secret.from_token(userdata.get('CU_OPENAI_API_KEY'))
+
+# Configuration
+FILE_PATH = '/content/drive/MyDrive/Omaha/Omaha.xlsx'
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2" # Use Sentence Transformers
+LLM_MODEL = "gpt-4o-mini"
+
+# Initialize document store - No embedding_dim needed here
+problem_document_store = InMemoryDocumentStore()
+
+# 1️⃣ Load Data
+def load_data(file_path):
+    problem_data = pd.read_excel(file_path, sheet_name='Sheet1')
+    conversation_data = pd.read_excel(file_path, sheet_name='Sheet3')
+    return problem_data, conversation_data
+
+problem_data, conversation_data = load_data(FILE_PATH)
+
+# 2️⃣ Prepare Documents with Metadata
+def prepare_problem_documents(problem_data):
+    problem_documents = []
+    for _, row in problem_data.iterrows():
+        doc = Document(
+            content=f"""Domain: {row['Domain']}
+Domain Definition: {row['Domain definition']}
+Problem: {row['Problems of the Problem Classification Scheme']}
+Problem Definition: {row['Problem definition']}
+Signs/Symptoms: {row['SIGNS/SYMPTOMS OF ACTUAL']}""",
+            meta={
+                "type": "problem",
+                "domain": row["Domain"],
+                "domain_definition": row["Domain definition"],
+                "problem": row["Problems of the Problem Classification Scheme"],
+                "problem_definition": row["Problem definition"],
+                "signs_or_symptoms": row["SIGNS/SYMPTOMS OF ACTUAL"],
+                "sign/symptom_definition": row['Definition/example of signs/symptoms']
+            }
+        )
+        problem_documents.append(doc)
+    return problem_documents
+
+problem_documents = prepare_problem_documents(problem_data)
+
+
+# 3️⃣ Indexing Pipeline with Embeddings - Use Sentence Transformers
+def index_documents(document_store, documents):
+    indexing_pipeline = Pipeline()
+
+    # Use SentenceTransformersDocumentEmbedder for indexing
+    document_embedder = SentenceTransformersDocumentEmbedder(
+        model=EMBEDDING_MODEL,
+        device=ComponentDevice.from_str('cuda' if torch.cuda.is_available() else 'cpu'),
+        trust_remote_code=True
+    )
+
+    writer = DocumentWriter(document_store=document_store)
+
+    indexing_pipeline.add_component("embedder", document_embedder)
+    indexing_pipeline.add_component("writer", writer)
+    indexing_pipeline.connect("embedder.documents", "writer.documents")
+
+    print("🔄 Indexing documents with embeddings...")
+
+    indexing_pipeline.run({"embedder": {"documents": documents}})
+
+    print("✅ Indexing completed.")
+
+
+# Index documents with embeddings
+index_documents(problem_document_store, problem_documents)
+
+
+# 4️⃣ Prompt Template for Generator
+
+
+
+
+# 5️⃣ Create Generator
+#def create_generator():
+#    return OpenAIGenerator(
+#        model=LLM_MODEL,
+#        api_key=api_key  # Pass the API key here
+#    )
+#generator = create_generator()
+# 5️⃣ Create Generator
+def create_generator(temperature=0.1, top_p=0.7):
+    return OpenAIGenerator(
+        model=LLM_MODEL,
+        api_key=api_key,
+        generation_kwargs={"temperature": temperature, "top_p": top_p}
+    )
+# Initialize the generator
+generator = create_generator(temperature=0.05, top_p=0.6)
+# Initialize the generator
+problem_prompt_template = """
+Analyze the healthcare query provided below and identify the MOST RELEVANT Omaha System classification.
+
+Instructions:
+1. Review the query for any direct mentions of healthcare-related issues across these domains:
+   - Environmental Domain (e.g., environment safety, insurance)
+   - Psychological Domain (e.g., feelings of fatigue, low mood)
+   - Physiological Domain
+   - Health-related Behaviors Domain (e.g., nutrition, medication regimen)
+2. If the problem pertains to issues affecting others (e.g., family members, children) or describes general environmental or administrative issues (e.g., insurance paperwork, scheduling, date inquiries) that do not directly affect the patient him/herself, ignore it.
+3. From the provided options, select the single MOST RELEVANT classification that best matches the query’s domain, problem, and signs/symptoms.
+4. IMPORTANT: Your final answer MUST USE THE EXACT WORDING from one of the provided options without any modifications, rephrasing, or synonyms. For example, if the query uses a synonym like "swollen," you MUST map it to "edema" exactly as it appears in the options.
+5. EXTRA RULE: If the query contains "swollen" or any variant (e.g., "swelling"), choose the option that lists "edema" with the "Circulation" problem in the Signs/Symptoms field. Do not substitute any other term such as "inflammation."
+6. DO NOT OVERINFER. If the query does not clearly describe a healthcare problem, lacks sufficient information to support the presence of a healthcare issue, or if no option closely aligns with the query, respond with "No sufficient information available." For example, vague or ambiguous statements such as "I didn't know. I heard voices." should not be interpreted as a healthcare problem.
+7. If the query is phrased as a question, assume that no healthcare problem can be confirmed and respond with "No sufficient information available."
+8. If the query includes a blood pressure reading, glucose level, or any other medical measurement, determine whether the value is abnormal. If abnormal, respond with the corresponding problem mapped to the Omaha System; if normal, respond with "No sufficient information available."
+9. NORMAL BEHAVIOR RULE: If the query describes typical, expected behavior or general administrative/healthcare information (e.g., exercising, working late, needing rest or sleep, test costs, scheduling, date inquiries, availability, payment details) without any indication of abnormal symptoms, distress, or dysfunction, then no healthcare problem is identified. However, if the query simply states a symptom (e.g., "I am tired today") without additional context indicating normal behavior, treat it as a potential healthcare problem only if supported by corresponding classification options.
+10. NEGATIVE QUERY RULE: If the overall tone or content of the query is purely administrative, factual, or routine (e.g., inquiries about dates, insurance paperwork, normal vital sign values, casual remarks about sleep or work schedules) or includes negative phrasing that does not describe a specific abnormal health condition, respond with "No sufficient information available."
+
+11. CHAIN-OF-THOUGHT: In your final output, include a brief chain-of-thought explanation immediately following your classification. This explanation should outline the key reasoning steps without revealing sensitive internal processing details.
+
+Query: {{query}}
+
+Options:
+{% for doc in documents %}
+{{ loop.index }}.
+- Domain: {{ doc.meta.get('domain', 'N/A') }}
+- Problem: {{ doc.meta.get('problem', 'N/A') }}
+- Signs/Symptoms: {{ doc.meta.get('signs_or_symptoms', 'N/A') }}
+{% endfor %}
+
+Response format:
+If a relevant match is found, provide ONLY ONE classification using the exact wording from the selected option in this format:
+Domain: [Exact match as provided]
+Problem: [Exact match as provided]
+Signs/Symptoms: [Exact match as provided]
+Chain-of-Thought: [A brief explanation of the reasoning process.]
+
+If no healthcare problem is identified or no close match is found:
+No sufficient information available
+
+Example Queries and Responses:
+Example 1:
+Query: "when I got back from my walk today; it is 145/92."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal blood pressure reading
+Chain-of-Thought: The query mentioned a high blood pressure reading (145/92, which is above the normal range), directly mapping to "abnormal blood pressure reading" under the Circulation option.
+
+Example 2:
+Query: "You have the shower?"
+Response:
+No sufficient information available
+Chain-of-Thought: The query is phrased as a question, so no specific healthcare-related information can be confirmed.
+
+Example 3:
+Query: "I can not breath at night."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal breath pattern
+Chain-of-Thought: "cannot breath" here is interpreted as an irregular or abnormal breathing pattern rather than a complete inability to breathe independently (which would typically require mechanical assistance). Therefore, the best matching option is "abnormal breath pattern." Do not change the wording.
+
+
+"""
+
+
+# 6️⃣ Create Query Pipeline with Debug Component
+@component
+class DebugComponent:
+    def __init__(self, name):
+        self.name = name
+
+    @component.output_types(documents=List[Document], embedding=List[float], prompt=str)
+    def run(self, documents: List[Document] = None, embedding: List[float] = None, prompt: str = None, **kwargs):
+        print(f"\n--- Debug: {self.name} ---")
+        if documents:
+            print(f"Number of documents: {len(documents)}")
+            for i, doc in enumerate(documents, 1):
+                print(f"\nDocument {i} Full Content:")
+                print(f"Content: {doc.content}")
+                print("Metadata:")
+                for key, value in doc.meta.items():
+                    print(f"  {key}: {value}")
+        if embedding:
+            print(f"\nEmbedding: {embedding[:5]}... (truncated)")
+        if prompt:
+            print(f"\nPrompt: {prompt}")
+        for key, value in kwargs.items():
+            print(f"\n{key}: {value}")
+        return {"documents": documents, "embedding": embedding, "prompt": prompt, **kwargs}
+
+def create_debug_pipeline(document_store):
+    pipeline = Pipeline()
+
+    text_embedder = SentenceTransformersTextEmbedder(model=EMBEDDING_MODEL)
+    retriever = InMemoryEmbeddingRetriever(document_store=document_store, top_k=15)
+    prompt_builder = PromptBuilder(template=problem_prompt_template)
+    generator = create_generator()
+
+    pipeline.add_component("text_embedder", text_embedder)
+    pipeline.add_component("debug_embedder", DebugComponent("Embedder"))
+    pipeline.add_component("retriever", retriever)
+    pipeline.add_component("debug_retriever", DebugComponent("Retriever"))
+    pipeline.add_component("prompt_builder", prompt_builder)
+    pipeline.add_component("debug_prompt_builder", DebugComponent("Prompt Builder"))
+    pipeline.add_component("generator", generator)
+
+    pipeline.connect("text_embedder", "debug_embedder")
+    pipeline.connect("debug_embedder", "retriever")
+    pipeline.connect("retriever", "debug_retriever")
+    pipeline.connect("debug_retriever", "prompt_builder")
+    pipeline.connect("prompt_builder", "debug_prompt_builder")
+    pipeline.connect("debug_prompt_builder", "generator")
+
+    return pipeline, retriever
+
+
+
+
+debug_pipeline, retriever = create_debug_pipeline(problem_document_store)
+
+
+# 7️⃣ Test the Full Pipeline
+def test_debug_pipeline(query):
+    result = debug_pipeline.run({"text_embedder": {"text": query}, "prompt_builder": {"query": query}})
+
+    print("\n------ Retrieved Documents ------")
+    if 'debug_retriever' in result and 'documents' in result['debug_retriever']:
+        retrieved_documents = result['debug_retriever']['documents']
+        if retrieved_documents is not None:
+            for i, doc in enumerate(retrieved_documents, 1):
+                print(f"\nDocument {i}:")
+                print(f"Content: {doc.content}")
+                print("Metadata:")
+                for key, value in doc.meta.items():
+                    print(f"  {key}: {value}")
+        else:
+            print("Retrieved documents is None")
+    else:
+        print("No 'documents' key found in debug_retriever output.")
+
+    print("\n------ Selected Answer ------")
+    if 'generator' in result and 'replies' in result['generator'] and result['generator']['replies']:
+        print(result["generator"]["replies"][0])
+    else:
+        print("No answer generated.")
+
+    return result
+
+
+problem_prompt_template = """
+Analyze the healthcare query provided below and identify the MOST RELEVANT Omaha System classification.
+
+Instructions:
+1. Review the query for any direct mentions of healthcare-related issues across these domains:
+   - Environmental Domain (e.g., environment safety, insurance)
+   - Psychological Domain (e.g., feelings of fatigue, low mood)
+   - Physiological Domain
+   - Health-related Behaviors Domain (e.g., nutrition, medication regimen)
+2. If the problem pertains to issues affecting others or general environmental issues (e.g., COVID-19, flu) that do not directly affect the patient, ignore it.
+3. From the provided options, select the single MOST RELEVANT classification that best matches the query’s domain, problem, and signs/symptoms.
+4. IMPORTANT: Your final answer MUST USE THE EXACT WORDING from one of the provided options without any modifications, rephrasing, or synonyms. For example, if the query uses a synonym like "swollen," you MUST map it to "edema" exactly as it appears in the options.
+5. EXTRA RULE: If the query contains "swollen" or any variant (e.g., "swelling"), choose the option that lists "edema" with the "Circulation" problem in the Signs/Symptoms field. Do not substitute any other term such as "inflammation."
+6. Do not overinfer. If the query does not clearly describe a healthcare problem or if no option closely aligns with the query, respond with "No sufficient information available."
+7. If the query is phrased as a question, assume that no healthcare problem can be confirmed and respond with "No sufficient information available."
+8. If the query includes a blood pressure reading, glucose level, or any other medical measurement, determine whether the value is abnormal. If abnormal, respond with the corresponding problem mapped to the Omaha System; if normal, respond with "No sufficient information available."
+9. NORMAL BEHAVIOR RULE: If the query describes typical, expected behavior or general administrative/healthcare information (e.g., exercising, working late, needing rest or sleep, test costs, availability, payment details) without any indication of abnormal symptoms, distress, or dysfunction, then no healthcare problem is identified. However, if the query simply states a symptom (e.g., "I am tired today") without additional context indicating normal behavior, treat it as a potential healthcare problem. In such cases, if there is a corresponding classification option (for instance, "Mental health: somatic complaints/fatigue"), use that option.
+
+Query: {{query}}
+
+Options:
+{% for doc in documents %}
+{{ loop.index }}.
+- Domain: {{ doc.meta.get('domain', 'N/A') }}
+- Problem: {{ doc.meta.get('problem', 'N/A') }}
+- Signs/Symptoms: {{ doc.meta.get('signs_or_symptoms', 'N/A') }}
+{% endfor %}
+
+Response format:
+If a relevant match is found, provide ONLY ONE classification using the exact wording from the selected option in this format:
+Domain: [Exact match as provided]
+Problem: [Exact match as provided]
+Signs/Symptoms: [Exact match as provided]
+
+If no healthcare problem is identified or no close match is found:
+No sufficient information available
+
+Example Queries and Responses:
+
+Example 1:
+Query: "when I got back from my walk today; it is 145/92."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal blood pressure reading
+Chain-of-Thought: The query mentioned a high blood pressure reading (145/92, which is above the normal range), directly mapping to "abnormal blood pressure reading" under the Circulation option.
+
+Example 2:
+Query: "You have the shower?"
+Response:
+No sufficient information available
+Chain-of-Thought: The query is phrased as a question, so no specific healthcare-related information can be confirmed.
+
+Example 3:
+Query: "I can not breath at night."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal breath pattern
+Chain-of-Thought: "cannot breath" here is interpreted as an irregular or abnormal breathing pattern rather than a complete inability to breathe independently (which would typically require mechanical assistance). Therefore, the best matching option is "abnormal breath pattern." Do not change the wording.
+
+Example 4:
+Query: "It was a bit swollen."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: edema
+Chain-of-Thought: The query uses "swollen" (or "swelling") as a synonym; per the extra rule, it maps to "edema" exactly as provided.
+
+Example 5:
+Query: "My insurance does not support this care."
+Response:
+Domain: Communication with community resources
+Problem: Limited access to care/services/goods
+Signs/Symptoms: Communication with community resources_limited access to care/services/goods
+Chain-of-Thought: The query clearly indicates a problem with insurance coverage, which limits access to necessary healthcare services. This directly aligns with the classification option under the domain "Communication with community resources" where both the problem and the signs/symptoms are described as "Limited access to care/services/goods."
+
+Example 6:
+Query: "I need a rest. I will go to sleep now."
+Response:
+No sufficient information available
+Chain-of-Thought: Although the query mentioned "rest" and "sleep," these terms describe normal behavior that does not indicate a healthcare problem.
+
+Example 7:
+Query: "I am tired today."
+Response:
+Domain: Psychological Domain
+Problem: Mental health
+Signs/Symptoms: somatic complaints/fatigue
+Chain-of-Thought: The query "I am tired today" states a symptom of fatigue without any additional context suggesting that it is normal or a routine state. Therefore, it is treated as a potential healthcare problem, and maps to "somatic complaints/fatigue" under the Psychological Domain.
+"""
+problem_prompt_template = """
+Analyze the healthcare query provided and identify the MOST RELEVANT Omaha System classification.
+
+Instructions:
+1. Carefully review the query for healthcare-related issues.
+2. Select the MOST RELEVANT options from the provided Omaha System classifications that best matches the query's domain, problem, and signs/symptoms.
+3. Use ONLY the exact terminology from the chosen Omaha System option.
+4. If no healthcare problem is evident or if the query doesn't closely align with any option, respond with "No sufficient information available."
+
+Query: {{query}}
+
+Options:
+{% for doc in documents %}
+{{loop.index}}.
+- Domain: {{ doc.meta.get('domain', 'N/A') }}
+- Problem: {{ doc.meta.get('problem', 'N/A') }}
+- Signs/Symptoms: {{ doc.meta.get('signs_or_symptoms', 'N/A') }}
+{% endfor %}
+
+Response format:
+If a relevant match is found, provide ONLY ONE classification:
+Domain: [Exact match]
+Problem: [Exact match]
+Signs/Symptoms: [Exact match]
+
+If no healthcare problem is identified or no close match is found:
+No sufficient information available
+"""
+import pandas as pd
+import torch
+from haystack import Pipeline, Document, component
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.components.embedders import SentenceTransformersTextEmbedder, SentenceTransformersDocumentEmbedder
+from haystack.components.writers import DocumentWriter
+from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
+from haystack.components.builders import PromptBuilder
+from haystack.components.generators import OpenAIGenerator
+from haystack.utils import ComponentDevice
+from google.colab import drive, userdata
+from haystack.utils import Secret
+from typing import List
+from haystack.components.embedders import OpenAIDocumentEmbedder, OpenAITextEmbedder # Import OpenAI components
+import openai # Import the OpenAI library
+
+# Set OpenAI API key
+api_key = Secret.from_token(userdata.get('CU_OPENAI_API_KEY'))
+
+# Configuration
+FILE_PATH = '/content/drive/MyDrive/Omaha/Omaha.xlsx'
+#EMBEDDING_MODEL = "text-embedding-3-small"
+EMBEDDING_MODEL = "text-embedding-ada-002"  # Use OpenAI embedding model
+LLM_MODEL = "o3-mini"
+
+# Initialize document store - the embedding_dim argument has been removed
+problem_document_store = InMemoryDocumentStore()
+
+# 1️⃣ Load Data
+def load_data(file_path):
+    problem_data = pd.read_excel(file_path, sheet_name='Sheet1')
+    conversation_data = pd.read_excel(file_path, sheet_name='Sheet3')
+    return problem_data, conversation_data
+
+problem_data, conversation_data = load_data(FILE_PATH)
+
+# 2️⃣ Prepare Documents with Metadata
+def prepare_problem_documents(problem_data):
+    problem_documents = []
+    for _, row in problem_data.iterrows():
+        doc = Document(
+            content=f"""Domain: {row['Domain']}
+Domain Definition: {row['Domain definition']}
+Problem: {row['Problems of the Problem Classification Scheme']}
+Problem Definition: {row['Problem definition']}
+Signs/Symptoms: {row['SIGNS/SYMPTOMS OF ACTUAL']}""",
+            meta={
+                "type": "problem",
+                "domain": row["Domain"],
+                "domain_definition": row["Domain definition"],
+                "problem": row["Problems of the Problem Classification Scheme"],
+                "problem_definition": row["Problem definition"],
+                "signs_or_symptoms": row["SIGNS/SYMPTOMS OF ACTUAL"],
+                "sign/symptom_definition": row['Definition/example of signs/symptoms']
+            }
+        )
+        problem_documents.append(doc)
+    return problem_documents
+
+problem_documents = prepare_problem_documents(problem_data)
+
+# 3️⃣ Indexing Pipeline with Embeddings - Use Open AI
+def index_documents(document_store, documents):
+    indexing_pipeline = Pipeline()
+
+    document_embedder = OpenAIDocumentEmbedder(  # Use OpenAIDocumentEmbedder
+        api_key=api_key,
+        model=EMBEDDING_MODEL
+    )
+
+    writer = DocumentWriter(document_store=document_store)
+
+    indexing_pipeline.add_component("embedder", document_embedder)
+    indexing_pipeline.add_component("writer", writer)
+    indexing_pipeline.connect("embedder.documents", "writer.documents")  # Correct connection
+
+    print("🔄 Indexing documents with embeddings...")
+    indexing_pipeline.run({"embedder": {"documents": documents}})
+    print("✅ Indexing completed.")
+
+
+# Index documents with embeddings
+index_documents(problem_document_store, problem_documents)
+
+# 4️⃣ Prompt Template for Generator
+problem_prompt_template = """
+Identify the health problems from the conversation between the nurse and the patient provided in the query below, and map it to the MOST RELEVANT Omaha System classification.
+
+Instructions:
+1. Review the query for any direct mentions of healthcare-related issues across these domains:
+   - Environmental Domain (e.g., environment safety, insurance)
+   - Psychological Domain (e.g., feelings of fatigue, low mood)
+   - Physiological Domain
+   - Health-related Behaviors Domain (e.g., nutrition, medication regimen)
+
+2. DO NOT classify if:
+   - The issue affects others or describes a general environmental/public health concern (e.g., COVID-19, flu, air quality, needing rest or sleep, test costs, availability, payment details) without any indication of abnormal symptoms, distress, or dysfuction.
+   - The query is too vague or lacks abnormality (e.g., "I feel weird").
+   - It describes normal behavior (e.g., "Worked late", "doing excercise", needing rest or sleep, test costs, availability, payment details) unless there is clear evidence of abnormal symptoms, distress, or dysfunction.
+   - The query is a question or request for information (e.g., "Do I have high BP?").
+   - A normal medical reading (e.g., BP, glucose).
+
+3. Select the single MOST RELEVANT classification from the provided options that best matches the query’s domain, problem, and signs/symptoms.
+4. IMPORTANT: The final answer MUST USE THE EXACT WORDING from the provided options without modifications, rephrasing, or synonyms.
+   - Example: If the query mentioned "swollen" or related term ('retain water'),  you must map it to sign/symptom of "edema" under the "Circulation" problem (do not change it to "inflammation" or "oral health" problems).
+   - If no close match exists, respond with:
+     No sufficient information available
+5. DO NOT Overinfer:
+If the query does not clearly describe a healthcare problem, lacks enough background information to support the sign/symptom, or if no option closely aligns with the query, respond with:
+No sufficient information availableQuery:
+
+{{query}}
+
+Options:
+{% for doc in documents %}
+{{ loop.index }}.
+- Domain: {{ doc.meta.get('domain', 'N/A') }}
+- Problem: {{ doc.meta.get('problem', 'N/A') }}
+- Signs/Symptoms: {{ doc.meta.get('signs_or_symptoms', 'N/A') }}
+{% endfor %}
+
+Response Format:
+If a relevant match is found, provide ONLY ONE classification using the exact wording from the selected option in this format:
+Domain: [Exact match]
+Problem: [Exact match]
+Signs/Symptoms: [Exact match]
+If no match:
+No sufficient information available
+
+Example Queries and Responses:
+
+Example 1:
+Query: "when I got back from my walk today; it is 145/92."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal blood pressure reading
+
+Example 2:
+Query: "You have the shower?"
+Response:
+No sufficient information available
+
+Example 3:
+Query: "I can not breath at night."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal breath pattern
+
+"""
+
+
+# 5️⃣ Create Generator
+def create_generator():
+    return OpenAIGenerator(
+        model=LLM_MODEL,
+        api_key=api_key,
+        #generation_kwargs={"temperature": temperature, "top_p": top_p}
+    )
+# Initialize the generator
+#generator = create_generator(temperature=0.1, top_p=0.6)
+generator = create_generator()
+
+# 6️⃣ Create Query Pipeline with Debug Component
+@component
+class DebugComponent:
+    def __init__(self, name):
+        self.name = name
+
+    @component.output_types(documents=List[Document], embedding=List[float], prompt=str)
+    def run(self, documents: List[Document] = None, embedding: List[float] = None, prompt: str = None, **kwargs):
+        return {"documents": documents, "embedding": embedding, "prompt": prompt, **kwargs}
+
+
+def create_debug_pipeline(document_store):
+    pipeline = Pipeline()
+
+    #text_embedder = SentenceTransformersTextEmbedder(model=EMBEDDING_MODEL)
+
+    text_embedder = OpenAITextEmbedder( # Use OpenAITextEmbedder
+        api_key=api_key,
+        model=EMBEDDING_MODEL
+    )
+
+    retriever = InMemoryEmbeddingRetriever(document_store=document_store, top_k=15)
+    prompt_builder = PromptBuilder(template=problem_prompt_template)
+    generator = create_generator()
+
+    pipeline.add_component("text_embedder", text_embedder)
+    pipeline.add_component("debug_embedder", DebugComponent("Embedder"))
+    pipeline.add_component("retriever", retriever)
+    pipeline.add_component("debug_retriever", DebugComponent("Retriever"))
+    pipeline.add_component("prompt_builder", prompt_builder)
+    pipeline.add_component("debug_prompt_builder", DebugComponent("Prompt Builder"))
+    pipeline.add_component("generator", generator)
+
+    pipeline.connect("text_embedder.embedding", "debug_embedder") # Connect based on embedding output
+    pipeline.connect("debug_embedder", "retriever")
+    pipeline.connect("retriever", "debug_retriever")
+    pipeline.connect("debug_retriever", "prompt_builder")
+    pipeline.connect("prompt_builder", "debug_prompt_builder")
+    pipeline.connect("debug_prompt_builder", "generator")
+
+    return pipeline, retriever
+
+debug_pipeline, retriever = create_debug_pipeline(problem_document_store)
+
+
+# 7️⃣ Test the Full Pipeline
+def test_debug_pipeline(query):
+    result = debug_pipeline.run({"text_embedder": {"text": query}, "prompt_builder": {"query": query}})
+    return result
+
+
+
+# 7️⃣ Test the Full Pipeline
+def test_debug_pipeline(query):
+    result = debug_pipeline.run({"text_embedder": {"text": query}, "prompt_builder": {"query": query}})
+
+    # Check if any documents were retrieved
+    if 'debug_retriever' in result and 'documents' in result['debug_retriever']:
+        retrieved_documents = result['debug_retriever']['documents']
+        if not retrieved_documents:
+            # No documents retrieved, but no output is printed
+            pass
+        for i, doc in enumerate(retrieved_documents, 1):
+            # This loop now contains a pass, which is a placeholder
+            pass
+    else:
+        # No documents found in debug_retriever output, but no output is printed
+        pass
+
+    # Check for replies from the generator
+    if 'generator' in result and 'replies' in result['generator'] and result['generator']['replies']:
+        # A reply is available, but it's not printed
+        pass
+    else:
+        # No answer generated, but no output is printed
+        pass
+
+    return result
+
+import pandas as pd
+import torch
+from haystack import Pipeline, Document, component
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.components.embedders import SentenceTransformersTextEmbedder, SentenceTransformersDocumentEmbedder
+from haystack.components.writers import DocumentWriter
+from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
+from haystack.components.builders import PromptBuilder
+from haystack.components.generators import HuggingFaceLocalGenerator
+from haystack.utils import ComponentDevice
+from typing import List
+from huggingface_hub import login
+from google.colab import userdata
+
+llama_3_key = userdata.get('Llama3')
+login(token=llama_3_key)
+
+
+
+# Configuration
+FILE_PATH = '/content/drive/MyDrive/Omaha.xlsx'
+#EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+EMBEDDING_MODEL = "Snowflake/snowflake-arctic-embed-l"
+LLM_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+
+
+# Initialize document store
+problem_document_store = InMemoryDocumentStore()
+
+# 1️⃣ Load Data
+def load_data(file_path):
+    problem_data = pd.read_excel(file_path, sheet_name='Sheet1')
+    conversation_data = pd.read_excel(file_path, sheet_name='Sheet3')
+    return problem_data, conversation_data
+
+problem_data, conversation_data = load_data(FILE_PATH)
+
+# 2️⃣ Prepare Documents with Metadata
+def prepare_problem_documents(problem_data):
+    problem_documents = []
+    for _, row in problem_data.iterrows():
+        doc = Document(
+            content=f"""Domain: {row['Domain']}
+Domain Definition: {row['Domain definition']}
+Problem: {row['Problems of the Problem Classification Scheme']}
+Problem Definition: {row['Problem definition']}
+Signs/Symptoms: {row['SIGNS/SYMPTOMS OF ACTUAL']}""",
+            meta={
+                "type": "problem",
+                "domain": row["Domain"],
+                "domain_definition": row["Domain definition"],
+                "problem": row["Problems of the Problem Classification Scheme"],
+                "problem_definition": row["Problem definition"],
+                "signs_or_symptoms": row["SIGNS/SYMPTOMS OF ACTUAL"],
+                "sign/symptom_definition": row['Definition/example of signs/symptoms']
+            }
+        )
+        problem_documents.append(doc)
+    return problem_documents
+
+problem_documents = prepare_problem_documents(problem_data)
+
+# 3️⃣ Indexing Pipeline with Embeddings
+def index_documents(document_store, documents):
+    indexing_pipeline = Pipeline()
+    document_embedder = SentenceTransformersDocumentEmbedder(
+        model=EMBEDDING_MODEL,
+        device=ComponentDevice.from_str('cuda' if torch.cuda.is_available() else 'cpu')
+    )
+    writer = DocumentWriter(document_store=document_store)
+    indexing_pipeline.add_component("embedder", document_embedder)
+    indexing_pipeline.add_component("writer", writer)
+    indexing_pipeline.connect("embedder.documents", "writer.documents")
+    print("🔄 Indexing documents with embeddings...")
+    indexing_pipeline.run({"embedder": {"documents": documents}})
+    print("✅ Indexing completed.")
+
+# Index documents with embeddings
+index_documents(problem_document_store, problem_documents)
+
+# 4️⃣ Prompt Template for Generator
+problem_prompt_template = """
+<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+Analyze the healthcare query provided to identify potential problems and match them to the most relevant Omaha System classifications.
+
+Instructions:
+1. Carefully review the query for any healthcare-related issues.
+2. If a healthcare problem is identified, select the MOST RELVANT options provided from the Omaha System that best matches the problem and its signs/symptoms.
+3. Your answer should be only the identified {domain, problem, and sign or symptoms} link. You can not provide additional answer. Use ONLY the exact terminology from the Omaha System options provided.
+4. If no healthcare problem is evident or if the query doesn't align with any Omaha System options, respond with "No sufficient information available."
+
+
+
+Context:
+{% for doc in documents %}
+  Domain: {{ doc.meta['domain'] }}
+  Problem: {{ doc.meta['problem'] }}
+  Signs/Symptoms: {{ doc.meta['signs_or_symptoms'] }}
+{% endfor %}
+
+Question: {{query}}<|eot_id|>
+
+<|start_header_id|>assistant<|end_header_id|>
+
+"""
+
+
+
+# Set up generators
+def create_generator():
+    return HuggingFaceLocalGenerator(
+        model=LLM_MODEL,
+        huggingface_pipeline_kwargs={
+            "device_map": "auto",
+            "model_kwargs": {
+                "load_in_4bit": True,
+                "bnb_4bit_use_double_quant": True,
+                "bnb_4bit_quant_type": "nf4",
+                "bnb_4bit_compute_dtype": torch.bfloat16
+            }
+        },
+        generation_kwargs={"max_new_tokens": 500}
+    )
+
+
+# 6️⃣ Create Query Pipeline with Debug Component
+@component
+class DebugComponent:
+    def __init__(self, name):
+        self.name = name
+
+    @component.output_types(documents=List[Document], embedding=List[float], prompt=str)
+    def run(self, documents: List[Document] = None, embedding: List[float] = None, prompt: str = None, **kwargs):
+        return {"documents": documents, "embedding": embedding, "prompt": prompt, **kwargs}
+
+def create_debug_pipeline(document_store):
+    pipeline = Pipeline()
+    text_embedder = SentenceTransformersTextEmbedder(
+        model=EMBEDDING_MODEL,
+        device=ComponentDevice.from_str('cuda' if torch.cuda.is_available() else 'cpu')
+    )
+    retriever = InMemoryEmbeddingRetriever(document_store=document_store, top_k=15)
+    prompt_builder = PromptBuilder(template=problem_prompt_template)
+    generator = create_generator()
+
+    pipeline.add_component("text_embedder", text_embedder)
+    pipeline.add_component("debug_embedder", DebugComponent("Embedder"))
+    pipeline.add_component("retriever", retriever)
+    pipeline.add_component("debug_retriever", DebugComponent("Retriever"))
+    pipeline.add_component("prompt_builder", prompt_builder)
+    pipeline.add_component("debug_prompt_builder", DebugComponent("Prompt Builder"))
+    pipeline.add_component("generator", generator)
+
+    pipeline.connect("text_embedder.embedding", "debug_embedder")
+    pipeline.connect("debug_embedder", "retriever")
+    pipeline.connect("retriever", "debug_retriever")
+    pipeline.connect("debug_retriever", "prompt_builder")
+    pipeline.connect("prompt_builder", "debug_prompt_builder")
+    pipeline.connect("debug_prompt_builder", "generator")
+
+    return pipeline, retriever
+
+debug_pipeline, retriever = create_debug_pipeline(problem_document_store)
+
+# 7️⃣ Test the Full Pipeline
+def test_debug_pipeline(query):
+    result = debug_pipeline.run({"text_embedder": {"text": query}, "prompt_builder": {"query": query}})
+    return result
+
+# Example Usage:
+query = "What are the signs of pneumonia?"
+result = test_debug_pipeline(query)
+
+if result and 'generator' in result and 'replies' in result['generator']:
+    print(f"Generated Reply: {result['generator']['replies'][0]}")
+else:
+    print("No answer generated.")
+problem_prompt_template = """
+<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+
+
+user
+
+Your answer should be only the identified {domain, problem, and sign or symptoms} link OR "No sufficient information available". You cannot provide additional answer.
+
+Context:
+{% for doc in documents %}
+  Domain: {{ doc.meta['domain'] }}
+  Problem: {{ doc.meta['problem'] }}
+  Signs/Symptoms: {{ doc.meta['signs_or_symptoms'] }}
+{% endfor %}
+
+Instructions:
+1. FIRST determine if the query describes any health problem meeting these criteria:
+   - Explicit mention of abnormal symptoms/distress/dysfunction
+   - Not a general question/public health concern
+   - Not normal behavior/test results
+   - Not vague descriptions without clear abnormality
+
+2. IF NO HEALTH PROBLEM EXISTS:
+   Respond immediately with: "No sufficient information available"
+
+3. IF HEALTH PROBLEM EXISTS:
+   a. Select the SINGLE MOST RELEVANT option from Context using EXACT WORDING
+   b. Match using these priority rules:
+      - Match exact symptom terminology first
+      - Match problem category second
+      - Match domain last
+   c. NEVER use synonyms/rephrasing - only exact matches from Context
+
+4. STRICT PROHIBITIONS:
+   - No classification for questions/requests
+   - No inference beyond explicit information
+   - No partial matches
+   - No combining multiple options
+
+5. **Term Conversion Rules** - Convert these common phrases to Omaha terms:
+   - "Shortness of breath" → "abnormal breath patterns"
+   - "Trouble breathing" → "abnormal breath patterns"
+   - "Swollen or retain water" → "edema" under the "Circulation" problem
+   - "High BP numbers" → "abnormal blood pressure reading"
+
+Examples:
+Example 1:
+Query: "when I got back from my walk today; it is 145/92."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal blood pressure reading
+
+Example 2:
+Query: "You have the shower?"
+Response:
+No sufficient information available
+
+Example 3:
+Query: "I can not breath at night."
+Response:
+Domain: Physiological Domain
+Problem: Respiration
+Signs/Symptoms: abnormal breath patterns
+
+Question: {{query}}<|eot_id|>
+
+<|start_header_id|>assistant<|end_header_id|>
+
+
+"""
+problem_prompt_template = """
+<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+
+<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+
+Your answer should be only the identified {domain, problem, and sign or symptoms} link OR "No sufficient information available". You cannot provide additional answer.
+
+Context:
+{% for doc in documents %}
+  Domain: {{ doc.meta['domain'] }}
+  Problem: {{ doc.meta['problem'] }}
+  Signs/Symptoms: {{ doc.meta['signs_or_symptoms'] }}
+{% endfor %}
+
+Instructions:
+1. FIRST determine if the query describes any health problem meeting these criteria:
+   - Explicit mention of abnormal symptoms/distress/dysfunction
+   - Not a general question/public health concern
+   - Not normal behavior/test results
+   - Not vague descriptions without clear abnormality
+
+2. IF NO HEALTH PROBLEM EXISTS:
+   Respond immediately with: "No sufficient information available"
+
+3. IF HEALTH PROBLEM EXISTS:
+   a. Select the SINGLE MOST RELEVANT option from Context using EXACT WORDING
+   b. Match using these priority rules:
+      - Match exact symptom terminology first
+      - Match problem category second
+      - Match domain last
+   c. NEVER use synonyms/rephrasing - only exact matches from Context
+
+4. STRICT PROHIBITIONS:
+   - No classification for questions/requests
+   - No inference beyond explicit information
+   - No partial matches
+   - No combining multiple options
+
+Question: {{query}}<|eot_id|>
+
+<|start_header_id|>assistant<|end_header_id|>
+
+
+"""
+import pandas as pd
+import torch
+from haystack import Pipeline, Document, component
+from haystack.document_stores.in_memory import InMemoryDocumentStore
+from haystack.components.embedders import SentenceTransformersTextEmbedder, SentenceTransformersDocumentEmbedder
+from haystack.components.writers import DocumentWriter
+from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
+from haystack.components.builders import PromptBuilder
+from haystack.components.generators import HuggingFaceLocalGenerator
+from haystack.utils import ComponentDevice
+from typing import List
+from huggingface_hub import login
+from google.colab import userdata
+
+llama_3_key = userdata.get('Llama3')
+login(token=llama_3_key)
+
+
+
+# Configuration
+FILE_PATH = '/content/drive/MyDrive/Omaha.xlsx'
+EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
+#EMBEDDING_MODEL = "Snowflake/snowflake-arctic-embed-l"
+LLM_MODEL = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+
+
+
+# Initialize document store
+problem_document_store = InMemoryDocumentStore()
+
+# 1️⃣ Load Data
+def load_data(file_path):
+    problem_data = pd.read_excel(file_path, sheet_name='Sheet1')
+    conversation_data = pd.read_excel(file_path, sheet_name='Sheet3')
+    return problem_data, conversation_data
+
+problem_data, conversation_data = load_data(FILE_PATH)
+
+# 2️⃣ Prepare Documents with Metadata
+def prepare_problem_documents(problem_data):
+    problem_documents = []
+    for _, row in problem_data.iterrows():
+        doc = Document(
+            content=f"""Domain: {row['Domain']}
+Domain Definition: {row['Domain definition']}
+Problem: {row['Problems of the Problem Classification Scheme']}
+Problem Definition: {row['Problem definition']}
+Signs/Symptoms: {row['SIGNS/SYMPTOMS OF ACTUAL']}""",
+            meta={
+                "type": "problem",
+                "domain": row["Domain"],
+                "domain_definition": row["Domain definition"],
+                "problem": row["Problems of the Problem Classification Scheme"],
+                "problem_definition": row["Problem definition"],
+                "signs_or_symptoms": row["SIGNS/SYMPTOMS OF ACTUAL"],
+                "sign/symptom_definition": row['Definition/example of signs/symptoms']
+            }
+        )
+        problem_documents.append(doc)
+    return problem_documents
+
+problem_documents = prepare_problem_documents(problem_data)
+
+# 3️⃣ Indexing Pipeline with Embeddings
+def index_documents(document_store, documents):
+    indexing_pipeline = Pipeline()
+    document_embedder = SentenceTransformersDocumentEmbedder(
+        model=EMBEDDING_MODEL,
+        device=ComponentDevice.from_str('cuda' if torch.cuda.is_available() else 'cpu')
+    )
+    writer = DocumentWriter(document_store=document_store)
+    indexing_pipeline.add_component("embedder", document_embedder)
+    indexing_pipeline.add_component("writer", writer)
+    indexing_pipeline.connect("embedder.documents", "writer.documents")
+    print("🔄 Indexing documents with embeddings...")
+    indexing_pipeline.run({"embedder": {"documents": documents}})
+    print("✅ Indexing completed.")
+
+# Index documents with embeddings
+index_documents(problem_document_store, problem_documents)
+
+# 4️⃣ Prompt Template for Generator
+problem_prompt_template = """
+<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+
+Your answer must be either the identified {domain, problem, and signs/symptoms} link from Context or "No sufficient information available." You cannot provide additional answers.
+
+Context:
+{% for doc in documents %}
+  Domain: {{ doc.meta['domain'] }}
+  Problem: {{ doc.meta['problem'] }}
+  Signs/Symptoms: {{ doc.meta['signs_or_symptoms'] }}
+{% endfor %}
+
+Instructions:
+1. FIRST determine if the query describes any health problem meeting these criteria:
+   - Explicit mention of **abnormal symptoms, distress, or dysfunction**
+   - NOT a general question, public health concern, or vague description
+   - NOT a normal behavior, normal medical reading, or test result without abnormality
+
+2. IF NO HEALTH PROBLEM EXISTS:
+   Respond immediately with: "No sufficient information available."
+
+3. IF A HEALTH PROBLEM EXISTS:
+   a. Select the SINGLE MOST RELEVANT option from Context using EXACT WORDING.
+   b. Match using these priority rules:
+      - Match exact symptom terminology first.
+      - Match problem category second.
+      - Match domain last.
+   c. NEVER use synonyms, rephrasing, or inferred terms—only exact matches from Context.
+
+4. STRICT PROHIBITIONS:
+   - DO NOT classify normal medical readings (e.g., "110/70" for BP or "98.6°F" for temperature) as abnormal unless explicitly stated otherwise in the query.
+   - DO NOT classify questions or requests for information (e.g., "Do I have high BP?").
+   - DO NOT infer health problems from vague phrases (e.g., "I feel weird").
+   - DO NOT combine multiple options or provide partial matches.
+
+5. **Term Conversion Rules** - Convert these common phrases to Omaha terms:
+   - "Shortness of breath" → "abnormal breath patterns"
+   - "Trouble breathing" → "abnormal breath patterns"
+   - "Swollen or retain water" → "edema" under the "Circulation" problem
+   - "High BP numbers" → "abnormal blood pressure reading"
+
+Examples:
+Example 1:
+Query: "when I got back from my walk today; it is 145/92."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal blood pressure reading
+
+Example 2:
+Query: "You have the shower?"
+Response:
+No sufficient information available
+
+Example 3:
+Query: "I can not breathe at night."
+Response:
+Domain: Physiological Domain
+Problem: Respiration
+Signs/Symptoms: abnormal breath patterns
+
+
+Question: {{query}}<|eot_id|>
+
+<|start_header_id|>assistant<|end_header_id|>
+
+
+"""
+
+
+
+# Set up generators
+def create_generator():
+    return HuggingFaceLocalGenerator(
+        model=LLM_MODEL,
+        huggingface_pipeline_kwargs={
+            "device_map": "auto",
+            "model_kwargs": {
+                "load_in_4bit": True,
+                "bnb_4bit_use_double_quant": True,
+                "bnb_4bit_quant_type": "nf4",
+                "bnb_4bit_compute_dtype": torch.bfloat16,
+                "eos_token_id":128001
+            }
+        },
+        generation_kwargs={"max_new_tokens": 500}
+    )
+
+
+
+# 6️⃣ Create Query Pipeline with Debug Component
+@component
+class DebugComponent:
+    def __init__(self, name):
+        self.name = name
+
+    @component.output_types(documents=List[Document], embedding=List[float], prompt=str)
+    def run(self, documents: List[Document] = None, embedding: List[float] = None, prompt: str = None, **kwargs):
+        return {"documents": documents, "embedding": embedding, "prompt": prompt, **kwargs}
+
+def create_debug_pipeline(document_store):
+    pipeline = Pipeline()
+    text_embedder = SentenceTransformersTextEmbedder(
+        model=EMBEDDING_MODEL,
+        device=ComponentDevice.from_str('cuda' if torch.cuda.is_available() else 'cpu')
+    )
+    retriever = InMemoryEmbeddingRetriever(document_store=document_store, top_k=15)
+    prompt_builder = PromptBuilder(template=problem_prompt_template)
+    generator = create_generator()
+
+    pipeline.add_component("text_embedder", text_embedder)
+    pipeline.add_component("debug_embedder", DebugComponent("Embedder"))
+    pipeline.add_component("retriever", retriever)
+    pipeline.add_component("debug_retriever", DebugComponent("Retriever"))
+    pipeline.add_component("prompt_builder", prompt_builder)
+    pipeline.add_component("debug_prompt_builder", DebugComponent("Prompt Builder"))
+    pipeline.add_component("generator", generator)
+
+    pipeline.connect("text_embedder.embedding", "debug_embedder")
+    pipeline.connect("debug_embedder", "retriever")
+    pipeline.connect("retriever", "debug_retriever")
+    pipeline.connect("debug_retriever", "prompt_builder")
+    pipeline.connect("prompt_builder", "debug_prompt_builder")
+    pipeline.connect("debug_prompt_builder", "generator")
+
+    return pipeline, retriever
+
+debug_pipeline, retriever = create_debug_pipeline(problem_document_store)
+
+# 7️⃣ Test the Full Pipeline
+def test_debug_pipeline(query):
+    result = debug_pipeline.run({"text_embedder": {"text": query}, "prompt_builder": {"query": query}})
+    return result
+import pandas as pd
+from openpyxl import Workbook
+from tqdm import tqdm
+
+# Define a function to process each conversation
+def process_conversation_data(conversation_data):
+    processed_data = []
+
+    for index, row in conversation_data.iterrows():
+        try:
+            query = str(row.get('Conversation', ''))  # Ensure we handle missing data
+            result = test_debug_pipeline(query)  # Ensure this function is correctly defined/imported
+
+            # Extract response safely
+            response = result.get('generator', {}).get('replies', ["No sufficient information available"])[0]
+
+        except Exception as e:
+            print(f"⚠️ Error processing conversation at index {index}: {str(e)}")
+            response = "Error: Unable to process"
+
+        # Append the processed row
+        processed_data.append({
+            'Speaker': row.get('Spk', 'Unknown'),  # Handle missing 'Spk'
+            'Conversation': query,
+            'Omaha_Classification': response
+        })
+
+    return pd.DataFrame(processed_data)
+
+# Read all sheets from the Excel file
+file_path2 = '/content/drive/MyDrive/Omaha/Completed_annotation.xlsx'
+output_file_name = "/content/drive/MyDrive/Omaha/Processed_Conversation_llama3.xlsx"
+
+try:
+    excel_file = pd.ExcelFile(file_path2)  # Load the Excel file
+
+    with pd.ExcelWriter(output_file_name, engine='openpyxl') as writer:
+        # Loop through sheets with tqdm progress bar
+        for i, sheet_name in tqdm(list(enumerate(excel_file.sheet_names, start=1)),
+                                  total=len(excel_file.sheet_names), desc="Processing sheets"):
+
+            try:
+                conversation_data = pd.read_excel(excel_file, sheet_name=sheet_name)
+                processed_data = process_conversation_data(conversation_data)
+
+                # Save processed data with indexed sheet name
+                new_sheet_name = f"Sheet_{i}"
+                processed_data.to_excel(writer, sheet_name=new_sheet_name, index=False)
+                print(f"✅ Processed sheet {i}: {sheet_name}")
+
+            except Exception as e:
+                print(f"❌ Error processing sheet {i} ({sheet_name}): {str(e)}")
+
+    print(f"\n📁 Processed data has been saved to: {output_file_name} ✅")
+
+except Exception as e:
+    print(f"❌ Failed to read input Excel file: {str(e)}")
+import pandas as pd
+from openpyxl import Workbook
+from tqdm import tqdm
+
+# Define a function to process each conversation with additional context (2 rows before and 2 rows after)
+def process_conversation_data(conversation_data):
+    processed_data = []
+    num_rows = len(conversation_data)
+
+    for index in range(num_rows):
+        try:
+            # Determine context indices: two rows before and two rows after (if available)
+            start_index = max(0, index - 2)
+            end_index = min(num_rows, index + 3)  # end_index is non-inclusive
+
+            # Concatenate the 'Conversation' texts from the context window
+            context_rows = conversation_data.iloc[start_index:end_index]
+            context_text = " ".join(context_rows['Conversation'].astype(str).tolist())
+
+            # Process the concatenated context using the pipeline function
+            result = test_debug_pipeline(context_text)
+
+            # Safely extract the response
+            response = result.get('generator', {}).get('replies', ["No sufficient information available"])[0]
+
+        except Exception as e:
+            print(f"⚠️ Error processing conversation at index {index}: {str(e)}")
+            response = "Error: Unable to process"
+
+        # Append only the current row's conversation and response
+        processed_data.append({
+            'Speaker': conversation_data.iloc[index].get('Spk', 'Unknown'),
+            'Conversation': str(conversation_data.iloc[index].get('Conversation', '')),
+            'Omaha_Classification': response
+        })
+
+    return pd.DataFrame(processed_data)
+
+# Read all sheets from the Excel file
+file_path2 = '/content/drive/MyDrive/Omaha/Completed_annotation.xlsx'
+output_file_name = "/content/drive/MyDrive/Omaha/Processed_Conversation_4omini_2rowWindown_V3.xlsx"
+
+try:
+    excel_file = pd.ExcelFile(file_path2)  # Load the Excel file
+
+    with pd.ExcelWriter(output_file_name, engine='openpyxl') as writer:
+        # Loop through sheets with tqdm progress bar
+        for i, sheet_name in tqdm(list(enumerate(excel_file.sheet_names, start=1)),
+                                  total=len(excel_file.sheet_names), desc="Processing sheets"):
+            try:
+                conversation_data = pd.read_excel(excel_file, sheet_name=sheet_name)
+                processed_data = process_conversation_data(conversation_data)
+
+                # Save processed data with indexed sheet name
+                new_sheet_name = f"Sheet_{i}"
+                processed_data.to_excel(writer, sheet_name=new_sheet_name, index=False)
+                print(f"✅ Processed sheet {i}: {sheet_name}")
+
+            except Exception as e:
+                print(f"❌ Error processing sheet {i} ({sheet_name}): {str(e)}")
+
+    print(f"\n📁 Processed data has been saved to: {output_file_name} ✅")
+
+except Exception as e:
+    print(f"❌ Failed to read input Excel file: {str(e)}")
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results2.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results3.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results4.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results5.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results6.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results7.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results8.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results9.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results10.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results11.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results12.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results13.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results14.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results15.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results16.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results17.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results18.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results19.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results20.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results21.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results22.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results23.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results24.xlsx", index=False)
+#processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results25.xlsx", index=False)
+processed_conversation_data.to_excel("/content/drive/MyDrive/mapped_results26.xlsx", index=False)
+
+import pandas as pd
+
+# Load the Excel file
+file_path = '/content/drive/MyDrive/Omaha/Completed_annotation.xlsx'
+xls = pd.ExcelFile(file_path)
+
+# Columns containing health problems
+columns_to_check = ["OS_SS_1", "OS_SS_2", "OS_SS_3"]
+
+# Initialize counters and sets
+total_health_problems = 0  # Sum of all identified health problems
+total_rows = 0  # Total number of rows across sheets, including those with all empty columns
+unique_health_problems = set()  # Set to store unique health problems
+unique_problems = set()  # Set to store unique problems
+unique_symptoms = set()  # Set to store unique signs/symptoms
+
+# Iterate through all sheets
+for sheet_name in xls.sheet_names:
+    df = pd.read_excel(xls, sheet_name=sheet_name, usecols=columns_to_check)
+
+    # Update the total rows count with the number of rows in the DataFrame (including empty rows)
+    total_rows += len(df)
+
+    # Filter out rows where all specified columns are empty (for health problem analysis)
+    df_filtered = df.dropna(how='all', subset=columns_to_check)
+
+    # Iterate over each column in the filtered DataFrame to extract unique health problems
+    for column in columns_to_check:
+        column_data = df_filtered[column].dropna().unique()  # Get unique non-empty data for each column
+        for item in column_data:
+            if pd.notna(item):
+                unique_health_problems.add(item.strip())  # Update the set with unique items from the column
+
+    # Sum the total non-empty values in all columns from the filtered DataFrame
+    total_health_problems += df_filtered[columns_to_check].notna().sum().sum()
+
+# Process each health problem to split into problem and sign/symptom
+for health_problem in unique_health_problems:
+    parts = health_problem.split("_")
+    if len(parts) >= 2:
+        unique_problems.add(parts[0].strip())
+        unique_symptoms.add(parts[1].strip())
+
+    else:
+        unique_problems.add(health_problem)
+
+# Output the results
+print(f"Total identified health problems: {total_health_problems}")
+print(f"Total unique identified health problems: {len(unique_health_problems)}")
+print(f"Total unique problems: {len(unique_problems)}")
+print(f"Total unique signs/symptoms: {len(unique_symptoms)}")
+print(f"Total number of rows across all sheets: {total_rows}")
+import pandas as pd
+import re
+from thefuzz import fuzz
+from tqdm import tqdm
+
+# Load the dataset
+file_path = "/content/drive/MyDrive/Omaha/process_data_llama3_5R.xlsx"
+output_file = "/content/drive/MyDrive/Omaha/processed_results13.xlsx"
+
+# Read all sheets from the Excel file
+excel_file = pd.ExcelFile(file_path)
+sheet_names = excel_file.sheet_names  # List of sheet names
+
+# Initialize a list to store results for summary
+summary_results = []
+
+# Function to extract problem and sign/symptom from GPT identified content
+def extract_omaha_info(text):
+    problem, symptoms = "None", "None"
+    if pd.notna(text):
+        text = re.sub(r"-\s*", "", text)  # Remove leading dashes
+        text = text.replace("**Problem:**", "Problem: ").replace("**Signs/Symptoms:**", "Signs/Symptoms: ")
+        parts = text.split("\n")
+        for part in parts:
+            if "Problem:" in part:
+                problem = part.replace("Problem:", "").strip()
+            if "Signs/Symptoms:" in part:
+                symptoms = part.replace("Signs/Symptoms:", "").strip()
+    return problem, symptoms
+
+# Function to split human-identified problem and sign/symptom
+def split_human_info(text):
+    if pd.isna(text) or text.strip() == "":
+        return None, None
+    parts = text.split("_")
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return text.strip(), None
+
+# Function to compute fuzzy matching, ensuring 'None' values match each other
+def fuzzy_match(pred, true, threshold=80):
+    if (pred == "None" and true == "None") or (pd.isna(pred) and pd.isna(true)):
+        return True
+    if pd.isna(pred) or pd.isna(true) or pred.strip() == "" or true.strip() == "":
+        return False
+    return fuzz.ratio(str(pred).lower(), str(true).lower()) >= threshold
+
+# Function to compute precision, recall, and F1 score
+def compute_metrics(matches, total_pred, total_true):
+    tp = matches
+    fn = total_true - matches
+    fp = total_pred - matches
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+    return precision, recall, f1_score
+
+# Create a new Excel writer to save results
+with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+
+    # Process each sheet separately
+    for i, sheet_name in tqdm(enumerate(sheet_names, start=1), total=len(sheet_names), desc="Processing sheets"):
+        try:
+            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+
+            # Extract problems and symptoms from GPT-identified column
+            df[['GPT_Problem', 'GPT_Symptom']] = df['Omaha_Classification'].apply(lambda x: pd.Series(extract_omaha_info(x)))
+
+            # Apply function to human-labeled columns and correctly combine OS_SS_1, OS_SS_2, OS_SS_3
+            df[['Human_Problem_1', 'Human_Symptom_1']] = df['OS_SS_1'].apply(lambda x: pd.Series(split_human_info(x)))
+            df[['Human_Problem_2', 'Human_Symptom_2']] = df['OS_SS_2'].apply(lambda x: pd.Series(split_human_info(x)))
+            df[['Human_Problem_3', 'Human_Symptom_3']] = df['OS_SS_3'].apply(lambda x: pd.Series(split_human_info(x)))
+
+            # Merge human-identified problems and symptoms while handling NaN values
+            df['Human_Problem'] = df[['Human_Problem_1', 'Human_Problem_2', 'Human_Problem_3']].apply(
+                lambda x: ', '.join(x.dropna().astype(str)) if x.notna().any() else 'None', axis=1
+            )
+            df['Human_Symptom'] = df[['Human_Symptom_1', 'Human_Symptom_2', 'Human_Symptom_3']].apply(
+                lambda x: ', '.join(x.dropna().astype(str)) if x.notna().any() else 'None', axis=1
+            )
+
+            # Drop intermediate columns
+            df.drop(columns=['Human_Problem_1', 'Human_Symptom_1', 'Human_Problem_2', 'Human_Symptom_2','Human_Problem_3', 'Human_Symptom_3'], inplace=True)
+
+            # Compute match status
+            df['Problem_Match'] = df.apply(lambda row: fuzzy_match(str(row['GPT_Problem']), str(row['Human_Problem'])), axis=1)
+            df['Symptom_Match'] = df.apply(lambda row: fuzzy_match(str(row['GPT_Symptom']), str(row['Human_Symptom'])), axis=1)
+
+            # Count matched and not matched cases
+            problem_matched_count = df['Problem_Match'].sum()
+            symptom_matched_count = df['Symptom_Match'].sum()
+
+            # Compute total counts
+            total_gpt_problems = df['GPT_Problem'].notna().sum()
+            total_human_problems = df['Human_Problem'].notna().sum()
+            total_gpt_symptoms = df['GPT_Symptom'].notna().sum()
+            total_human_symptoms = df['Human_Symptom'].notna().sum()
+
+            # Compute metrics for this sheet
+            problem_precision, problem_recall, problem_f1 = compute_metrics(problem_matched_count, total_gpt_problems, total_human_problems)
+            symptom_precision, symptom_recall, symptom_f1 = compute_metrics(symptom_matched_count, total_gpt_symptoms, total_human_symptoms)
+
+            # Save processed sheet
+            df.to_excel(writer, sheet_name=f"Sheet_{i}", index=False)
+
+            # Store summary results
+            summary_results.append({
+                'Sheet Name': sheet_name,
+                'Problem Precision': problem_precision,
+                'Problem Recall': problem_recall,
+                'Problem F1 Score': problem_f1,
+                'Symptom Precision': symptom_precision,
+                'Symptom Recall': symptom_recall,
+                'Symptom F1 Score': symptom_f1
+            })
+
+        except Exception as e:
+            print(f"❌ Error processing sheet {i} ({sheet_name}): {str(e)}")
+
+# Convert summary results to a DataFrame and compute overall averages
+summary_df = pd.DataFrame(summary_results)
+summary_df.loc['Average'] = summary_df.mean(numeric_only=True)
+
+# Save summary results to the same Excel file
+with pd.ExcelWriter(output_file, engine='openpyxl', mode='a') as writer:
+    summary_df.to_excel(writer, sheet_name="Summary", index=False)
+
+
+print(f"\n📁 Processed data and summary results have been saved to: {output_file} ✅")
+import pandas as pd
+import re
+from thefuzz import fuzz
+from tqdm import tqdm
+
+# Load the dataset
+file_path = "/content/drive/MyDrive/Omaha/process_data_llama3_1R.xlsx"
+output_file = "/content/drive/MyDrive/Omaha/processed_results12.xlsx"
+
+# Read all sheets from the Excel file
+excel_file = pd.ExcelFile(file_path)
+sheet_names = excel_file.sheet_names  # List of sheet names
+
+# Initialize a list to store results for summary
+summary_results = []
+
+# Function to extract problem and sign/symptom from GPT identified content
+def extract_omaha_info(text):
+    problem, symptoms = "None", "None"
+    if pd.notna(text):
+        text = re.sub(r"-\s*", "", text)  # Remove leading dashes
+        text = text.replace("**Problem:**", "Problem: ").replace("**Signs/Symptoms:**", "Signs/Symptoms: ")
+        parts = text.split("\n")
+        for part in parts:
+            if "Problem:" in part:
+                problem = part.replace("Problem:", "").strip()
+            if "Signs/Symptoms:" in part:
+                symptoms = part.replace("Signs/Symptoms:", "").strip()
+    return problem, symptoms
+
+# Function to split human-identified problem and sign/symptom
+def split_human_info(text):
+    if pd.isna(text) or text.strip() == "":
+        return None, None
+    parts = text.split("_")
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return text.strip(), None
+
+# Function to compute fuzzy matching
+def fuzzy_match_sets(pred_set, true_set, threshold=80):
+    return {pred for pred in pred_set if any(fuzz.ratio(str(pred).lower(), str(true).lower()) >= threshold for true in true_set)}
+
+# Function to compute precision, recall, and F1 score
+def compute_metrics(matches, total_pred, total_true):
+    tp = matches
+    fn = total_true - matches
+    fp = total_pred - matches
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+    return precision, recall, f1_score
+
+# Process each sheet separately
+with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+    for i, sheet_name in tqdm(enumerate(sheet_names, start=1), total=len(sheet_names), desc="Processing sheets"):
+        try:
+            df = pd.read_excel(excel_file, sheet_name=sheet_name)
+
+            # Extract problems and symptoms
+            df[['GPT_Problem', 'GPT_Symptom']] = df['Omaha_Classification'].apply(lambda x: pd.Series(extract_omaha_info(x)))
+
+            # Apply function to human-labeled columns
+            df[['Human_Problem_OS1', 'Human_Symptom_OS1']] = df['OS_SS_1'].apply(lambda x: pd.Series(split_human_info(x)))
+            df[['Human_Problem_OS2', 'Human_Symptom_OS2']] = df['OS_SS_2'].apply(lambda x: pd.Series(split_human_info(x)))
+            df[['Human_Problem_OS3', 'Human_Symptom_OS3']] = df['OS_SS_3'].apply(lambda x: pd.Series(split_human_info(x)))
+
+            # Combine OS_SS1, OS_SS2, and OS_SS3 into unified sets
+            all_human_problems = set(df['Human_Problem_OS1'].dropna()).union(set(df['Human_Problem_OS2'].dropna())).union(set(df['Human_Problem_OS3'].dropna()))
+            all_human_symptoms = set(df['Human_Symptom_OS1'].dropna()).union(set(df['Human_Symptom_OS2'].dropna())).union(set(df['Human_Symptom_OS3'].dropna()))
+
+            all_gpt_problems = set(df['GPT_Problem'].dropna())
+            all_gpt_symptoms = set(df['GPT_Symptom'].dropna())
+
+            # Compute matches
+            fuzzy_problem_matches_set = fuzzy_match_sets(all_gpt_problems, all_human_problems)
+            fuzzy_problem_matches = len(fuzzy_problem_matches_set)
+            fuzzy_symptom_matches_set = fuzzy_match_sets(all_gpt_symptoms, all_human_symptoms)
+            fuzzy_symptom_matches = len(fuzzy_symptom_matches_set)
+
+            # Count total unmatched cases
+            unmatched_problems = len(all_human_problems) - fuzzy_problem_matches
+            unmatched_symptoms = len(all_human_symptoms) - fuzzy_symptom_matches
+
+            # Compute metrics
+            problem_precision, problem_recall, problem_f1 = compute_metrics(fuzzy_problem_matches, len(all_gpt_problems), len(all_human_problems))
+            symptom_precision, symptom_recall, symptom_f1 = compute_metrics(fuzzy_symptom_matches, len(all_gpt_symptoms), len(all_human_symptoms))
+
+            # Save processed sheet
+            df.to_excel(writer, sheet_name=f"Sheet_{i}", index=False)
+
+            # Store summary results
+            summary_results.append({
+                'Sheet Name': sheet_name,
+                'Problem Precision': problem_precision,
+                'Problem Recall': problem_recall,
+                'Problem F1 Score': problem_f1,
+                'Symptom Precision': symptom_precision,
+                'Symptom Recall': symptom_recall,
+                'Symptom F1 Score': symptom_f1
+            })
+        except Exception as e:
+            print(f"❌ Error processing sheet {i} ({sheet_name}): {str(e)}")
+
+
+# Convert summary results to a DataFrame and compute overall averages
+summary_df = pd.DataFrame(summary_results)
+summary_df.loc['Average'] = summary_df.mean(numeric_only=True)
+
+# Save summary results to the same Excel file
+with pd.ExcelWriter(output_file, engine='openpyxl', mode='a') as writer:
+    summary_df.to_excel(writer, sheet_name="Summary", index=False)
+
+
+print(f"\n📁 Processed data and summary results have been saved to: {output_file} ✅")
+import pandas as pd
+import re
+from thefuzz import fuzz
+
+# Load the dataset
+file_path = "/content/drive/MyDrive/mapped_results25.xlsx"
+#file_path="/content/drive/MyDrive/Omaha/Processed_Conversation_Data_BACKUP.xlsx"
+df = pd.read_excel(file_path)
+
+# Function to extract problem and sign/symptom from GPT identified content
+def extract_omaha_info(text):
+    problem, symptoms = "None", "None"
+    if pd.notna(text):
+        text = re.sub(r"-\s*", "", text)  # Remove leading dashes
+        text = text.replace("**Problem:**", "Problem: ").replace("**Signs/Symptoms:**", "Signs/Symptoms: ")
+        parts = text.split("\n")
+        for part in parts:
+            if "Problem:" in part:
+                problem = part.replace("Problem:", "").strip()
+            if "Signs/Symptoms:" in part:
+                symptoms = part.replace("Signs/Symptoms:", "").strip()
+    return problem, symptoms
+
+# Extract problems and symptoms from GPT-identified column
+df[['GPT_Problem', 'GPT_Symptom']] = df['Omaha_Classification'].apply(lambda x: pd.Series(extract_omaha_info(x)))
+
+# Function to split human-identified problem and sign/symptom
+def split_human_info(text):
+    if pd.isna(text) or text.strip() == "":
+        return None, None
+    parts = text.split("_")
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return text.strip(), None
+
+# Apply function to human-labeled columns and correctly combine OS_SS_1 and OS_SS_2
+df[['Human_Problem_1', 'Human_Symptom_1']] = df['OS_SS_1'].apply(lambda x: pd.Series(split_human_info(x)))
+df[['Human_Problem_2', 'Human_Symptom_2']] = df['OS_SS_2'].apply(lambda x: pd.Series(split_human_info(x)))
+
+# Properly merge human-identified problems and symptoms while handling NaN values
+df['Human_Problem'] = df[['Human_Problem_1', 'Human_Problem_2']].apply(lambda x: ', '.join(x.dropna().astype(str)) if x.notna().any() else 'None', axis=1)
+df['Human_Symptom'] = df[['Human_Symptom_1', 'Human_Symptom_2']].apply(lambda x: ', '.join(x.dropna().astype(str)) if x.notna().any() else 'None', axis=1)
+
+# Drop intermediate columns
+df.drop(columns=['Human_Problem_1', 'Human_Symptom_1', 'Human_Problem_2', 'Human_Symptom_2'], inplace=True)
+
+# Function to compute fuzzy matching, ensuring 'None' values match each other
+def fuzzy_match(pred, true, threshold=80):
+    if (pred == "None" and true == "None") or (pd.isna(pred) and pd.isna(true)):
+        return True
+    if pd.isna(pred) or pd.isna(true) or pred.strip() == "" or true.strip() == "":
+        return False
+    return fuzz.ratio(str(pred).lower(), str(true).lower()) >= threshold
+
+# Compute match status
+df['Problem_Match'] = df.apply(lambda row: fuzzy_match(str(row['GPT_Problem']), str(row['Human_Problem'])), axis=1)
+df['Symptom_Match'] = df.apply(lambda row: fuzzy_match(str(row['GPT_Symptom']), str(row['Human_Symptom'])), axis=1)
+
+# Count matched and not matched cases
+problem_matched_count = df['Problem_Match'].sum()
+problem_not_matched_count = len(df) - problem_matched_count
+symptom_matched_count = df['Symptom_Match'].sum()
+symptom_not_matched_count = len(df) - symptom_matched_count
+
+
+# Compute precision, recall, and F1 score
+def compute_metrics(matches, total_pred, total_true):
+    tp = matches
+    fn = total_true - matches
+    fp = total_pred - matches
+    #fp = fn  # Assume FP = FN for consistency with manual calculations
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+    return precision, recall, f1_score
+
+# Update the metric calculations
+total_gpt_problems = df['GPT_Problem'].notna().sum()
+total_human_problems = df['Human_Problem'].notna().sum()
+total_gpt_symptoms = df['GPT_Symptom'].notna().sum()
+total_human_symptoms = df['Human_Symptom'].notna().sum()
+
+problem_precision, problem_recall, problem_f1 = compute_metrics(problem_matched_count, total_gpt_problems, total_human_problems)
+symptom_precision, symptom_recall, symptom_f1 = compute_metrics(symptom_matched_count, total_gpt_symptoms, total_human_symptoms)
+
+# Update the print statements
+print(f"Problem Matching - Matched: {problem_matched_count}, GPT Total: {total_gpt_problems}, Human Total: {total_human_problems}")
+print(f"Problem Precision: {problem_precision:.4f}, Recall: {problem_recall:.4f}, F1 Score: {problem_f1:.4f}")
+print(f"Symptom Matching - Matched: {symptom_matched_count}, GPT Total: {total_gpt_symptoms}, Human Total: {total_human_symptoms}")
+print(f"Symptom Precision: {symptom_precision:.4f}, Recall: {symptom_recall:.4f}, F1 Score: {symptom_f1:.4f}")
+import pandas as pd
+import re
+from thefuzz import fuzz
+
+# Load the dataset
+file_path = "/content/drive/MyDrive/mapped_results25.xlsx"
+#file_path="/content/drive/MyDrive/Omaha/Processed_Conversation_Data_BACKUP.xlsx"
+df = pd.read_excel(file_path)
+
+# Function to extract problem and sign/symptom from GPT identified content
+def extract_omaha_info(text):
+    problem, symptoms = None, None
+    if pd.notna(text):
+        text = re.sub(r"-\s*", "", text)  # Remove leading dashes
+        text = text.replace("**Problem:**", "Problem: ").replace("**Signs/Symptoms:**", "Signs/Symptoms: ")
+        parts = text.split("\n")
+        for part in parts:
+            if "Problem:" in part:
+                problem = part.replace("Problem:", "").strip()
+            if "Signs/Symptoms:" in part:
+                symptoms = part.replace("Signs/Symptoms:", "").strip()
+    return problem, symptoms
+
+# Extract problems and symptoms from GPT-identified column
+df[['GPT_Problem', 'GPT_Symptom']] = df['Omaha_Classification'].apply(lambda x: pd.Series(extract_omaha_info(x)))
+
+# Function to split human-identified problem and sign/symptom
+def split_human_info(text):
+    if pd.isna(text):
+        return None, None
+    parts = text.split("_")
+    if len(parts) == 2:
+        return parts[0].strip(), parts[1].strip()
+    return text.strip(), None
+
+# Apply function to human-labeled columns
+df[['Human_Problem_OS1', 'Human_Symptom_OS1']] = df['OS_SS_1'].apply(lambda x: pd.Series(split_human_info(x)))
+df[['Human_Problem_OS2', 'Human_Symptom_OS2']] = df['OS_SS_2'].apply(lambda x: pd.Series(split_human_info(x)))
+
+# Combine OS_SS1 and OS_SS2 into unified sets for human-labeled problems and symptoms
+all_human_problems = set(df['Human_Problem_OS1'].dropna()).union(set(df['Human_Problem_OS2'].dropna()))
+all_human_symptoms = set(df['Human_Symptom_OS1'].dropna()).union(set(df['Human_Symptom_OS2'].dropna()))
+
+# Aggregate unique problems and symptoms across all utterances into a single conversation-level record
+all_gpt_problems = set(df['GPT_Problem'].dropna())
+all_gpt_symptoms = set(df['GPT_Symptom'].dropna())
+all_gpt_omaha = set(df['Omaha_Classification'].dropna())
+all_human_os_ss1 = set(df['OS_SS_1'].dropna())
+all_human_os_ss2 = set(df['OS_SS_2'].dropna())
+
+# Function to compute exact matches
+def compute_exact_matches(pred_set, true_set):
+    return len(pred_set & true_set)
+
+# Function to compute fuzzy matching
+def fuzzy_match_sets(pred_set, true_set, threshold=80):
+    return {pred for pred in pred_set if any(fuzz.ratio(str(pred).lower(), str(true).lower()) >= threshold for true in true_set)}
+
+# Compute matches
+exact_problem_matches = compute_exact_matches(all_gpt_problems, all_human_problems)
+fuzzy_problem_matches_set = fuzzy_match_sets(all_gpt_problems, all_human_problems)
+fuzzy_problem_matches = len(fuzzy_problem_matches_set)
+exact_symptom_matches = compute_exact_matches(all_gpt_symptoms, all_human_symptoms)
+fuzzy_symptom_matches_set = fuzzy_match_sets(all_gpt_symptoms, all_human_symptoms)
+fuzzy_symptom_matches = len(fuzzy_symptom_matches_set)
+
+# Count total unmatched cases
+unmatched_problems = len(all_human_problems) - fuzzy_problem_matches
+unmatched_symptoms = len(all_human_symptoms) - fuzzy_symptom_matches
+
+
+
+# Compute precision, recall, and F1 score
+
+def compute_metrics(matches, total_pred, total_true):
+    tp = matches
+    fn = total_true - matches
+    fp = total_pred - matches
+
+    #fp = fn  # Assume FP = FN for consistency with manual calculations
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+
+    return precision, recall, f1_score
+
+problem_precision, problem_recall, problem_f1 = compute_metrics(fuzzy_problem_matches, len(all_gpt_problems), len(all_human_problems))
+symptom_precision, symptom_recall, symptom_f1 = compute_metrics(fuzzy_symptom_matches, len(all_gpt_symptoms), len(all_human_symptoms))
+
+# Save results
+df_results = pd.DataFrame({
+    'GPT_Problems': [all_gpt_problems],
+    'GPT_Symptoms': [all_gpt_symptoms],
+    'Human_Problems': [all_human_problems],
+    'Human_Symptoms': [all_human_symptoms],
+    'Matched_Symptoms': [fuzzy_symptom_matches_set],
+    'Original_GPT_Omaha': [all_gpt_omaha],
+    'Original_Human_OS_SS1': [all_human_os_ss1],
+    'Original_Human_OS_SS2': [all_human_os_ss2],
+    'Exact_Problem_Matches': [exact_problem_matches],
+    'Fuzzy_Problem_Matches': [fuzzy_problem_matches],
+    'Exact_Symptom_Matches': [exact_symptom_matches],
+    'Fuzzy_Symptom_Matches': [fuzzy_symptom_matches],
+    'Unmatched_Problems': [unmatched_problems],
+    'Unmatched_Symptoms': [unmatched_symptoms]
+})
+
+print(f"Problem Precision: {problem_precision:.4f}, Recall: {problem_recall:.4f}, F1 Score: {problem_f1:.4f}")
+print(f"Symptom Precision: {symptom_precision:.4f}, Recall: {symptom_recall:.4f}, F1 Score: {symptom_f1:.4f}")
+print(f"Unmatched Problems: {unmatched_problems}, Unmatched Symptoms: {unmatched_symptoms}")
+print(f"matched Problems: {fuzzy_problem_matches}, matched Symptoms: {fuzzy_symptom_matches}")
+print(f"Matched Symptoms: {fuzzy_problem_matches_set}")
+print(f"Matched Symptoms: {fuzzy_symptom_matches_set}")
+import pandas as pd
+import re
+from thefuzz import fuzz
+
+# Load data
+df = pd.read_excel("/content/drive/MyDrive/mapped_results25.xlsx")
+
+# 1. Convert Omaha_Classification to problem_sign/symptom format
+def convert_omaha_to_pair(text):
+    """Convert LLM output to standardized problem_symptom format"""
+    if pd.notna(text):
+        problem = re.search(r"Problem:\s*(.*?)(?=\n|$)", text, re.IGNORECASE)
+        symptom = re.search(r"Signs/Symptoms:\s*(.*?)(?=\n|$)", text, re.IGNORECASE)
+
+        if problem and symptom:
+            # Clean and standardize formatting
+            p = problem.group(1).strip().replace("_", " ").lower()
+            s = symptom.group(1).strip().replace("_", " ").lower()
+            return f"{p}_{s}"
+    return None
+
+# Create standardized pairs for LLM
+df['LLM_Pair'] = df['Omaha_Classification'].apply(convert_omaha_to_pair)
+
+# 2. Get all unique human pairs from OS_SS_1 and OS_SS_2 columns
+# Get all human pairs as a list (not a set)
+human_pairs = set()
+for col in ['OS_SS_1', 'OS_SS_2']:
+    human_pairs.update(
+        [x.lower().strip().replace(" ", "_") for x in df[col].dropna() if "_" in x]
+    )
+
+
+# Get unique LLM pairs
+llm_pairs = set(df['LLM_Pair'].dropna())
+
+# 3. Split unique pairs into components (problems and symptoms)
+def split_components(pairs):
+    problems, symptoms = [], []
+    for pair in pairs:
+        if "_" in pair:
+            p, s = pair.split("_", 1)
+            problems.append(p)
+            symptoms.append(s)
+    return problems, symptoms
+
+# Split unique LLM and human pairs into problems and symptoms
+llm_problems, llm_symptoms = split_components(llm_pairs)
+human_problems, human_symptoms = split_components(human_pairs)
+
+# 4. Matching function
+def match_components(predicted, reference, threshold=80):
+    matches = 0
+    matched_reference = []  # Track matched reference items (allow duplicates)
+    reference_list = list(reference)  # Convert set to list for counting duplicates
+    for p in predicted:
+        for r in reference_list:
+            if fuzz.ratio(p, r) >= threshold and matched_reference.count(r) < reference_list.count(r):
+                matches += 1
+                matched_reference.append(r)  # Track this match (including duplicates)
+                break
+    return matches
+
+
+
+# 5. Metric calculation function
+def calculate_metrics(matches, predicted_count, reference_count):
+    precision = matches / predicted_count if predicted_count > 0 else 0
+    recall = matches / reference_count if reference_count > 0 else 0
+    f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+    return precision, recall, f1
+
+
+# Pair-level evaluation (unique pairs)
+pair_matches = match_components(llm_pairs, human_pairs)
+pair_precision, pair_recall, pair_f1 = calculate_metrics(pair_matches, len(llm_pairs), len(human_pairs))
+
+# Problem-level evaluation (all problems derived from unique pairs)
+problem_matches = match_components(llm_problems, human_problems)
+prob_precision, prob_recall, prob_f1 = calculate_metrics(problem_matches, len(llm_problems), len(human_problems))
+
+# Symptom-level evaluation (all symptoms derived from unique pairs)
+symptom_matches = match_components(llm_symptoms, human_symptoms)
+symp_precision, symp_recall, symp_f1 = calculate_metrics(symptom_matches, len(llm_symptoms), len(human_symptoms))
+
+# Results
+print("=== Pair-level Evaluation ===")
+print(f"Precision: {pair_precision:.2f}, Recall: {pair_recall:.2f}, F1: {pair_f1:.2f}")
+print(f"\nTotal Unique LLM Pairs: {len(llm_pairs)} | Total Unique Human Pairs: {len(human_pairs)}")
+print(f"Matched Pairs: {pair_matches}")
+
+print("\n=== Component-level Evaluation ===")
+print(f"Problems - Precision: {prob_precision:.2f}, Recall: {prob_recall:.2f}, F1: {prob_f1:.2f}")
+print(f"Symptoms - Precision: {symp_precision:.2f}, Recall: {symp_recall:.2f}, F1: {symp_f1:.2f}")
+print(f"\nTotal Problems Derived from Unique LLM Pairs: {len(llm_problems)} | Total Problems Derived from Unique Human Pairs: {len(human_problems)}")
+print(f"Total Symptoms Derived from Unique LLM Pairs: {len(llm_symptoms)} | Total Symptoms Derived from Unique Human Pairs: {len(human_symptoms)}")
+print(f"LLM Pairs: {llm_pairs}")
+print(f"Human Pairs: {human_pairs}")
+print(f"LLM Problems: {llm_problems}")
+print(f"Human Problems: {human_problems}")
+print(f"LLM Symptoms: {llm_symptoms}")
+print(f"Human Symptoms: {human_symptoms}")
+
