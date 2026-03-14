@@ -7,13 +7,26 @@ Maps clinical conversation turns to Omaha System classifications:
 
 Architecture:
   - RAG: Sentence-Transformers embeddings + cosine-similarity retrieval
-  - LLM: OpenAI (gpt-4o-mini / o3-mini) or HuggingFace Inference API
+  - LLM: local HuggingFace model (data never leaves AWS) OR
+         Azure OpenAI with HIPAA BAA (optional)
   - Evaluation: row-level fuzzy matching, micro P/R/F1
+
+PRIVACY NOTE:
+  Patient data stays entirely within AWS.
+  - Local models: loaded onto the SageMaker GPU instance; no external calls.
+  - Azure OpenAI: only use if your organisation has a signed HIPAA BAA with
+    Microsoft. Standard OpenAI API (api.openai.com) is NOT covered by HIPAA
+    without an enterprise agreement.
+  - HuggingFace Inference API: NEVER use with real patient data.
 
 Input  (S3): Omaha_system list with definition.xlsx
              Completed_annotation.xlsx  (23 conversation sheets)
 Output (S3): output/<model>_<timestamp>_results.xlsx
              output/<model>_<timestamp>_summary.json
+
+Recommended SageMaker instances for local models:
+  Mistral-7B / Llama3-8B (4-bit):  ml.g5.xlarge   (1× A10G 24 GB, ~$1.41/hr)
+  Llama3-70B (4-bit, ~35 GB VRAM): ml.g5.12xlarge  (4× A10G 96 GB, ~$5.67/hr)
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -30,11 +43,17 @@ from tqdm import tqdm
 from thefuzz import fuzz
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
-from openai import OpenAI          # pip install openai>=1.0
+
+# Local model imports (only used when provider == "local")
+# These are pre-installed on SageMaker GPU images; no extra pip install needed.
+import torch
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO, format="%(levelname)s | %(message)s")
 log = logging.getLogger(__name__)
+
+# ── Lazy global for local model (loaded once, reused across all calls) ─────────
+_local_pipeline = None
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 1 — CONFIGURATION
@@ -54,51 +73,82 @@ EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
 
 # ── LLM configuration ─────────────────────────────────────────────────────────
 # Set ACTIVE_LLM to one of the keys below.
+#
+# PRIVACY GUIDE:
+#   provider = "local"       → model runs on SageMaker GPU; no data leaves AWS ✓
+#   provider = "azure_openai"→ only if your org has a HIPAA BAA with Microsoft ✓
+#   provider = "openai"      → only if your org has an OpenAI Enterprise BAA   ✓
+#   provider = "huggingface" → DO NOT use with real patient data               ✗
+#
 LLM_CONFIGS = {
-    # --- OpenAI (requires OPENAI_API_KEY env var) ---
+    # ── Local models (data stays on SageMaker) ────────────────────────────────
+    # Requires GPU instance. Model is downloaded from HuggingFace on first run
+    # and cached in /tmp or EFS. No patient data is ever sent externally.
+    "llama3-8b-local": {
+        "provider":    "local",
+        "model":       "meta-llama/Meta-Llama-3.1-8B-Instruct",
+        # Recommended instance: ml.g5.xlarge (1× A10G 24 GB)
+        # 4-bit quantisation fits comfortably; fast inference (~2 s/call)
+        "load_in_4bit": True,
+        "kwargs":      {"max_new_tokens": 500, "temperature": 0.05, "do_sample": True},
+    },
+    "mistral-7b-local": {
+        "provider":    "local",
+        "model":       "mistralai/Mistral-7B-Instruct-v0.3",
+        # Recommended instance: ml.g5.xlarge  (same as above)
+        "load_in_4bit": True,
+        "kwargs":      {"max_new_tokens": 500, "temperature": 0.05, "do_sample": True},
+    },
+    "llama3-70b-local": {
+        "provider":    "local",
+        "model":       "meta-llama/Meta-Llama-3.3-70B-Instruct",
+        # Recommended instance: ml.g5.12xlarge (4× A10G 96 GB)
+        # 4-bit quantisation needs ~35 GB VRAM; slower (~15 s/call)
+        "load_in_4bit": True,
+        "kwargs":      {"max_new_tokens": 500, "temperature": 0.05, "do_sample": True},
+    },
+    # ── Azure OpenAI (HIPAA BAA required) ────────────────────────────────────
+    # Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY env vars.
+    # Your deployment name goes in "model" field.
+    "azure-gpt4o-mini": {
+        "provider":    "azure_openai",
+        "model":       "gpt-4o-mini",          # Azure deployment name
+        "kwargs":      {"temperature": 0.05, "max_tokens": 500},
+    },
+    # ── Standard OpenAI (only if you have an Enterprise HIPAA BAA) ────────────
     "gpt-4o-mini": {
         "provider": "openai",
         "model":    "gpt-4o-mini",
         "kwargs":   {"temperature": 0.05, "max_tokens": 500},
     },
-    "o3-mini": {
-        "provider": "openai",
-        "model":    "o3-mini",
-        "kwargs":   {},
-    },
-    # --- HuggingFace Inference API (requires HF_TOKEN env var) ---
-    # Free tier supports many models; some need Pro/Enterprise.
-    "mistral-7b": {
-        "provider": "huggingface",
-        "model":    "mistralai/Mistral-7B-Instruct-v0.3",
-        "kwargs":   {"max_new_tokens": 500, "temperature": 0.05},
-    },
-    "llama3-8b": {
-        "provider": "huggingface",
-        "model":    "meta-llama/Meta-Llama-3.1-8B-Instruct",
-        "kwargs":   {"max_new_tokens": 500, "temperature": 0.05},
-    },
-    "llama3-70b": {
-        "provider": "huggingface",
-        "model":    "meta-llama/Meta-Llama-3.3-70B-Instruct",
-        "kwargs":   {"max_new_tokens": 500, "temperature": 0.05},
-    },
 }
 
-ACTIVE_LLM = "gpt-4o-mini"   # ← change to compare models
+# ← Set this to the model you want to run
+ACTIVE_LLM = "llama3-8b-local"
 
-# To run ALL models sequentially and compare, set:
+# To run multiple models sequentially and compare results, set:
 # COMPARE_ALL_MODELS = True
-COMPARE_ALL_MODELS = False
+# MODELS_TO_COMPARE  = ["llama3-8b-local", "mistral-7b-local"]
+COMPARE_ALL_MODELS  = False
+MODELS_TO_COMPARE   = ["llama3-8b-local", "mistral-7b-local"]
 
 # ── Pipeline settings ─────────────────────────────────────────────────────────
 CONTEXT_WINDOW  = 2    # rows before/after current turn to include as context
 TOP_K_RETRIEVAL = 15   # number of Omaha options sent to the LLM
 FUZZY_THRESHOLD = 80   # minimum fuzz.ratio for a match (0–100)
 
-# ── API keys (set as SageMaker env vars or paste here for testing) ─────────────
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
-HF_TOKEN       = os.environ.get("HF_TOKEN", "")
+# ── API / model credentials ────────────────────────────────────────────────────
+# For local models: set HF_TOKEN so the model can be downloaded from HuggingFace.
+# The token is only used for the initial download; it is not sent with patient data.
+HF_TOKEN              = os.environ.get("HF_TOKEN", "")
+
+# For Azure OpenAI (if using "azure_openai" provider):
+AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "")   # e.g. https://xxx.openai.azure.com/
+AZURE_OPENAI_API_KEY  = os.environ.get("AZURE_OPENAI_API_KEY",  "")
+AZURE_API_VERSION     = "2024-08-01-preview"
+
+# For standard OpenAI (enterprise BAA only):
+OPENAI_API_KEY        = os.environ.get("OPENAI_API_KEY", "")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 2 — S3 HELPERS
@@ -248,51 +298,125 @@ def retrieve(query: str, docs: list[dict], embeddings: np.ndarray,
 # SECTION 4 — LLM CLIENTS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _call_openai(prompt: str, config: dict) -> str:
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    resp   = client.chat.completions.create(
+def _load_local_model(config: dict):
+    """
+    Load a HuggingFace model onto the local GPU (once; cached in _local_pipeline).
+    Uses 4-bit quantisation via bitsandbytes to fit large models on smaller GPUs.
+
+    First call takes 2–5 minutes (model download + load).
+    Subsequent calls are instant (model stays in GPU memory).
+    """
+    global _local_pipeline
+    if _local_pipeline is not None:
+        return _local_pipeline
+
+    from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, BitsAndBytesConfig
+
+    model_id    = config["model"]
+    load_in_4bit = config.get("load_in_4bit", True)
+
+    log.info(f"Loading local model: {model_id}  (4-bit={load_in_4bit})")
+    log.info("This takes 2–5 min on first run. Model is cached after that.")
+
+    # Login to HuggingFace for gated models (Llama3 requires accepting licence)
+    if HF_TOKEN:
+        from huggingface_hub import login
+        login(token=HF_TOKEN, add_to_git_credential=False)
+
+    quant_cfg = None
+    if load_in_4bit:
+        quant_cfg = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+        )
+
+    tokenizer = AutoTokenizer.from_pretrained(model_id, token=HF_TOKEN)
+    model     = AutoModelForCausalLM.from_pretrained(
+        model_id,
+        quantization_config=quant_cfg,
+        device_map="auto",          # spreads across all available GPUs
+        torch_dtype=torch.bfloat16 if not load_in_4bit else None,
+        token=HF_TOKEN,
+    )
+
+    _local_pipeline = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        device_map="auto",
+    )
+    log.info(f"Model loaded. Device map: {model.hf_device_map}")
+    return _local_pipeline
+
+
+def _call_local(prompt: str, config: dict) -> str:
+    """Run inference locally on the SageMaker GPU. No data leaves AWS."""
+    pipe    = _load_local_model(config)
+    kwargs  = config.get("kwargs", {"max_new_tokens": 500, "temperature": 0.05})
+    outputs = pipe(prompt, return_full_text=False, **kwargs)
+    return outputs[0]["generated_text"].strip()
+
+
+def _call_azure_openai(prompt: str, config: dict) -> str:
+    """Azure OpenAI — use only if HIPAA BAA is in place with Microsoft."""
+    from openai import AzureOpenAI
+    client = AzureOpenAI(
+        azure_endpoint=AZURE_OPENAI_ENDPOINT,
+        api_key=AZURE_OPENAI_API_KEY,
+        api_version=AZURE_API_VERSION,
+    )
+    resp = client.chat.completions.create(
         model=config["model"],
         messages=[{"role": "user", "content": prompt}],
-        **config.get("kwargs", {})
+        **config.get("kwargs", {}),
     )
     return resp.choices[0].message.content.strip()
 
 
-def _call_huggingface(prompt: str, config: dict) -> str:
-    """
-    Uses HuggingFace Inference API (serverless).
-    Free tier: ~1000 req/day for many models.
-    Set HF_TOKEN env var.
-    """
-    from huggingface_hub import InferenceClient
-    client = InferenceClient(model=config["model"], token=HF_TOKEN)
-    resp   = client.text_generation(
-        prompt,
-        **config.get("kwargs", {"max_new_tokens": 500, "temperature": 0.05}),
+def _call_openai(prompt: str, config: dict) -> str:
+    """Standard OpenAI — only if enterprise HIPAA BAA is in place."""
+    from openai import OpenAI
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    resp   = client.chat.completions.create(
+        model=config["model"],
+        messages=[{"role": "user", "content": prompt}],
+        **config.get("kwargs", {}),
     )
-    return resp.strip()
+    return resp.choices[0].message.content.strip()
 
 
 def call_llm(prompt: str, llm_name: str = ACTIVE_LLM,
-             max_retries: int = 4) -> str:
-    """Unified LLM call with exponential-backoff retry."""
-    config = LLM_CONFIGS[llm_name]
+             max_retries: int = 3) -> str:
+    """
+    Unified LLM call with exponential-backoff retry.
+
+    Local models don't need retries (no network); retries only help for API calls.
+    """
+    config   = LLM_CONFIGS[llm_name]
     provider = config["provider"]
 
     for attempt in range(max_retries):
         try:
-            if provider == "openai":
+            if provider == "local":
+                # Local: no retry needed — if it fails it's a code/memory error
+                return _call_local(prompt, config)
+            elif provider == "azure_openai":
+                return _call_azure_openai(prompt, config)
+            elif provider == "openai":
                 return _call_openai(prompt, config)
-            elif provider == "huggingface":
-                return _call_huggingface(prompt, config)
             else:
                 raise ValueError(f"Unknown provider: {provider}")
         except Exception as e:
+            if provider == "local":
+                log.error(f"Local model call failed: {e}")
+                return "Error: local model call failed"
             wait = 2 ** attempt
-            log.warning(f"LLM call failed (attempt {attempt+1}): {e}. Retrying in {wait}s …")
+            log.warning(f"API call failed (attempt {attempt+1}): {e}. Retry in {wait}s …")
             time.sleep(wait)
 
-    log.error("All LLM retries exhausted.")
+    log.error("All retries exhausted.")
     return "Error: LLM call failed"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -881,13 +1005,24 @@ def run_pipeline(llm_name: str = ACTIVE_LLM):
 def compare_models(models_to_compare: list[str] = None):
     """
     Run the full pipeline for each model and produce a side-by-side comparison.
+    NOTE: when switching between local models the old model is unloaded first
+    to free GPU memory.
     """
+    global _local_pipeline
     if models_to_compare is None:
-        models_to_compare = list(LLM_CONFIGS.keys())
+        models_to_compare = MODELS_TO_COMPARE
 
     all_summaries = {}
     for model_name in models_to_compare:
         log.info(f"\n{'#'*60}\nRunning model: {model_name}\n{'#'*60}")
+
+        # Free previous local model from GPU memory before loading the next one
+        if _local_pipeline is not None:
+            log.info("Unloading previous local model to free GPU memory …")
+            del _local_pipeline
+            _local_pipeline = None
+            torch.cuda.empty_cache()
+
         try:
             summary = run_pipeline(llm_name=model_name)
             all_summaries[model_name] = summary
