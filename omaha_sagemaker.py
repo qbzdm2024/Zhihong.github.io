@@ -123,17 +123,27 @@ LLM_CONFIGS = {
     },
 }
 
-# ← Set this to the model you want to run.
-# If using a school/institution-provided OpenAI key with a HIPAA BAA,
-# "gpt-4o-mini" is the recommended starting point: fast, cheap, high quality.
-# Switch to a local model only if you lose access to the key or need offline use.
+# ── Single-model run ──────────────────────────────────────────────────────────
+# Used when COMPARE_ALL_MODELS = False
 ACTIVE_LLM = "gpt-4o-mini"
 
-# To run multiple models sequentially and compare results, set:
-# COMPARE_ALL_MODELS = True
-# MODELS_TO_COMPARE  = ["gpt-4o-mini", "llama3-8b-local", "mistral-7b-local"]
-COMPARE_ALL_MODELS  = False
-MODELS_TO_COMPARE   = ["gpt-4o-mini", "llama3-8b-local", "mistral-7b-local"]
+# ── Multi-model comparison ────────────────────────────────────────────────────
+# Set COMPARE_ALL_MODELS = True to benchmark several models back-to-back.
+# The RAG index is built ONCE and shared across all models (no redundant S3 reads).
+# Results per model are saved individually; a side-by-side comparison Excel is
+# produced at the end.
+#
+# Instance guide:
+#   OpenAI only              → ml.t3.medium  (~$0.05/hr, CPU is enough)
+#   + one local 7/8B model   → ml.g5.xlarge  (~$1.41/hr, 1× A10G 24 GB)
+#   + Llama3-70B             → ml.g5.12xlarge (~$5.67/hr, 4× A10G 96 GB)
+#
+COMPARE_ALL_MODELS = True
+MODELS_TO_COMPARE  = [
+    "gpt-4o-mini",        # OpenAI — school HIPAA key
+    "mistral-7b-local",   # open-source 7B — local GPU
+    "llama3-8b-local",    # open-source 8B — local GPU
+]
 
 # ── Pipeline settings ─────────────────────────────────────────────────────────
 CONTEXT_WINDOW  = 2    # rows before/after current turn to include as context
@@ -811,55 +821,81 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
     }
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 9 — MAIN PIPELINE
+# SECTION 9 — SHARED INDEX BUILDER
+# Builds the RAG index and loads annotation data ONCE, shared across all models.
 # ══════════════════════════════════════════════════════════════════════════════
 
-def run_pipeline(llm_name: str = ACTIVE_LLM):
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log.info(f"{'='*60}")
-    log.info(f"Starting Omaha Mapping Pipeline | LLM: {llm_name}")
-    log.info(f"{'='*60}")
+def build_shared_resources() -> dict:
+    """
+    Load Omaha system, build embeddings, and read all annotation sheets.
+    Returns a dict of shared resources passed to run_inference().
+    Called once per session, even when comparing multiple models.
+    """
+    log.info("Building shared RAG index (runs once for all models) …")
 
-    # ── Load Omaha System ─────────────────────────────────────────────────────
     ss_df, int_df = load_omaha_system(S3_BUCKET, OMAHA_KEY)
     ss_docs       = build_ss_documents(ss_df)
     int_docs      = build_intervention_documents(int_df)
 
-    # ── Build embeddings ──────────────────────────────────────────────────────
     log.info(f"Loading embedding model: {EMBEDDING_MODEL}")
     embed_model    = SentenceTransformer(EMBEDDING_MODEL)
     ss_embeddings  = build_index(ss_docs,  embed_model)
     int_embeddings = build_index(int_docs, embed_model)
-    log.info("Indices ready.")
 
-    # ── Load annotation data ──────────────────────────────────────────────────
+    log.info("Reading annotation data from S3 …")
     annotation_sheets = s3_read_excel(S3_BUCKET, ANNOTATION_KEY)
-    log.info(f"Annotation sheets: {len(annotation_sheets)}")
+    # Standardise column names once
+    annotation_sheets = {
+        name: df.rename(columns=str.strip).fillna("")
+        for name, df in annotation_sheets.items()
+    }
+    log.info(f"Shared index ready. Annotation sheets: {len(annotation_sheets)}")
 
-    # ── Process each conversation ─────────────────────────────────────────────
-    output_sheets   = {}   # sheet_name → processed DataFrame
-    sheet_metrics   = []   # list of per-sheet metric dicts
+    return {
+        "ss_docs":          ss_docs,
+        "ss_embeddings":    ss_embeddings,
+        "int_docs":         int_docs,
+        "int_embeddings":   int_embeddings,
+        "embed_model":      embed_model,
+        "annotation_sheets": annotation_sheets,
+    }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 10 — RUN INFERENCE FOR ONE MODEL
+# ══════════════════════════════════════════════════════════════════════════════
+
+def run_inference(llm_name: str, resources: dict) -> dict:
+    """
+    Run the full inference + evaluation pipeline for one LLM, using
+    pre-built shared resources (no repeated S3 reads or index rebuilds).
+
+    Returns the summary dict and saves results to S3.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log.info(f"\n{'='*60}")
+    log.info(f"Running inference  |  LLM: {llm_name}")
+    log.info(f"{'='*60}")
+
+    ss_docs          = resources["ss_docs"]
+    ss_embeddings    = resources["ss_embeddings"]
+    int_docs         = resources["int_docs"]
+    int_embeddings   = resources["int_embeddings"]
+    embed_model      = resources["embed_model"]
+    annotation_sheets = resources["annotation_sheets"]
+
+    output_sheets = {}
+    sheet_metrics = []
     global_ss_tp = global_ss_fp = global_ss_fn = 0
     global_i_tp  = global_i_fp  = global_i_fn  = 0
 
     for sheet_name, conv_df in tqdm(annotation_sheets.items(),
-                                    desc="Processing conversations"):
-        log.info(f"\n--- Sheet: {sheet_name} ---")
-
-        # Standardise column names
-        conv_df.columns = [c.strip() for c in conv_df.columns]
-        conv_df = conv_df.fillna("")
-
+                                    desc=f"[{llm_name}] sheets"):
         try:
-            df_out = process_sheet(
-                conv_df,
-                ss_docs, ss_embeddings,
-                int_docs, int_embeddings,
-                embed_model,
-                llm_name,
-            )
+            df_out  = process_sheet(conv_df, ss_docs, ss_embeddings,
+                                    int_docs, int_embeddings,
+                                    embed_model, llm_name)
             metrics = evaluate_sheet(df_out)
-
         except Exception as e:
             log.error(f"Sheet '{sheet_name}' failed: {e}")
             df_out  = conv_df.copy()
@@ -871,30 +907,25 @@ def run_pipeline(llm_name: str = ACTIVE_LLM):
         metrics["sheet"] = sheet_name
         sheet_metrics.append(metrics)
 
-        # Accumulate global counts
         global_ss_tp += metrics["ss_tp"];  global_ss_fp += metrics["ss_fp"]
         global_ss_fn += metrics["ss_fn"]
         global_i_tp  += metrics["int_tp"]; global_i_fp  += metrics["int_fp"]
         global_i_fn  += metrics["int_fn"]
 
-        # Store processed sheet (safe sheet name ≤ 31 chars)
         safe = re.sub(r"[\\/*?:\[\]]", "_", sheet_name)[:31]
         output_sheets[safe] = df_out
 
         log.info(
-            f"SS  → P={metrics['ss_precision']:.3f}  R={metrics['ss_recall']:.3f}  "
-            f"F1={metrics['ss_f1']:.3f}"
-        )
-        log.info(
-            f"Int → P={metrics['int_precision']:.3f}  R={metrics['int_recall']:.3f}  "
-            f"F1={metrics['int_f1']:.3f}"
+            f"  SS  P={metrics['ss_precision']:.3f} "
+            f"R={metrics['ss_recall']:.3f} F1={metrics['ss_f1']:.3f}  |  "
+            f"Int P={metrics['int_precision']:.3f} "
+            f"R={metrics['int_recall']:.3f} F1={metrics['int_f1']:.3f}"
         )
 
-    # ── Aggregate metrics ─────────────────────────────────────────────────────
-    global_ss_p,  global_ss_r,  global_ss_f1  = compute_prf(global_ss_tp,  global_ss_fp,  global_ss_fn)
-    global_int_p, global_int_r, global_int_f1 = compute_prf(global_i_tp,   global_i_fp,   global_i_fn)
+    # ── Aggregate ─────────────────────────────────────────────────────────────
+    gss_p, gss_r, gss_f1  = compute_prf(global_ss_tp, global_ss_fp, global_ss_fn)
+    gi_p,  gi_r,  gi_f1   = compute_prf(global_i_tp,  global_i_fp,  global_i_fn)
 
-    # Macro averages (mean across sheets, for comparison to prior work)
     macro_ss_p  = np.mean([m["ss_precision"]  for m in sheet_metrics])
     macro_ss_r  = np.mean([m["ss_recall"]     for m in sheet_metrics])
     macro_ss_f1 = np.mean([m["ss_f1"]         for m in sheet_metrics])
@@ -903,164 +934,212 @@ def run_pipeline(llm_name: str = ACTIVE_LLM):
     macro_i_f1  = np.mean([m["int_f1"]        for m in sheet_metrics])
 
     summary = {
-        "llm":       llm_name,
-        "embedding": EMBEDDING_MODEL,
-        "timestamp": timestamp,
-        "context_window": CONTEXT_WINDOW,
-        "top_k_retrieval": TOP_K_RETRIEVAL,
+        "llm": llm_name, "embedding": EMBEDDING_MODEL, "timestamp": timestamp,
+        "context_window": CONTEXT_WINDOW, "top_k": TOP_K_RETRIEVAL,
         "fuzzy_threshold": FUZZY_THRESHOLD,
         "signs_symptoms": {
-            "micro": {
-                "precision": global_ss_p,
-                "recall":    global_ss_r,
-                "f1":        global_ss_f1,
-                "tp": global_ss_tp, "fp": global_ss_fp, "fn": global_ss_fn,
-            },
-            "macro": {
-                "precision": round(macro_ss_p,  4),
-                "recall":    round(macro_ss_r,  4),
-                "f1":        round(macro_ss_f1, 4),
-            },
+            "micro":  {"precision": gss_p,  "recall": gss_r,  "f1": gss_f1,
+                       "tp": global_ss_tp, "fp": global_ss_fp, "fn": global_ss_fn},
+            "macro":  {"precision": round(macro_ss_p,4), "recall": round(macro_ss_r,4),
+                       "f1": round(macro_ss_f1,4)},
         },
         "interventions": {
-            "micro": {
-                "precision": global_int_p,
-                "recall":    global_int_r,
-                "f1":        global_int_f1,
-                "tp": global_i_tp, "fp": global_i_fp, "fn": global_i_fn,
-            },
-            "macro": {
-                "precision": round(macro_i_p,  4),
-                "recall":    round(macro_i_r,  4),
-                "f1":        round(macro_i_f1, 4),
-            },
+            "micro":  {"precision": gi_p,   "recall": gi_r,   "f1": gi_f1,
+                       "tp": global_i_tp,  "fp": global_i_fp,  "fn": global_i_fn},
+            "macro":  {"precision": round(macro_i_p,4),  "recall": round(macro_i_r,4),
+                       "f1": round(macro_i_f1,4)},
         },
         "per_sheet": sheet_metrics,
     }
 
-    # ── Build summary sheet ───────────────────────────────────────────────────
-    summary_rows = []
+    # ── Build SUMMARY sheet ────────────────────────────────────────────────────
+    rows = []
     for m in sheet_metrics:
-        summary_rows.append({
-            "Sheet":            m["sheet"],
-            "SS_Precision":     m["ss_precision"],
-            "SS_Recall":        m["ss_recall"],
-            "SS_F1":            m["ss_f1"],
-            "SS_TP":            m["ss_tp"],
-            "SS_FP":            m["ss_fp"],
-            "SS_FN":            m["ss_fn"],
-            "Int_Precision":    m["int_precision"],
-            "Int_Recall":       m["int_recall"],
-            "Int_F1":           m["int_f1"],
-            "Int_TP":           m["int_tp"],
-            "Int_FP":           m["int_fp"],
-            "Int_FN":           m["int_fn"],
+        rows.append({
+            "Sheet":         m["sheet"],
+            "SS_Precision":  m["ss_precision"], "SS_Recall":  m["ss_recall"],
+            "SS_F1":         m["ss_f1"],
+            "SS_TP": m["ss_tp"], "SS_FP": m["ss_fp"], "SS_FN": m["ss_fn"],
+            "Int_Precision": m["int_precision"], "Int_Recall": m["int_recall"],
+            "Int_F1":        m["int_f1"],
+            "Int_TP": m["int_tp"], "Int_FP": m["int_fp"], "Int_FN": m["int_fn"],
         })
-
-    # Add aggregate rows
-    for row_data in [
-        ("MICRO_AGGREGATE", global_ss_p,  global_ss_r,  global_ss_f1,
-                            global_int_p, global_int_r, global_int_f1),
-        ("MACRO_AVERAGE",   round(macro_ss_p,4),  round(macro_ss_r,4),  round(macro_ss_f1,4),
-                            round(macro_i_p,4),   round(macro_i_r,4),   round(macro_i_f1,4)),
+    for label, sp, sr, sf, ip, ir, i_f in [
+        ("MICRO_AGGREGATE", gss_p,               gss_r,               gss_f1,
+                            gi_p,                gi_r,                gi_f1),
+        ("MACRO_AVERAGE",   round(macro_ss_p,4), round(macro_ss_r,4), round(macro_ss_f1,4),
+                            round(macro_i_p,4),  round(macro_i_r,4),  round(macro_i_f1,4)),
     ]:
-        label, sp, sr, sf, ip, ir, i_f = row_data
-        summary_rows.append({
+        rows.append({
             "Sheet": label,
             "SS_Precision": sp,  "SS_Recall": sr,  "SS_F1": sf,
-            "SS_TP": "",         "SS_FP": "",       "SS_FN": "",
+            "SS_TP": "", "SS_FP": "", "SS_FN": "",
             "Int_Precision": ip, "Int_Recall": ir,  "Int_F1": i_f,
-            "Int_TP": "",        "Int_FP": "",       "Int_FN": "",
+            "Int_TP": "", "Int_FP": "", "Int_FN": "",
         })
+    output_sheets["SUMMARY"] = pd.DataFrame(rows)
 
-    output_sheets["SUMMARY"] = pd.DataFrame(summary_rows)
-
-    # ── Save to S3 ────────────────────────────────────────────────────────────
-    results_key = f"{OUTPUT_PREFIX}{llm_name}_{timestamp}_results.xlsx"
-    summary_key = f"{OUTPUT_PREFIX}{llm_name}_{timestamp}_summary.json"
-
+    # ── Save per-model results ─────────────────────────────────────────────────
+    safe_name   = re.sub(r"[^a-zA-Z0-9_-]", "_", llm_name)
+    results_key = f"{OUTPUT_PREFIX}{safe_name}_{timestamp}_results.xlsx"
+    summary_key = f"{OUTPUT_PREFIX}{safe_name}_{timestamp}_summary.json"
     s3_write_excel(output_sheets, S3_BUCKET, results_key)
     s3_write_json(summary, S3_BUCKET, summary_key)
 
-    # ── Print final report ────────────────────────────────────────────────────
-    print("\n" + "=" * 60)
-    print(f"RESULTS  |  Model: {llm_name}")
-    print("=" * 60)
-    print(f"{'Metric':<30} {'Signs/Symptoms':>16}  {'Interventions':>14}")
-    print("-" * 60)
-    print(f"{'Micro Precision':<30} {global_ss_p:>16.4f}  {global_int_p:>14.4f}")
-    print(f"{'Micro Recall':<30} {global_ss_r:>16.4f}  {global_int_r:>14.4f}")
-    print(f"{'Micro F1':<30} {global_ss_f1:>16.4f}  {global_int_f1:>14.4f}")
-    print(f"{'Macro Precision':<30} {macro_ss_p:>16.4f}  {macro_i_p:>14.4f}")
-    print(f"{'Macro Recall':<30} {macro_ss_r:>16.4f}  {macro_i_r:>14.4f}")
-    print(f"{'Macro F1':<30} {macro_ss_f1:>16.4f}  {macro_i_f1:>14.4f}")
-    print("-" * 60)
-    print(f"Global TP/FP/FN (SS):  {global_ss_tp}/{global_ss_fp}/{global_ss_fn}")
-    print(f"Global TP/FP/FN (Int): {global_i_tp}/{global_i_fp}/{global_i_fn}")
-    print("=" * 60)
-    print(f"Results saved to: s3://{S3_BUCKET}/{results_key}")
-    print(f"Summary saved to: s3://{S3_BUCKET}/{summary_key}")
+    # ── Print per-model report ─────────────────────────────────────────────────
+    print(f"\n{'='*62}")
+    print(f"RESULTS  |  {llm_name}")
+    print(f"{'='*62}")
+    print(f"{'Metric':<28} {'Signs/Symptoms':>16}  {'Interventions':>13}")
+    print(f"{'-'*62}")
+    for label, sv, iv in [
+        ("Micro Precision", gss_p,        gi_p),
+        ("Micro Recall",    gss_r,        gi_r),
+        ("Micro F1",        gss_f1,       gi_f1),
+        ("Macro Precision", macro_ss_p,   macro_i_p),
+        ("Macro Recall",    macro_ss_r,   macro_i_r),
+        ("Macro F1",        macro_ss_f1,  macro_i_f1),
+    ]:
+        print(f"{label:<28} {sv:>16.4f}  {iv:>13.4f}")
+    print(f"{'-'*62}")
+    print(f"TP/FP/FN (SS):   {global_ss_tp}/{global_ss_fp}/{global_ss_fn}")
+    print(f"TP/FP/FN (Int):  {global_i_tp}/{global_i_fp}/{global_i_fn}")
+    print(f"{'='*62}")
+    print(f"Saved: s3://{S3_BUCKET}/{results_key}")
 
     return summary
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SECTION 10 — MULTI-MODEL COMPARISON (optional)
+# SECTION 11 — MULTI-MODEL COMPARISON
 # ══════════════════════════════════════════════════════════════════════════════
 
 def compare_models(models_to_compare: list[str] = None):
     """
-    Run the full pipeline for each model and produce a side-by-side comparison.
-    NOTE: when switching between local models the old model is unloaded first
-    to free GPU memory.
+    Benchmark multiple models on the same data.
+
+    - RAG index and annotation data are built ONCE (not per model).
+    - Local models are unloaded from GPU before the next one loads.
+    - Produces per-model Excel results + a side-by-side comparison Excel.
     """
     global _local_pipeline
     if models_to_compare is None:
         models_to_compare = MODELS_TO_COMPARE
 
+    # ── Build shared resources once ────────────────────────────────────────────
+    resources     = build_shared_resources()
     all_summaries = {}
-    for model_name in models_to_compare:
-        log.info(f"\n{'#'*60}\nRunning model: {model_name}\n{'#'*60}")
 
-        # Free previous local model from GPU memory before loading the next one
+    for model_name in models_to_compare:
+        # Free previous local model from GPU before loading the next
         if _local_pipeline is not None:
-            log.info("Unloading previous local model to free GPU memory …")
+            log.info(f"Unloading previous local model to free GPU memory …")
             del _local_pipeline
             _local_pipeline = None
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         try:
-            summary = run_pipeline(llm_name=model_name)
+            summary = run_inference(model_name, resources)
             all_summaries[model_name] = summary
         except Exception as e:
-            log.error(f"Model {model_name} failed: {e}")
+            log.error(f"Model '{model_name}' failed: {e}")
             all_summaries[model_name] = {"error": str(e)}
 
-    # Print comparison table
-    print("\n" + "=" * 80)
-    print("MODEL COMPARISON")
-    print("=" * 80)
-    print(f"{'Model':<25} {'SS_P':>6} {'SS_R':>6} {'SS_F1':>6}  "
-          f"{'Int_P':>6} {'Int_R':>6} {'Int_F1':>6}")
-    print("-" * 80)
+    # ── Side-by-side comparison table (console) ────────────────────────────────
+    W = 22
+    header = f"{'Model':<{W}}"
+    for kind in ("SS", "Int"):
+        header += f"  {kind+'_P':>7} {kind+'_R':>7} {kind+'_F1':>7}"
+    print(f"\n{'='*len(header)}\nMODEL COMPARISON — Micro P / R / F1\n{'='*len(header)}")
+    print(header)
+    print("-" * len(header))
+
     for mn, s in all_summaries.items():
         if "error" in s:
-            print(f"{mn:<25}  ERROR: {s['error']}")
+            print(f"{mn:<{W}}  ERROR: {s['error']}")
             continue
-        ss  = s.get("signs_symptoms", {}).get("micro", {})
-        iv  = s.get("interventions",  {}).get("micro", {})
+        ss = s.get("signs_symptoms", {}).get("micro", {})
+        iv = s.get("interventions",  {}).get("micro", {})
         print(
-            f"{mn:<25} {ss.get('precision',0):>6.4f} {ss.get('recall',0):>6.4f} "
-            f"{ss.get('f1',0):>6.4f}  {iv.get('precision',0):>6.4f} "
-            f"{iv.get('recall',0):>6.4f} {iv.get('f1',0):>6.4f}"
+            f"{mn:<{W}}"
+            f"  {ss.get('precision',0):>7.4f} {ss.get('recall',0):>7.4f} {ss.get('f1',0):>7.4f}"
+            f"  {iv.get('precision',0):>7.4f} {iv.get('recall',0):>7.4f} {iv.get('f1',0):>7.4f}"
         )
-    print("=" * 80)
 
-    # Save comparison to S3
-    ts  = datetime.now().strftime("%Y%m%d_%H%M%S")
-    key = f"{OUTPUT_PREFIX}model_comparison_{ts}.json"
-    s3_write_json(all_summaries, S3_BUCKET, key)
-    print(f"\nComparison saved: s3://{S3_BUCKET}/{key}")
+    print("-" * len(header))
+    print("(also showing Macro F1)")
+    for mn, s in all_summaries.items():
+        if "error" in s:
+            continue
+        ss = s.get("signs_symptoms", {}).get("macro", {})
+        iv = s.get("interventions",  {}).get("macro", {})
+        print(
+            f"{mn:<{W}}  macro SS_F1={ss.get('f1',0):.4f}  macro Int_F1={iv.get('f1',0):.4f}"
+        )
+    print("=" * len(header))
+
+    # ── Side-by-side comparison Excel ─────────────────────────────────────────
+    # Sheet "Comparison" has one row per conversation sheet, columns for each model.
+    # Sheet "Aggregate" has the micro/macro summary.
+    comp_rows      = []   # per-sheet metrics for all models
+    aggregate_rows = []   # one row per model with micro + macro
+
+    # Collect all sheet names from any successful run
+    all_sheet_names = []
+    for s in all_summaries.values():
+        if "per_sheet" in s:
+            all_sheet_names = [m["sheet"] for m in s["per_sheet"]]
+            break
+
+    for sheet_name in all_sheet_names:
+        row = {"Sheet": sheet_name}
+        for mn, s in all_summaries.items():
+            if "per_sheet" not in s:
+                continue
+            m = next((x for x in s["per_sheet"] if x["sheet"] == sheet_name), None)
+            if m:
+                row[f"{mn}_SS_F1"]  = m["ss_f1"]
+                row[f"{mn}_Int_F1"] = m["int_f1"]
+        comp_rows.append(row)
+
+    for mn, s in all_summaries.items():
+        if "error" in s:
+            aggregate_rows.append({"Model": mn, "Error": s["error"]})
+            continue
+        ss_m = s.get("signs_symptoms", {}).get("micro", {})
+        ss_M = s.get("signs_symptoms", {}).get("macro", {})
+        iv_m = s.get("interventions",  {}).get("micro", {})
+        iv_M = s.get("interventions",  {}).get("macro", {})
+        aggregate_rows.append({
+            "Model":              mn,
+            "SS_Micro_P":         ss_m.get("precision", 0),
+            "SS_Micro_R":         ss_m.get("recall",    0),
+            "SS_Micro_F1":        ss_m.get("f1",        0),
+            "SS_Macro_F1":        ss_M.get("f1",        0),
+            "Int_Micro_P":        iv_m.get("precision", 0),
+            "Int_Micro_R":        iv_m.get("recall",    0),
+            "Int_Micro_F1":       iv_m.get("f1",        0),
+            "Int_Macro_F1":       iv_M.get("f1",        0),
+            "SS_TP":  ss_m.get("tp", 0), "SS_FP":  ss_m.get("fp", 0),
+            "SS_FN":  ss_m.get("fn", 0),
+            "Int_TP": iv_m.get("tp", 0), "Int_FP": iv_m.get("fp", 0),
+            "Int_FN": iv_m.get("fn", 0),
+        })
+
+    ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
+    comp_key = f"{OUTPUT_PREFIX}model_comparison_{ts}.xlsx"
+    s3_write_excel(
+        {"Aggregate": pd.DataFrame(aggregate_rows),
+         "Per_Sheet_F1": pd.DataFrame(comp_rows)},
+        S3_BUCKET, comp_key,
+    )
+
+    json_key = f"{OUTPUT_PREFIX}model_comparison_{ts}.json"
+    s3_write_json(all_summaries, S3_BUCKET, json_key)
+
+    print(f"\nComparison Excel: s3://{S3_BUCKET}/{comp_key}")
+    print(f"Full JSON:        s3://{S3_BUCKET}/{json_key}")
     return all_summaries
 
 
@@ -1072,4 +1151,5 @@ if __name__ == "__main__":
     if COMPARE_ALL_MODELS:
         compare_models()
     else:
-        run_pipeline(llm_name=ACTIVE_LLM)
+        resources = build_shared_resources()
+        run_inference(llm_name=ACTIVE_LLM, resources=resources)
