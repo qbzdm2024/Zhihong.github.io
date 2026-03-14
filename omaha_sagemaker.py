@@ -123,14 +123,17 @@ LLM_CONFIGS = {
     },
 }
 
-# ← Set this to the model you want to run
-ACTIVE_LLM = "llama3-8b-local"
+# ← Set this to the model you want to run.
+# If using a school/institution-provided OpenAI key with a HIPAA BAA,
+# "gpt-4o-mini" is the recommended starting point: fast, cheap, high quality.
+# Switch to a local model only if you lose access to the key or need offline use.
+ACTIVE_LLM = "gpt-4o-mini"
 
 # To run multiple models sequentially and compare results, set:
 # COMPARE_ALL_MODELS = True
-# MODELS_TO_COMPARE  = ["llama3-8b-local", "mistral-7b-local"]
+# MODELS_TO_COMPARE  = ["gpt-4o-mini", "llama3-8b-local", "mistral-7b-local"]
 COMPARE_ALL_MODELS  = False
-MODELS_TO_COMPARE   = ["llama3-8b-local", "mistral-7b-local"]
+MODELS_TO_COMPARE   = ["gpt-4o-mini", "llama3-8b-local", "mistral-7b-local"]
 
 # ── Pipeline settings ─────────────────────────────────────────────────────────
 CONTEXT_WINDOW  = 2    # rows before/after current turn to include as context
@@ -138,17 +141,20 @@ TOP_K_RETRIEVAL = 15   # number of Omaha options sent to the LLM
 FUZZY_THRESHOLD = 80   # minimum fuzz.ratio for a match (0–100)
 
 # ── API / model credentials ────────────────────────────────────────────────────
-# For local models: set HF_TOKEN so the model can be downloaded from HuggingFace.
-# The token is only used for the initial download; it is not sent with patient data.
+# School/institution OpenAI key (HIPAA BAA in place — safe for patient data).
+# Set as an environment variable in the SageMaker terminal:
+#   export OPENAI_API_KEY="sk-..."
+# Or paste directly here for quick testing (don't commit the key to git):
+OPENAI_API_KEY        = os.environ.get("OPENAI_API_KEY", "")
+
+# For local models: HF_TOKEN is only needed to download model weights once.
+# Patient data is never sent to HuggingFace when using local models.
 HF_TOKEN              = os.environ.get("HF_TOKEN", "")
 
-# For Azure OpenAI (if using "azure_openai" provider):
-AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "")   # e.g. https://xxx.openai.azure.com/
+# For Azure OpenAI (only needed if using "azure_openai" provider):
+AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "")
 AZURE_OPENAI_API_KEY  = os.environ.get("AZURE_OPENAI_API_KEY",  "")
 AZURE_API_VERSION     = "2024-08-01-preview"
-
-# For standard OpenAI (enterprise BAA only):
-OPENAI_API_KEY        = os.environ.get("OPENAI_API_KEY", "")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 2 — S3 HELPERS
