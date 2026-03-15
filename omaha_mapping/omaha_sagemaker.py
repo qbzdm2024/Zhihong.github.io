@@ -140,7 +140,7 @@ ACTIVE_LLM = "gpt-4o-mini"
 #
 COMPARE_ALL_MODELS = True
 MODELS_TO_COMPARE  = [
-    "gpt-4o-mini",        # OpenAI — school HIPAA key
+    # "gpt-4o-mini",        # OpenAI — school HIPAA key
     "mistral-7b-local",   # open-source 7B — local GPU
     "llama3-8b-local",    # open-source 8B — local GPU
 ]
@@ -154,7 +154,7 @@ FUZZY_THRESHOLD = 80   # minimum fuzz.ratio for a match (0–100)
 # Set to a small number (e.g. 3) to run only the first N conversation sheets.
 # Use this to check prompt quality quickly before running all 23 sheets.
 # Set to None (or 0) to run all sheets.
-MAX_SHEETS = 3          # ← change to None when ready for the full 23 sheets
+MAX_SHEETS = 1          # ← 1 sheet for local model debugging; change to 3 or None for full run
 
 # ── API / model credentials ────────────────────────────────────────────────────
 # School/institution OpenAI key (HIPAA BAA in place — safe for patient data).
@@ -469,8 +469,9 @@ def call_llm(prompt: str, llm_name: str = ACTIVE_LLM,
                 raise ValueError(f"Unknown provider: {provider}")
         except Exception as e:
             if provider == "local":
-                log.error(f"Local model call failed: {e}")
-                return "Error: local model call failed"
+                # Re-raise hard errors (no GPU, OOM) so they surface immediately
+                # rather than silently producing empty predictions for every row.
+                raise
             wait = 2 ** attempt
             log.warning(f"API call failed (attempt {attempt+1}): {e}. Retry in {wait}s …")
             time.sleep(wait)
@@ -1044,6 +1045,21 @@ def run_inference(llm_name: str, resources: dict) -> dict:
 
     Returns the summary dict and saves results to S3.
     """
+    # ── Pre-flight: fail fast before touching any data ─────────────────────────
+    config = LLM_CONFIGS[llm_name]
+    if config["provider"] == "local":
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                f"Skipping '{llm_name}': no CUDA GPU detected. "
+                "Switch your SageMaker instance to ml.g5.xlarge (or any GPU type)."
+            )
+        log.info(f"GPU detected: {torch.cuda.get_device_name(0)}")
+        if "llama" in config["model"].lower() and not HF_TOKEN:
+            log.warning(
+                "HF_TOKEN is not set. Llama-3 is a gated model — "
+                "you must set HF_TOKEN or the download will fail with 401."
+            )
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log.info(f"\n{'='*60}")
     log.info(f"Running inference  |  LLM: {llm_name}")
@@ -1194,9 +1210,7 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     # ── Save per-model results ─────────────────────────────────────────────────
     safe_name   = re.sub(r"[^a-zA-Z0-9_-]", "_", llm_name)
     results_key = f"{OUTPUT_PREFIX}{safe_name}_{timestamp}_results.xlsx"
-    summary_key = f"{OUTPUT_PREFIX}{safe_name}_{timestamp}_summary.json"
     s3_write_excel(output_sheets, S3_BUCKET, results_key)
-    s3_write_json(summary, S3_BUCKET, summary_key)
 
     # ── Print per-model report ─────────────────────────────────────────────────
     W = 30
@@ -1352,11 +1366,7 @@ def compare_models(models_to_compare: list[str] = None):
         S3_BUCKET, comp_key,
     )
 
-    json_key = f"{OUTPUT_PREFIX}model_comparison_{ts}.json"
-    s3_write_json(all_summaries, S3_BUCKET, json_key)
-
     print(f"\nComparison Excel: s3://{S3_BUCKET}/{comp_key}")
-    print(f"Full JSON:        s3://{S3_BUCKET}/{json_key}")
     return all_summaries
 
 
