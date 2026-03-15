@@ -150,6 +150,12 @@ CONTEXT_WINDOW  = 2    # rows before/after current turn to include as context
 TOP_K_RETRIEVAL = 15   # number of Omaha options sent to the LLM
 FUZZY_THRESHOLD = 80   # minimum fuzz.ratio for a match (0–100)
 
+# ── Quick-test mode ───────────────────────────────────────────────────────────
+# Set to a small number (e.g. 3) to run only the first N conversation sheets.
+# Use this to check prompt quality quickly before running all 23 sheets.
+# Set to None (or 0) to run all sheets.
+MAX_SHEETS = 3          # ← change to None when ready for the full 23 sheets
+
 # ── API / model credentials ────────────────────────────────────────────────────
 # School/institution OpenAI key (HIPAA BAA in place — safe for patient data).
 # Set as an environment variable in the SageMaker terminal:
@@ -1011,6 +1017,10 @@ def build_shared_resources() -> dict:
         name: df.rename(columns=str.strip).fillna("")
         for name, df in annotation_sheets.items()
     }
+    # Quick-test mode: limit to first N sheets
+    if MAX_SHEETS:
+        annotation_sheets = dict(list(annotation_sheets.items())[:MAX_SHEETS])
+        log.info(f"Quick-test mode: using {len(annotation_sheets)} of the available sheets")
     log.info(f"Shared index ready. Annotation sheets: {len(annotation_sheets)}")
 
     return {
