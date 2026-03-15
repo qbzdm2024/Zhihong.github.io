@@ -34,6 +34,13 @@ import os, re, json, time, logging, warnings
 from datetime import datetime
 from typing import Optional
 
+# Suppress noisy third-party warnings
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")   # stops HF tokenizer fork warnings
+warnings.filterwarnings("ignore", message=".*cuFFT.*")
+warnings.filterwarnings("ignore", message=".*cuDNN.*")
+warnings.filterwarnings("ignore", message=".*cuBLAS.*")
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")         # silence TensorFlow INFO/WARNING
+
 # ── Third-party ───────────────────────────────────────────────────────────────
 import boto3
 import pandas as pd
@@ -337,7 +344,8 @@ def build_index(docs: list[dict], model: SentenceTransformer) -> np.ndarray:
 def retrieve(query: str, docs: list[dict], embeddings: np.ndarray,
              model: SentenceTransformer, top_k: int = TOP_K_RETRIEVAL) -> list[dict]:
     """Return top-k most relevant documents for the query."""
-    q_emb = model.encode([query], normalize_embeddings=True).astype("float32")
+    q_emb = model.encode([query], normalize_embeddings=True,
+                         show_progress_bar=False).astype("float32")
     sims  = cosine_similarity(q_emb, embeddings)[0]
     top_idx = sims.argsort()[::-1][:top_k]
     return [docs[i] for i in top_idx]
@@ -496,67 +504,144 @@ def call_llm(prompt: str, llm_name: str = ACTIVE_LLM,
 # ══════════════════════════════════════════════════════════════════════════════
 
 SS_PROMPT_TEMPLATE = """\
-You are a clinical coding assistant mapping conversation text to the Omaha System.
+You are a clinical coding assistant. Map the CURRENT TURN to Omaha System signs/symptoms.
 
-Task: Identify ALL signs/symptoms mentioned in the CURRENT TURN (not just one).
-
-Context (surrounding conversation for reference only):
+Context (surrounding conversation — for reference only, do NOT classify context):
 {context}
 
 CURRENT TURN to classify:
 {query}
 
-Available Omaha classifications (retrieved by relevance):
+INSTRUCTIONS:
+1. Review the CURRENT TURN for healthcare-related issues across these domains:
+   - Environmental Domain (e.g., environment safety, sanitation, income)
+   - Psychological Domain (e.g., sadness, anxiety, grief, caregiver strain)
+   - Physiological Domain (e.g., circulation, respiration, pain, skin, neuro)
+   - Health-related Behaviors Domain (e.g., nutrition, medication regimen, sleep/rest patterns)
+
+2. DO NOT classify if:
+   - The issue affects others or describes a general concern (e.g., COVID-19, air quality) with no personal abnormal symptom.
+   - The query is vague or lacks abnormality (e.g., "I feel weird", "I feel okay").
+   - It describes NORMAL behavior or NORMAL readings (e.g., "98.2, no fever", "96 oxygen, excellent", "doing exercise", "worked late").
+   - The query is a question, greeting, or administrative logistics only.
+   - A normal medical reading (normal BP, glucose, temperature, O2) — do NOT classify these.
+
+3. EXACT WORDING ONLY — use the options list verbatim. No synonyms, no modifications, no additions (e.g., do NOT add "(5 days)" or other context).
+   - "swollen" / "retain water" / "edema" → Circulation | edema
+   - "145/92" / "high BP" / "elevated blood pressure" → Circulation | abnormal blood pressure reading
+   - "can't breathe" / "SOB" / "shortness of breath" / "abnormal breath" → Respiration | abnormal breath patterns
+   - "tired" / "fatigue" / "exhausted" → Mental health | somatic complaints/fatigue
+   - medication use → Health-related Behaviors Domain | Medication regimen | other
+
+4. List up to 3 classifications, one per numbered line. If nothing clearly qualifies → NONE.
+
+5. DO NOT OVERINFER: if the turn does not clearly describe an abnormal personal health problem, respond NONE.
+
+Available Omaha options (retrieved by relevance):
 {options}
 
-RULES:
-1. Classify ONLY explicit abnormal symptoms, distress, or dysfunction in the CURRENT TURN.
-2. Normal readings, questions, greetings, administrative talk → respond with NONE.
-3. Use EXACT wording from the options (domain, problem, signs/symptoms). No synonyms.
-4. If multiple signs/symptoms are present, list each on a separate numbered line.
-5. Map common phrases: "shortness of breath" / "SOB" → "abnormal breath patterns" (Respiration); \
-"swollen"/"edema" → "edema" (Circulation); "high BP"/"145/92" → "abnormal blood pressure reading" \
-(Circulation); "tired"/"fatigue" → "somatic complaints/fatigue" (Mental health).
-6. Maximum 3 classifications.
-
-OUTPUT FORMAT (use EXACTLY this format, or output NONE):
+OUTPUT FORMAT — respond ONLY with numbered classifications or NONE. No explanations.
 1. Domain: [exact] | Problem: [exact] | Signs/Symptoms: [exact]
 2. Domain: [exact] | Problem: [exact] | Signs/Symptoms: [exact]
-...
+3. Domain: [exact] | Problem: [exact] | Signs/Symptoms: [exact]
 
 NONE
+
+Examples:
+Query: "When I got back from my walk today; it is 145/92."
+1. Domain: Physiological Domain | Problem: Circulation | Signs/Symptoms: abnormal blood pressure reading
+
+Query: "This is temperature. Temperature. 98.2. No fever. Very good."
+NONE
+
+Query: "You have the shower? Can I put the microphone here?"
+NONE
+
+Query: "I take medication for asthma."
+1. Domain: Physiological Domain | Problem: Respiration | Signs/Symptoms: other
+2. Domain: Health-related Behaviors Domain | Problem: Medication regimen | Signs/Symptoms: other
+
+Query: "I can not breath at night."
+1. Domain: Physiological Domain | Problem: Respiration | Signs/Symptoms: abnormal breath patterns
+
+Query: "So I wasn't better. I sit in my bed. I pull up one leg and it blow up."
+1. Domain: Physiological Domain | Problem: Pain | Signs/Symptoms: compensated movement/guarding
 """
 
 INTERVENTION_PROMPT_TEMPLATE = """\
-You are a clinical coding assistant mapping conversation text to Omaha System interventions.
+You are a clinical coding assistant. Map the CURRENT TURN to Omaha System interventions.
 
-Task: Identify ALL nursing interventions or care actions performed in the CURRENT TURN.
-
-Context (surrounding conversation for reference only):
+Context (surrounding conversation — for reference only):
 {context}
 
 CURRENT TURN to classify:
 {query}
 
-Available Omaha intervention options (retrieved by relevance):
+INSTRUCTIONS:
+1. Classify ONLY actual or planned clinician actions in the CURRENT TURN: assessing, monitoring, treating, teaching, or coordinating care.
+2. Patient statements, greetings, patient questions, administrative logistics → NONE.
+3. EXACT WORDING ONLY from the options. No paraphrasing.
+4. Maximum 3 interventions. No explanations in output.
+
+KEY DISTINCTIONS — read carefully:
+- SURVEILLANCE = monitoring or assessing (no hands-on treatment)
+  • Checking / measuring vital signs, BP, heart, lungs, O2, temp, pulse → Surveillance | signs/symptoms-physical
+  • Asking about / reviewing medications → Surveillance | medication administration
+  • Assessing wound (looking at it, asking about it) → Surveillance | dressing change/wound care
+  • Reviewing lab results → Surveillance | laboratory findings
+
+- TREATMENTS AND PROCEDURES = hands-on clinical procedure actually performed
+  • Dressing, cleaning, or treating a wound → Treatments and Procedures | dressing change/wound care
+  • Actually giving / administering medication → Treatments and Procedures | medication administration
+  • Physical therapy, mobility help → Treatments and Procedures | mobility/transfers
+
+- TEACHING, GUIDANCE, AND COUNSELING = educating the patient
+  • Explaining how medications work → Teaching, Guidance, and Counseling | medication action/side effects
+  • Teaching about disease / condition → Teaching, Guidance, and Counseling | (relevant target)
+
+- CASE MANAGEMENT = coordinating care, referrals, prescriptions
+  • Arranging referrals, coordinating services → Case Management | (relevant target)
+
+CRITICAL MAPPINGS (use these exact strings):
+  "check blood pressure / heart / lungs / vital signs / pulse / O2 / temperature" → Surveillance | signs/symptoms-physical
+  "check / assess the wound" → Surveillance | dressing change/wound care
+  "take care of / dress / clean the wound" → Treatments and Procedures | dressing change/wound care
+  "check / review your medications" → Surveillance | medication administration
+  "check your medications when finished" → Surveillance | medication administration
+
+Available Omaha options (retrieved by relevance):
 {options}
 
-RULES:
-1. Classify ONLY actual clinician actions: teaching, assessing, monitoring, treating, case-managing.
-2. Patient statements, greetings, administrative logistics → respond with NONE.
-3. Use EXACT wording from the options (category and target). No paraphrasing.
-4. If multiple interventions are present, list each on a separate numbered line.
-5. Common mappings: assessing vital signs/symptoms → Surveillance_signs/symptoms-physical; \
-asking about emotions/mental state → Surveillance_signs/symptoms-mental/emotional; \
-explaining medications → Teaching, Guidance, and Counseling_medication action/side effects; \
-reviewing history → Surveillance_signs/symptoms-physical.
-6. Maximum 3 classifications.
-
-OUTPUT FORMAT (use EXACTLY this format, or output NONE):
+OUTPUT FORMAT — respond ONLY with numbered classifications or NONE. No explanations.
 1. Category: [exact] | Target: [exact]
 2. Category: [exact] | Target: [exact]
-...
+3. Category: [exact] | Target: [exact]
 
+NONE
+
+Examples:
+Query: "I'm going to check your blood pressure, heart, and lungs. And then I'm going to take care of your wound."
+1. Category: Surveillance | Target: signs/symptoms-physical
+2. Category: Treatments and Procedures | Target: dressing change/wound care
+
+Query: "So are you taking any medications?"
+1. Category: Surveillance | Target: medication administration
+
+Query: "So when we're finished with the wound, I'll check your medications."
+1. Category: Surveillance | Target: dressing change/wound care
+2. Category: Surveillance | Target: medication administration
+
+Query: "This is temperature. 98.2. No fever."
+1. Category: Surveillance | Target: signs/symptoms-physical
+
+Query: "Okay. All right. So we're going to check your blood pressure, heart, and lungs. And then I'll check the wound."
+1. Category: Surveillance | Target: signs/symptoms-physical
+2. Category: Surveillance | Target: dressing change/wound care
+
+Query: "Okay."
+NONE
+
+Query: "For what?"
 NONE
 """
 
@@ -588,37 +673,59 @@ def build_intervention_prompt(query: str, context: str,
 # SECTION 6 — OUTPUT PARSING
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _extract_answer_section(text: str) -> str:
+    """
+    Strip verbose preamble that Mistral/Llama sometimes add before the actual answer.
+    Looks for SOLUTION:/OUTPUT:/ANSWER: markers and returns the text after them.
+    If no marker found, returns the original text.
+    """
+    marker = re.search(
+        r"(?:SOLUTION|OUTPUT|ANSWER)\s*:\s*", text, re.IGNORECASE
+    )
+    if marker:
+        return text[marker.end():]
+    return text
+
+
+def _clean_field(s: str) -> str:
+    """Strip markdown artifacts and trailing parenthetical context from a field value."""
+    for artifact in ["**", "__", "  "]:
+        s = s.replace(artifact, "")
+    # Remove trailing parenthetical annotations like "(5 days)" or "(mentioned but not present)"
+    s = re.sub(r"\s*\([^)]{0,40}\)\s*$", "", s)
+    return s.strip().rstrip("|").strip()
+
+
 def parse_ss_output(text: str) -> list[dict]:
     """
     Parse LLM output for sign/symptom.
     Returns list of {'domain', 'problem', 'ss', 'label'} dicts.
     Returns [] if output is NONE / no healthcare problem.
     """
-    if not text or re.search(r"\bNONE\b", text, re.IGNORECASE):
-        # Extra check: if the model said "No sufficient information" etc.
-        if re.search(r"no sufficient|no health|not applicable|none", text, re.IGNORECASE):
-            return []
-        # If it starts with numbered items, continue parsing
-        if not re.search(r"^\d+\.", text.strip(), re.MULTILINE):
+    if not text:
+        return []
+
+    # Extract the answer section (handles Mistral's "EXPLANATION: ... SOLUTION: ...")
+    answer = _extract_answer_section(text)
+
+    # Any form of NONE / "no sufficient information" → empty
+    if re.search(r"no sufficient|no health|not applicable", answer, re.IGNORECASE):
+        return []
+    if re.search(r"\bNONE\b", answer, re.IGNORECASE):
+        # Only return empty if there are no numbered classifications following the NONE
+        if not re.search(r"^\d+\.\s*Domain", answer, re.IGNORECASE | re.MULTILINE):
             return []
 
     results = []
-    # Pattern: "Domain: X | Problem: Y | Signs/Symptoms: Z"
-    # or without leading number
     pattern = re.compile(
-        r"Domain\s*:\s*(?P<domain>[^|]+)\|\s*Problem\s*:\s*(?P<problem>[^|]+)\|"
+        r"Domain\s*:\s*(?P<domain>[^|\n]+)\|\s*Problem\s*:\s*(?P<problem>[^|\n]+)\|"
         r"\s*Signs/Symptoms\s*:\s*(?P<ss>[^\n]+)",
         re.IGNORECASE,
     )
-    for m in pattern.finditer(text):
-        domain  = m.group("domain").strip().rstrip("|").strip()
-        problem = m.group("problem").strip().rstrip("|").strip()
-        ss      = m.group("ss").strip().rstrip("|").strip()
-        # Remove markdown artifacts
-        for artifact in ["**", "__", "  "]:
-            domain  = domain.replace(artifact, "")
-            problem = problem.replace(artifact, "")
-            ss      = ss.replace(artifact, "")
+    for m in pattern.finditer(answer):
+        domain  = _clean_field(m.group("domain"))
+        problem = _clean_field(m.group("problem"))
+        ss      = _clean_field(m.group("ss"))
         if problem and ss:
             results.append({
                 "domain":  domain,
@@ -634,24 +741,25 @@ def parse_intervention_output(text: str) -> list[dict]:
     Parse LLM output for interventions.
     Returns list of {'category', 'target', 'label'} dicts.
     """
-    if not text or re.search(r"\bNONE\b", text, re.IGNORECASE):
-        if re.search(r"no sufficient|no intervention|not applicable|none", text, re.IGNORECASE):
-            return []
-        if not re.search(r"^\d+\.", text.strip(), re.MULTILINE):
+    if not text:
+        return []
+
+    answer = _extract_answer_section(text)
+
+    if re.search(r"no sufficient|no intervention|not applicable", answer, re.IGNORECASE):
+        return []
+    if re.search(r"\bNONE\b", answer, re.IGNORECASE):
+        if not re.search(r"^\d+\.\s*Category", answer, re.IGNORECASE | re.MULTILINE):
             return []
 
     results = []
-    # Pattern: "Category: X | Target: Y"
     pattern = re.compile(
-        r"Category\s*:\s*(?P<category>[^|]+)\|\s*Target\s*:\s*(?P<target>[^\n]+)",
+        r"Category\s*:\s*(?P<category>[^|\n]+)\|\s*Target\s*:\s*(?P<target>[^\n]+)",
         re.IGNORECASE,
     )
-    for m in pattern.finditer(text):
-        category = m.group("category").strip().rstrip("|").strip()
-        target   = m.group("target").strip().rstrip("|").strip()
-        for artifact in ["**", "__"]:
-            category = category.replace(artifact, "")
-            target   = target.replace(artifact, "")
+    for m in pattern.finditer(answer):
+        category = _clean_field(m.group("category"))
+        target   = _clean_field(m.group("target"))
         if category and target:
             results.append({
                 "category": category,
