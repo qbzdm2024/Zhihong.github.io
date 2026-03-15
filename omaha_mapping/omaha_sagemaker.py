@@ -568,80 +568,155 @@ Query: "So I wasn't better. I sit in my bed. I pull up one leg and it blow up."
 1. Domain: Physiological Domain | Problem: Pain | Signs/Symptoms: compensated movement/guarding
 """
 
-INTERVENTION_PROMPT_TEMPLATE = """\
-You are a clinical coding assistant. Map the CURRENT TURN to Omaha System interventions.
+INTERVENTION_PROMPT_TEMPLATE = """
+You are a clinical coding assistant mapping conversation turns to Omaha System interventions.
 
-Context (surrounding conversation — for reference only):
+Context (reference only):
 {context}
 
-CURRENT TURN to classify:
+CURRENT TURN:
 {query}
 
-INSTRUCTIONS:
-1. Classify ONLY actual or planned clinician actions in the CURRENT TURN: assessing, monitoring, treating, teaching, or coordinating care.
-2. Patient statements, greetings, patient questions, administrative logistics → NONE.
-3. EXACT WORDING ONLY from the options. No paraphrasing.
-4. Maximum 3 interventions. No explanations in output.
+TASK
+Identify Omaha System intervention(s) expressed in the CURRENT TURN.
 
-KEY DISTINCTIONS — read carefully:
-- SURVEILLANCE = monitoring or assessing (no hands-on treatment)
-  • Checking / measuring vital signs, BP, heart, lungs, O2, temp, pulse → Surveillance | signs/symptoms-physical
-  • Asking about / reviewing medications → Surveillance | medication administration
-  • Assessing wound (looking at it, asking about it) → Surveillance | dressing change/wound care
-  • Reviewing lab results → Surveillance | laboratory findings
+IMPORTANT RULES
+1. Only classify clinician actions in the CURRENT TURN.
+2. Patient speech, greetings, filler, acknowledgments, jokes, or casual conversation → NONE.
+3. Maximum 3 interventions.
+4. Use EXACT Omaha System terminology.
 
-- TREATMENTS AND PROCEDURES = hands-on clinical procedure actually performed
-  • Dressing, cleaning, or treating a wound → Treatments and Procedures | dressing change/wound care
-  • Actually giving / administering medication → Treatments and Procedures | medication administration
-  • Physical therapy, mobility help → Treatments and Procedures | mobility/transfers
+VALID OMAHA INTERVENTION DOMAINS
+You must use EXACTLY one of the following:
 
-- TEACHING, GUIDANCE, AND COUNSELING = educating the patient
-  • Explaining how medications work → Teaching, Guidance, and Counseling | medication action/side effects
-  • Teaching about disease / condition → Teaching, Guidance, and Counseling | (relevant target)
+- Teaching, Guidance, and Counseling
+- Treatments and Procedures
+- Case Management
+- Surveillance
 
-- CASE MANAGEMENT = coordinating care, referrals, prescriptions
-  • Arranging referrals, coordinating services → Case Management | (relevant target)
+TARGET REQUIREMENT
+The Target MUST exactly match one of the official Omaha System targets from the provided list.
+Do NOT modify wording, abbreviate, paraphrase, or invent targets.
 
-CRITICAL MAPPINGS (use these exact strings):
-  "check blood pressure / heart / lungs / vital signs / pulse / O2 / temperature" → Surveillance | signs/symptoms-physical
-  "check / assess the wound" → Surveillance | dressing change/wound care
-  "take care of / dress / clean the wound" → Treatments and Procedures | dressing change/wound care
-  "check / review your medications" → Surveillance | medication administration
-  "check your medications when finished" → Surveillance | medication administration
+Examples of INVALID targets:
+❌ respiratory therapy care
+❌ medication review
+❌ wound monitoring
 
-Available Omaha options (retrieved by relevance):
+Examples of VALID targets:
+✔ respiratory care
+✔ medication administration
+✔ dressing change/wound care
+✔ signs/symptoms-physical
+
+ACTION TYPE DEFINITIONS
+
+SURVEILLANCE
+Monitoring, assessing, measuring, reviewing status.
+
+Examples
+- checking blood pressure, pulse, oxygen
+- assessing heart or lungs
+- reviewing medications
+- assessing wound
+
+Common mappings
+blood pressure / pulse / oxygen / temperature
+→ Surveillance | signs/symptoms-physical
+
+checking wound
+→ Surveillance | dressing change/wound care
+
+reviewing medications
+→ Surveillance | medication administration
+
+
+TREATMENTS AND PROCEDURES
+Hands-on clinical care or procedures.
+
+Examples
+- dressing a wound
+- applying bandage or saline
+- administering medication
+- performing wound care
+
+Example mapping
+cleaning or dressing wound
+→ Treatments and Procedures | dressing change/wound care
+
+
+TEACHING, GUIDANCE, AND COUNSELING
+Providing instruction, explanation, or advice.
+
+Examples
+- explaining wound care
+- warning about infection
+- medication instructions
+
+Example mapping
+explaining how to clean a wound
+→ Teaching, Guidance, and Counseling | dressing change/wound care
+
+
+CASE MANAGEMENT
+Coordination, referrals, scheduling, contacting providers.
+
+Examples
+- calling doctor
+- arranging antibiotics
+- scheduling visits
+- coordinating care
+
+Example mapping
+calling doctor about medication
+→ Case Management | medication coordination/ordering
+
+
+MULTI-LABEL RULE
+Use multiple interventions only if the CURRENT TURN clearly contains multiple actions.
+
+NONE RULE
+Return NONE if the turn contains no clinical intervention.
+
+AVAILABLE OMAHA TARGET OPTIONS
 {options}
 
-OUTPUT FORMAT — respond ONLY with numbered classifications or NONE. No explanations.
-1. Category: [exact] | Target: [exact]
-2. Category: [exact] | Target: [exact]
-3. Category: [exact] | Target: [exact]
+OUTPUT FORMAT
+
+1. Category: [exact Omaha domain] | Target: [exact Omaha target]
+2. Category: [exact Omaha domain] | Target: [exact Omaha target]
+3. Category: [exact Omaha domain] | Target: [exact Omaha target]
+
+or
 
 NONE
 
-Examples:
-Query: "I'm going to check your blood pressure, heart, and lungs. And then I'm going to take care of your wound."
-1. Category: Surveillance | Target: signs/symptoms-physical
-2. Category: Treatments and Procedures | Target: dressing change/wound care
 
-Query: "So are you taking any medications?"
-1. Category: Surveillance | Target: medication administration
+EXAMPLES
 
-Query: "So when we're finished with the wound, I'll check your medications."
-1. Category: Surveillance | Target: dressing change/wound care
-2. Category: Surveillance | Target: medication administration
+Query:
+"I will check your blood pressure and pulse."
 
-Query: "This is temperature. 98.2. No fever."
 1. Category: Surveillance | Target: signs/symptoms-physical
 
-Query: "Okay. All right. So we're going to check your blood pressure, heart, and lungs. And then I'll check the wound."
-1. Category: Surveillance | Target: signs/symptoms-physical
-2. Category: Surveillance | Target: dressing change/wound care
+Query:
+"Let me clean the wound and place a new bandage."
 
-Query: "Okay."
-NONE
+1. Category: Treatments and Procedures | Target: dressing change/wound care
 
-Query: "For what?"
+Query:
+"You should clean the wound with saline and watch for redness."
+
+1. Category: Teaching, Guidance, and Counseling | Target: dressing change/wound care
+
+Query:
+"I will call your doctor to arrange the antibiotic prescription."
+
+1. Category: Case Management | Target: medication coordination/ordering
+
+Query:
+"Okay."
+
 NONE
 """
 
