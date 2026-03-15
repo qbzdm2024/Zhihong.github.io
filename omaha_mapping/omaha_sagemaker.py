@@ -352,6 +352,17 @@ def _load_local_model(config: dict):
     if _local_pipeline is not None:
         return _local_pipeline
 
+    # ── GPU guard ──────────────────────────────────────────────────────────────
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "No CUDA GPU detected. Local models require a GPU instance "
+            "(e.g. ml.g5.xlarge). Current machine has no CUDA device.\n"
+            "  • If you are on SageMaker, switch to a GPU instance type.\n"
+            "  • If you only want to run API models (gpt-4o-mini, azure), "
+            "set COMPARE_ALL_MODELS=False or remove local models from "
+            "MODELS_TO_COMPARE."
+        )
+
     from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, BitsAndBytesConfig
 
     model_id    = config["model"]
@@ -720,18 +731,18 @@ def process_sheet(
     # ── Flatten predictions into columns ─────────────────────────────────────
     out = df.copy()
 
-    # SS predictions (up to 3)
+    # SS predictions (up to 3) — label + individual components
     for col_i in range(1, 4):
-        out[f"Pred_SS_{col_i}"] = [
-            p[col_i - 1]["label"] if len(p) >= col_i else ""
-            for p in ss_preds_all
-        ]
-    # Intervention predictions (up to 3)
+        out[f"Pred_SS_{col_i}"]         = [p[col_i-1]["label"]   if len(p) >= col_i else "" for p in ss_preds_all]
+        out[f"Pred_SS_{col_i}_domain"]  = [p[col_i-1]["domain"]  if len(p) >= col_i else "" for p in ss_preds_all]
+        out[f"Pred_SS_{col_i}_problem"] = [p[col_i-1]["problem"] if len(p) >= col_i else "" for p in ss_preds_all]
+        out[f"Pred_SS_{col_i}_ss"]      = [p[col_i-1]["ss"]      if len(p) >= col_i else "" for p in ss_preds_all]
+
+    # Intervention predictions (up to 3) — label + individual components
     for col_i in range(1, 4):
-        out[f"Pred_I_{col_i}"] = [
-            p[col_i - 1]["label"] if len(p) >= col_i else ""
-            for p in int_preds_all
-        ]
+        out[f"Pred_I_{col_i}"]          = [p[col_i-1]["label"]    if len(p) >= col_i else "" for p in int_preds_all]
+        out[f"Pred_I_{col_i}_category"] = [p[col_i-1]["category"] if len(p) >= col_i else "" for p in int_preds_all]
+        out[f"Pred_I_{col_i}_target"]   = [p[col_i-1]["target"]   if len(p) >= col_i else "" for p in int_preds_all]
 
     # Keep raw LLM output for debugging
     out["LLM_SS_raw"]  = ss_raw_all
@@ -743,14 +754,43 @@ def process_sheet(
 # SECTION 8 — EVALUATION
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _norm(s: str) -> str:
+    """Lowercase, strip, collapse whitespace, remove common separators."""
+    s = re.sub(r"[\s_\-/]+", " ", s.strip().lower())
+    return s.strip()
+
+
 def fuzzy_label_match(pred: str, true: str, threshold: int = FUZZY_THRESHOLD) -> bool:
-    """True if two label strings are fuzzy-similar above threshold."""
+    """
+    True if two label strings are fuzzy-similar above threshold.
+
+    Tries multiple comparisons to be robust against format differences:
+    - Full label vs full label          (Problem_SS vs Problem_SS)
+    - Last component vs last component  (SS vs SS, or Target vs Target)
+    - Partial ratio (substring match)   (catches prefix/suffix differences)
+    """
     if not pred or not true:
         return False
-    # Normalise: lowercase, strip, collapse whitespace
-    p = re.sub(r"\s+", " ", pred.strip().lower())
-    t = re.sub(r"\s+", " ", true.strip().lower())
-    return fuzz.ratio(p, t) >= threshold
+
+    p_full = _norm(pred)
+    t_full = _norm(true)
+
+    # 1. Full-label comparison
+    if fuzz.ratio(p_full, t_full) >= threshold:
+        return True
+
+    # 2. Last component only (e.g. "Circulation_edema" → "edema")
+    p_last = p_full.rsplit(" ", 1)[-1]
+    t_last = t_full.rsplit(" ", 1)[-1]
+    if len(p_last) >= 4 and len(t_last) >= 4:  # avoid trivial single-word noise
+        if fuzz.ratio(p_last, t_last) >= threshold:
+            return True
+
+    # 3. Token set ratio (order-insensitive, handles extra words)
+    if fuzz.token_set_ratio(p_full, t_full) >= threshold:
+        return True
+
+    return False
 
 
 def row_level_match(pred_labels: list[str], true_labels: list[str],
@@ -792,58 +832,154 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
     """
     Compute P/R/F1 for SS and Interventions from one processed sheet.
 
-    Key design choices:
-    - Rows where BOTH human label set AND prediction set are empty → True Negative.
-      These are EXCLUDED from P/R/F1 (they don't affect clinical utility).
-    - TP counted with greedy bipartite fuzzy matching.
-    - Micro-average: accumulate TP/FP/FN across all rows, then compute metrics.
+    Returns:
+    - Combined label metrics (SS full-label, Int full-label)
+    - Component metrics:
+        SS:  domain, problem, ss (sign/symptom) separately
+        Int: category, target separately
     """
+    # ── Combined label counters ───────────────────────────────────────────────
     ss_tp = ss_fp = ss_fn = 0
     i_tp  = i_fp  = i_fn  = 0
-
-    # Rows with at least one human SS label OR at least one prediction
     ss_relevant_rows  = 0
     int_relevant_rows = 0
 
+    # ── SS component counters (domain / problem / ss-only) ────────────────────
+    dom_tp  = dom_fp  = dom_fn  = 0
+    prob_tp = prob_fp = prob_fn = 0
+    ss_only_tp = ss_only_fp = ss_only_fn = 0
+
+    # ── Intervention component counters (category / target) ───────────────────
+    cat_tp = cat_fp = cat_fn = 0
+    tgt_tp = tgt_fp = tgt_fn = 0
+
+    # ── Sample GT labels for diagnosis (logged once) ──────────────────────────
+    gt_sample_logged = False
+
     for _, row in df_out.iterrows():
         # ── Signs/Symptoms ───────────────────────────────────────────────────
-        human_ss  = [row[f"OS_SS_{j}"] for j in range(1, 4)
+        human_ss  = [str(row[f"OS_SS_{j}"]).strip()
+                     for j in range(1, 4)
                      if f"OS_SS_{j}" in df_out.columns
                      and pd.notna(row[f"OS_SS_{j}"])
                      and str(row[f"OS_SS_{j}"]).strip() not in ("", "nan")]
-        pred_ss   = [row[f"Pred_SS_{j}"] for j in range(1, 4)
-                     if f"Pred_SS_{j}" in df_out.columns
-                     and str(row.get(f"Pred_SS_{j}", "")).strip() != ""]
 
-        if human_ss or pred_ss:
+        # Full labels (Problem_SS)
+        pred_ss_labels = [str(row.get(f"Pred_SS_{j}", "")).strip()
+                          for j in range(1, 4)
+                          if str(row.get(f"Pred_SS_{j}", "")).strip() != ""]
+
+        # Component lists for SS
+        pred_domains   = [str(row.get(f"Pred_SS_{j}_domain",  "")).strip() for j in range(1, 4) if str(row.get(f"Pred_SS_{j}_domain",  "")).strip()]
+        pred_problems  = [str(row.get(f"Pred_SS_{j}_problem", "")).strip() for j in range(1, 4) if str(row.get(f"Pred_SS_{j}_problem", "")).strip()]
+        pred_ss_only   = [str(row.get(f"Pred_SS_{j}_ss",      "")).strip() for j in range(1, 4) if str(row.get(f"Pred_SS_{j}_ss",      "")).strip()]
+
+        if not gt_sample_logged and human_ss:
+            log.info(f"[DIAG] Sample OS_SS ground-truth labels: {human_ss}")
+            log.info(f"[DIAG] Sample Pred_SS labels:            {pred_ss_labels}")
+            gt_sample_logged = True
+
+        if human_ss or pred_ss_labels:
             ss_relevant_rows += 1
-            tp, fp, fn = row_level_match(pred_ss, human_ss)
+            tp, fp, fn = row_level_match(pred_ss_labels, human_ss)
             ss_tp += tp; ss_fp += fp; ss_fn += fn
 
+            # Component metrics: extract domain/problem/ss from human label
+            # Human label format may be "Problem_SS" or "SS" or "Domain_Problem_SS"
+            human_parts = [p.strip() for h in human_ss for p in re.split(r"[_\|]+", h) if p.strip()]
+            # For domain-level: compare first token of human label vs predicted domain
+            human_domains  = []
+            human_problems = []
+            human_ss_only  = []
+            for h in human_ss:
+                parts = [p.strip() for p in re.split(r"[_\|]+", h) if p.strip()]
+                if len(parts) >= 3:
+                    human_domains.append(parts[0])
+                    human_problems.append(parts[1])
+                    human_ss_only.append("_".join(parts[2:]))
+                elif len(parts) == 2:
+                    human_problems.append(parts[0])
+                    human_ss_only.append(parts[1])
+                elif len(parts) == 1:
+                    human_ss_only.append(parts[0])
+
+            if human_domains or pred_domains:
+                tp2, fp2, fn2 = row_level_match(pred_domains, human_domains)
+                dom_tp += tp2; dom_fp += fp2; dom_fn += fn2
+
+            if human_problems or pred_problems:
+                tp2, fp2, fn2 = row_level_match(pred_problems, human_problems)
+                prob_tp += tp2; prob_fp += fp2; prob_fn += fn2
+
+            if human_ss_only or pred_ss_only:
+                tp2, fp2, fn2 = row_level_match(pred_ss_only, human_ss_only)
+                ss_only_tp += tp2; ss_only_fp += fp2; ss_only_fn += fn2
+
         # ── Interventions ────────────────────────────────────────────────────
-        human_int = [row[f"OS_I_{j}"] for j in range(1, 4)
+        human_int = [str(row[f"OS_I_{j}"]).strip()
+                     for j in range(1, 4)
                      if f"OS_I_{j}" in df_out.columns
                      and pd.notna(row[f"OS_I_{j}"])
                      and str(row[f"OS_I_{j}"]).strip() not in ("", "nan")]
-        pred_int  = [row[f"Pred_I_{j}"] for j in range(1, 4)
-                     if f"Pred_I_{j}" in df_out.columns
-                     and str(row.get(f"Pred_I_{j}", "")).strip() != ""]
 
-        if human_int or pred_int:
+        pred_int_labels = [str(row.get(f"Pred_I_{j}", "")).strip()
+                           for j in range(1, 4)
+                           if str(row.get(f"Pred_I_{j}", "")).strip() != ""]
+
+        pred_cats = [str(row.get(f"Pred_I_{j}_category", "")).strip() for j in range(1, 4) if str(row.get(f"Pred_I_{j}_category", "")).strip()]
+        pred_tgts = [str(row.get(f"Pred_I_{j}_target",   "")).strip() for j in range(1, 4) if str(row.get(f"Pred_I_{j}_target",   "")).strip()]
+
+        if human_int or pred_int_labels:
             int_relevant_rows += 1
-            tp, fp, fn = row_level_match(pred_int, human_int)
+            tp, fp, fn = row_level_match(pred_int_labels, human_int)
             i_tp += tp; i_fp += fp; i_fn += fn
 
-    ss_p,  ss_r,  ss_f1  = compute_prf(ss_tp,  ss_fp,  ss_fn)
-    int_p, int_r, int_f1 = compute_prf(i_tp,   i_fp,   i_fn)
+            human_cats = []
+            human_tgts = []
+            for h in human_int:
+                parts = [p.strip() for p in re.split(r"[_\|]+", h) if p.strip()]
+                if len(parts) >= 2:
+                    human_cats.append(parts[0])
+                    human_tgts.append("_".join(parts[1:]))
+                elif len(parts) == 1:
+                    human_tgts.append(parts[0])
+
+            if human_cats or pred_cats:
+                tp2, fp2, fn2 = row_level_match(pred_cats, human_cats)
+                cat_tp += tp2; cat_fp += fp2; cat_fn += fn2
+
+            if human_tgts or pred_tgts:
+                tp2, fp2, fn2 = row_level_match(pred_tgts, human_tgts)
+                tgt_tp += tp2; tgt_fp += fp2; tgt_fn += fn2
+
+    ss_p,       ss_r,       ss_f1       = compute_prf(ss_tp,      ss_fp,      ss_fn)
+    int_p,      int_r,      int_f1      = compute_prf(i_tp,       i_fp,       i_fn)
+    dom_p,      dom_r,      dom_f1      = compute_prf(dom_tp,     dom_fp,     dom_fn)
+    prob_p,     prob_r,     prob_f1     = compute_prf(prob_tp,    prob_fp,    prob_fn)
+    ss_only_p,  ss_only_r,  ss_only_f1  = compute_prf(ss_only_tp, ss_only_fp, ss_only_fn)
+    cat_p,      cat_r,      cat_f1      = compute_prf(cat_tp,     cat_fp,     cat_fn)
+    tgt_p,      tgt_r,      tgt_f1      = compute_prf(tgt_tp,     tgt_fp,     tgt_fn)
 
     return {
+        # Combined labels
         "ss_precision":  ss_p,  "ss_recall":  ss_r,  "ss_f1":  ss_f1,
         "ss_tp": ss_tp, "ss_fp": ss_fp, "ss_fn": ss_fn,
         "ss_relevant_rows": ss_relevant_rows,
         "int_precision": int_p, "int_recall": int_r, "int_f1": int_f1,
         "int_tp": i_tp, "int_fp": i_fp, "int_fn": i_fn,
         "int_relevant_rows": int_relevant_rows,
+        # SS components
+        "dom_precision":     dom_p,     "dom_recall":     dom_r,     "dom_f1":     dom_f1,
+        "dom_tp": dom_tp,   "dom_fp": dom_fp,   "dom_fn": dom_fn,
+        "prob_precision":    prob_p,    "prob_recall":    prob_r,    "prob_f1":    prob_f1,
+        "prob_tp": prob_tp, "prob_fp": prob_fp, "prob_fn": prob_fn,
+        "ss_only_precision": ss_only_p, "ss_only_recall": ss_only_r, "ss_only_f1": ss_only_f1,
+        "ss_only_tp": ss_only_tp, "ss_only_fp": ss_only_fp, "ss_only_fn": ss_only_fn,
+        # Intervention components
+        "cat_precision": cat_p, "cat_recall": cat_r, "cat_f1": cat_f1,
+        "cat_tp": cat_tp, "cat_fp": cat_fp, "cat_fn": cat_fn,
+        "tgt_precision": tgt_p, "tgt_recall": tgt_r, "tgt_f1": tgt_f1,
+        "tgt_tp": tgt_tp, "tgt_fp": tgt_fp, "tgt_fn": tgt_fn,
     }
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -912,8 +1048,27 @@ def run_inference(llm_name: str, resources: dict) -> dict:
 
     output_sheets = {}
     sheet_metrics = []
+
+    # Combined label counters
     global_ss_tp = global_ss_fp = global_ss_fn = 0
     global_i_tp  = global_i_fp  = global_i_fn  = 0
+    # SS component counters
+    global_dom_tp   = global_dom_fp   = global_dom_fn   = 0
+    global_prob_tp  = global_prob_fp  = global_prob_fn  = 0
+    global_ssonly_tp= global_ssonly_fp= global_ssonly_fn= 0
+    # Intervention component counters
+    global_cat_tp   = global_cat_fp   = global_cat_fn   = 0
+    global_tgt_tp   = global_tgt_fp   = global_tgt_fn   = 0
+
+    _ZERO_METRICS = {k: 0 for k in [
+        "ss_precision","ss_recall","ss_f1","ss_tp","ss_fp","ss_fn","ss_relevant_rows",
+        "int_precision","int_recall","int_f1","int_tp","int_fp","int_fn","int_relevant_rows",
+        "dom_precision","dom_recall","dom_f1","dom_tp","dom_fp","dom_fn",
+        "prob_precision","prob_recall","prob_f1","prob_tp","prob_fp","prob_fn",
+        "ss_only_precision","ss_only_recall","ss_only_f1","ss_only_tp","ss_only_fp","ss_only_fn",
+        "cat_precision","cat_recall","cat_f1","cat_tp","cat_fp","cat_fn",
+        "tgt_precision","tgt_recall","tgt_f1","tgt_tp","tgt_fp","tgt_fn",
+    ]}
 
     for sheet_name, conv_df in tqdm(annotation_sheets.items(),
                                     desc=f"[{llm_name}] sheets"):
@@ -925,55 +1080,63 @@ def run_inference(llm_name: str, resources: dict) -> dict:
         except Exception as e:
             log.error(f"Sheet '{sheet_name}' failed: {e}")
             df_out  = conv_df.copy()
-            metrics = {k: 0 for k in [
-                "ss_precision","ss_recall","ss_f1","ss_tp","ss_fp","ss_fn",
-                "ss_relevant_rows","int_precision","int_recall","int_f1",
-                "int_tp","int_fp","int_fn","int_relevant_rows"]}
+            metrics = dict(_ZERO_METRICS)
 
         metrics["sheet"] = sheet_name
         sheet_metrics.append(metrics)
 
-        global_ss_tp += metrics["ss_tp"];  global_ss_fp += metrics["ss_fp"]
-        global_ss_fn += metrics["ss_fn"]
-        global_i_tp  += metrics["int_tp"]; global_i_fp  += metrics["int_fp"]
-        global_i_fn  += metrics["int_fn"]
+        global_ss_tp += metrics["ss_tp"];  global_ss_fp += metrics["ss_fp"];  global_ss_fn += metrics["ss_fn"]
+        global_i_tp  += metrics["int_tp"]; global_i_fp  += metrics["int_fp"]; global_i_fn  += metrics["int_fn"]
+        global_dom_tp    += metrics["dom_tp"];     global_dom_fp    += metrics["dom_fp"];     global_dom_fn    += metrics["dom_fn"]
+        global_prob_tp   += metrics["prob_tp"];    global_prob_fp   += metrics["prob_fp"];    global_prob_fn   += metrics["prob_fn"]
+        global_ssonly_tp += metrics["ss_only_tp"]; global_ssonly_fp += metrics["ss_only_fp"]; global_ssonly_fn += metrics["ss_only_fn"]
+        global_cat_tp    += metrics["cat_tp"];     global_cat_fp    += metrics["cat_fp"];     global_cat_fn    += metrics["cat_fn"]
+        global_tgt_tp    += metrics["tgt_tp"];     global_tgt_fp    += metrics["tgt_fp"];     global_tgt_fn    += metrics["tgt_fn"]
 
         safe = re.sub(r"[\\/*?:\[\]]", "_", sheet_name)[:31]
         output_sheets[safe] = df_out
 
         log.info(
-            f"  SS  P={metrics['ss_precision']:.3f} "
-            f"R={metrics['ss_recall']:.3f} F1={metrics['ss_f1']:.3f}  |  "
-            f"Int P={metrics['int_precision']:.3f} "
-            f"R={metrics['int_recall']:.3f} F1={metrics['int_f1']:.3f}"
+            f"  SS  P={metrics['ss_precision']:.3f} R={metrics['ss_recall']:.3f} F1={metrics['ss_f1']:.3f}"
+            f"  (ss_only F1={metrics['ss_only_f1']:.3f})  |  "
+            f"Int P={metrics['int_precision']:.3f} R={metrics['int_recall']:.3f} F1={metrics['int_f1']:.3f}"
+            f"  (tgt F1={metrics['tgt_f1']:.3f})"
         )
 
     # ── Aggregate ─────────────────────────────────────────────────────────────
-    gss_p, gss_r, gss_f1  = compute_prf(global_ss_tp, global_ss_fp, global_ss_fn)
-    gi_p,  gi_r,  gi_f1   = compute_prf(global_i_tp,  global_i_fp,  global_i_fn)
+    gss_p,    gss_r,    gss_f1    = compute_prf(global_ss_tp,     global_ss_fp,     global_ss_fn)
+    gi_p,     gi_r,     gi_f1     = compute_prf(global_i_tp,      global_i_fp,      global_i_fn)
+    gdom_p,   gdom_r,   gdom_f1   = compute_prf(global_dom_tp,    global_dom_fp,    global_dom_fn)
+    gprob_p,  gprob_r,  gprob_f1  = compute_prf(global_prob_tp,   global_prob_fp,   global_prob_fn)
+    gssonly_p,gssonly_r,gssonly_f1= compute_prf(global_ssonly_tp, global_ssonly_fp, global_ssonly_fn)
+    gcat_p,   gcat_r,   gcat_f1   = compute_prf(global_cat_tp,    global_cat_fp,    global_cat_fn)
+    gtgt_p,   gtgt_r,   gtgt_f1   = compute_prf(global_tgt_tp,    global_tgt_fp,    global_tgt_fn)
 
-    macro_ss_p  = np.mean([m["ss_precision"]  for m in sheet_metrics])
-    macro_ss_r  = np.mean([m["ss_recall"]     for m in sheet_metrics])
-    macro_ss_f1 = np.mean([m["ss_f1"]         for m in sheet_metrics])
-    macro_i_p   = np.mean([m["int_precision"] for m in sheet_metrics])
-    macro_i_r   = np.mean([m["int_recall"]    for m in sheet_metrics])
-    macro_i_f1  = np.mean([m["int_f1"]        for m in sheet_metrics])
+    def _macro(key): return np.mean([m.get(key, 0) for m in sheet_metrics])
 
     summary = {
         "llm": llm_name, "embedding": EMBEDDING_MODEL, "timestamp": timestamp,
         "context_window": CONTEXT_WINDOW, "top_k": TOP_K_RETRIEVAL,
         "fuzzy_threshold": FUZZY_THRESHOLD,
         "signs_symptoms": {
-            "micro":  {"precision": gss_p,  "recall": gss_r,  "f1": gss_f1,
-                       "tp": global_ss_tp, "fp": global_ss_fp, "fn": global_ss_fn},
-            "macro":  {"precision": round(macro_ss_p,4), "recall": round(macro_ss_r,4),
-                       "f1": round(macro_ss_f1,4)},
+            "micro":    {"precision": gss_p,     "recall": gss_r,     "f1": gss_f1,
+                         "tp": global_ss_tp, "fp": global_ss_fp, "fn": global_ss_fn},
+            "macro":    {"f1": round(_macro("ss_f1"), 4)},
+            "domain":   {"micro_p": gdom_p,    "micro_r": gdom_r,    "micro_f1": gdom_f1,
+                         "tp": global_dom_tp,   "fp": global_dom_fp,   "fn": global_dom_fn},
+            "problem":  {"micro_p": gprob_p,   "micro_r": gprob_r,   "micro_f1": gprob_f1,
+                         "tp": global_prob_tp,  "fp": global_prob_fp,  "fn": global_prob_fn},
+            "ss_only":  {"micro_p": gssonly_p, "micro_r": gssonly_r, "micro_f1": gssonly_f1,
+                         "tp": global_ssonly_tp,"fp": global_ssonly_fp,"fn": global_ssonly_fn},
         },
         "interventions": {
-            "micro":  {"precision": gi_p,   "recall": gi_r,   "f1": gi_f1,
-                       "tp": global_i_tp,  "fp": global_i_fp,  "fn": global_i_fn},
-            "macro":  {"precision": round(macro_i_p,4),  "recall": round(macro_i_r,4),
-                       "f1": round(macro_i_f1,4)},
+            "micro":    {"precision": gi_p,      "recall": gi_r,      "f1": gi_f1,
+                         "tp": global_i_tp,  "fp": global_i_fp,  "fn": global_i_fn},
+            "macro":    {"f1": round(_macro("int_f1"), 4)},
+            "category": {"micro_p": gcat_p, "micro_r": gcat_r, "micro_f1": gcat_f1,
+                         "tp": global_cat_tp, "fp": global_cat_fp, "fn": global_cat_fn},
+            "target":   {"micro_p": gtgt_p, "micro_r": gtgt_r, "micro_f1": gtgt_f1,
+                         "tp": global_tgt_tp, "fp": global_tgt_fp, "fn": global_tgt_fn},
         },
         "per_sheet": sheet_metrics,
     }
@@ -982,27 +1145,40 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     rows = []
     for m in sheet_metrics:
         rows.append({
-            "Sheet":         m["sheet"],
-            "SS_Precision":  m["ss_precision"], "SS_Recall":  m["ss_recall"],
-            "SS_F1":         m["ss_f1"],
+            "Sheet":           m["sheet"],
+            # Combined labels
+            "SS_Precision":    m["ss_precision"],   "SS_Recall":    m["ss_recall"],    "SS_F1":    m["ss_f1"],
             "SS_TP": m["ss_tp"], "SS_FP": m["ss_fp"], "SS_FN": m["ss_fn"],
-            "Int_Precision": m["int_precision"], "Int_Recall": m["int_recall"],
-            "Int_F1":        m["int_f1"],
+            # SS components
+            "Domain_F1":       m["dom_f1"],
+            "Problem_F1":      m["prob_f1"],
+            "SS_Only_F1":      m["ss_only_f1"],
+            # Intervention combined
+            "Int_Precision":   m["int_precision"],  "Int_Recall":   m["int_recall"],   "Int_F1":   m["int_f1"],
             "Int_TP": m["int_tp"], "Int_FP": m["int_fp"], "Int_FN": m["int_fn"],
+            # Intervention components
+            "Category_F1":     m["cat_f1"],
+            "Target_F1":       m["tgt_f1"],
         })
-    for label, sp, sr, sf, ip, ir, i_f in [
-        ("MICRO_AGGREGATE", gss_p,               gss_r,               gss_f1,
-                            gi_p,                gi_r,                gi_f1),
-        ("MACRO_AVERAGE",   round(macro_ss_p,4), round(macro_ss_r,4), round(macro_ss_f1,4),
-                            round(macro_i_p,4),  round(macro_i_r,4),  round(macro_i_f1,4)),
-    ]:
-        rows.append({
-            "Sheet": label,
-            "SS_Precision": sp,  "SS_Recall": sr,  "SS_F1": sf,
-            "SS_TP": "", "SS_FP": "", "SS_FN": "",
-            "Int_Precision": ip, "Int_Recall": ir,  "Int_F1": i_f,
-            "Int_TP": "", "Int_FP": "", "Int_FN": "",
-        })
+    rows.append({
+        "Sheet": "MICRO_AGGREGATE",
+        "SS_Precision": gss_p,    "SS_Recall": gss_r,    "SS_F1": gss_f1,
+        "SS_TP": global_ss_tp, "SS_FP": global_ss_fp, "SS_FN": global_ss_fn,
+        "Domain_F1": gdom_f1, "Problem_F1": gprob_f1, "SS_Only_F1": gssonly_f1,
+        "Int_Precision": gi_p, "Int_Recall": gi_r, "Int_F1": gi_f1,
+        "Int_TP": global_i_tp, "Int_FP": global_i_fp, "Int_FN": global_i_fn,
+        "Category_F1": gcat_f1, "Target_F1": gtgt_f1,
+    })
+    rows.append({
+        "Sheet": "MACRO_AVERAGE",
+        "SS_F1": round(_macro("ss_f1"),4),
+        "Domain_F1": round(_macro("dom_f1"),4),
+        "Problem_F1": round(_macro("prob_f1"),4),
+        "SS_Only_F1": round(_macro("ss_only_f1"),4),
+        "Int_F1": round(_macro("int_f1"),4),
+        "Category_F1": round(_macro("cat_f1"),4),
+        "Target_F1": round(_macro("tgt_f1"),4),
+    })
     output_sheets["SUMMARY"] = pd.DataFrame(rows)
 
     # ── Save per-model results ─────────────────────────────────────────────────
@@ -1013,24 +1189,30 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     s3_write_json(summary, S3_BUCKET, summary_key)
 
     # ── Print per-model report ─────────────────────────────────────────────────
-    print(f"\n{'='*62}")
+    W = 30
+    print(f"\n{'='*70}")
     print(f"RESULTS  |  {llm_name}")
-    print(f"{'='*62}")
-    print(f"{'Metric':<28} {'Signs/Symptoms':>16}  {'Interventions':>13}")
-    print(f"{'-'*62}")
-    for label, sv, iv in [
-        ("Micro Precision", gss_p,        gi_p),
-        ("Micro Recall",    gss_r,        gi_r),
-        ("Micro F1",        gss_f1,       gi_f1),
-        ("Macro Precision", macro_ss_p,   macro_i_p),
-        ("Macro Recall",    macro_ss_r,   macro_i_r),
-        ("Macro F1",        macro_ss_f1,  macro_i_f1),
+    print(f"{'='*70}")
+    print(f"{'Metric':<{W}} {'Micro P':>8} {'Micro R':>8} {'Micro F1':>9}")
+    print(f"{'-'*70}")
+    for lbl, p, r, f in [
+        ("SS (combined label)",    gss_p,    gss_r,    gss_f1),
+        ("  └ Domain only",        gdom_p,   gdom_r,   gdom_f1),
+        ("  └ Problem only",       gprob_p,  gprob_r,  gprob_f1),
+        ("  └ Sign/Symptom only",  gssonly_p,gssonly_r,gssonly_f1),
+        ("Intervention (combined)",gi_p,     gi_r,     gi_f1),
+        ("  └ Category only",      gcat_p,   gcat_r,   gcat_f1),
+        ("  └ Target only",        gtgt_p,   gtgt_r,   gtgt_f1),
     ]:
-        print(f"{label:<28} {sv:>16.4f}  {iv:>13.4f}")
-    print(f"{'-'*62}")
-    print(f"TP/FP/FN (SS):   {global_ss_tp}/{global_ss_fp}/{global_ss_fn}")
-    print(f"TP/FP/FN (Int):  {global_i_tp}/{global_i_fp}/{global_i_fn}")
-    print(f"{'='*62}")
+        print(f"{lbl:<{W}} {p:>8.4f} {r:>8.4f} {f:>9.4f}")
+    print(f"{'-'*70}")
+    print(f"Macro SS F1:           {round(_macro('ss_f1'),4):.4f}   "
+          f"(ss_only: {round(_macro('ss_only_f1'),4):.4f})")
+    print(f"Macro Int F1:          {round(_macro('int_f1'),4):.4f}   "
+          f"(target:  {round(_macro('tgt_f1'),4):.4f})")
+    print(f"TP/FP/FN (SS):         {global_ss_tp}/{global_ss_fp}/{global_ss_fn}")
+    print(f"TP/FP/FN (Int):        {global_i_tp}/{global_i_fp}/{global_i_fn}")
+    print(f"{'='*70}")
     print(f"Saved: s3://{S3_BUCKET}/{results_key}")
 
     return summary
@@ -1074,44 +1256,33 @@ def compare_models(models_to_compare: list[str] = None):
 
     # ── Side-by-side comparison table (console) ────────────────────────────────
     W = 22
-    header = f"{'Model':<{W}}"
-    for kind in ("SS", "Int"):
-        header += f"  {kind+'_P':>7} {kind+'_R':>7} {kind+'_F1':>7}"
-    print(f"\n{'='*len(header)}\nMODEL COMPARISON — Micro P / R / F1\n{'='*len(header)}")
-    print(header)
-    print("-" * len(header))
+    print(f"\n{'='*80}\nMODEL COMPARISON — Micro F1 by component\n{'='*80}")
+    print(f"{'Model':<{W}}  {'SS_F1':>7} {'Dom_F1':>7} {'Prob_F1':>8} {'SSOnly_F1':>10}"
+          f"  {'Int_F1':>7} {'Cat_F1':>7} {'Tgt_F1':>7}")
+    print("-" * 80)
 
     for mn, s in all_summaries.items():
         if "error" in s:
             print(f"{mn:<{W}}  ERROR: {s['error']}")
             continue
-        ss = s.get("signs_symptoms", {}).get("micro", {})
-        iv = s.get("interventions",  {}).get("micro", {})
+        ss  = s.get("signs_symptoms", {})
+        iv  = s.get("interventions",  {})
         print(
             f"{mn:<{W}}"
-            f"  {ss.get('precision',0):>7.4f} {ss.get('recall',0):>7.4f} {ss.get('f1',0):>7.4f}"
-            f"  {iv.get('precision',0):>7.4f} {iv.get('recall',0):>7.4f} {iv.get('f1',0):>7.4f}"
+            f"  {ss.get('micro',{}).get('f1',0):>7.4f}"
+            f" {ss.get('domain',{}).get('micro_f1',0):>7.4f}"
+            f" {ss.get('problem',{}).get('micro_f1',0):>8.4f}"
+            f" {ss.get('ss_only',{}).get('micro_f1',0):>10.4f}"
+            f"  {iv.get('micro',{}).get('f1',0):>7.4f}"
+            f" {iv.get('category',{}).get('micro_f1',0):>7.4f}"
+            f" {iv.get('target',{}).get('micro_f1',0):>7.4f}"
         )
-
-    print("-" * len(header))
-    print("(also showing Macro F1)")
-    for mn, s in all_summaries.items():
-        if "error" in s:
-            continue
-        ss = s.get("signs_symptoms", {}).get("macro", {})
-        iv = s.get("interventions",  {}).get("macro", {})
-        print(
-            f"{mn:<{W}}  macro SS_F1={ss.get('f1',0):.4f}  macro Int_F1={iv.get('f1',0):.4f}"
-        )
-    print("=" * len(header))
+    print("=" * 80)
 
     # ── Side-by-side comparison Excel ─────────────────────────────────────────
-    # Sheet "Comparison" has one row per conversation sheet, columns for each model.
-    # Sheet "Aggregate" has the micro/macro summary.
-    comp_rows      = []   # per-sheet metrics for all models
-    aggregate_rows = []   # one row per model with micro + macro
+    comp_rows      = []
+    aggregate_rows = []
 
-    # Collect all sheet names from any successful run
     all_sheet_names = []
     for s in all_summaries.values():
         if "per_sheet" in s:
@@ -1125,32 +1296,42 @@ def compare_models(models_to_compare: list[str] = None):
                 continue
             m = next((x for x in s["per_sheet"] if x["sheet"] == sheet_name), None)
             if m:
-                row[f"{mn}_SS_F1"]  = m["ss_f1"]
-                row[f"{mn}_Int_F1"] = m["int_f1"]
+                row[f"{mn}_SS_F1"]      = m.get("ss_f1", 0)
+                row[f"{mn}_SSOnly_F1"]  = m.get("ss_only_f1", 0)
+                row[f"{mn}_Int_F1"]     = m.get("int_f1", 0)
+                row[f"{mn}_Target_F1"]  = m.get("tgt_f1", 0)
         comp_rows.append(row)
 
     for mn, s in all_summaries.items():
         if "error" in s:
             aggregate_rows.append({"Model": mn, "Error": s["error"]})
             continue
-        ss_m = s.get("signs_symptoms", {}).get("micro", {})
-        ss_M = s.get("signs_symptoms", {}).get("macro", {})
-        iv_m = s.get("interventions",  {}).get("micro", {})
-        iv_M = s.get("interventions",  {}).get("macro", {})
+        ss_m  = s.get("signs_symptoms", {}).get("micro",    {})
+        ss_M  = s.get("signs_symptoms", {}).get("macro",    {})
+        ss_d  = s.get("signs_symptoms", {}).get("domain",   {})
+        ss_p  = s.get("signs_symptoms", {}).get("problem",  {})
+        ss_so = s.get("signs_symptoms", {}).get("ss_only",  {})
+        iv_m  = s.get("interventions",  {}).get("micro",    {})
+        iv_M  = s.get("interventions",  {}).get("macro",    {})
+        iv_c  = s.get("interventions",  {}).get("category", {})
+        iv_t  = s.get("interventions",  {}).get("target",   {})
         aggregate_rows.append({
             "Model":              mn,
             "SS_Micro_P":         ss_m.get("precision", 0),
             "SS_Micro_R":         ss_m.get("recall",    0),
             "SS_Micro_F1":        ss_m.get("f1",        0),
             "SS_Macro_F1":        ss_M.get("f1",        0),
+            "Domain_Micro_F1":    ss_d.get("micro_f1",  0),
+            "Problem_Micro_F1":   ss_p.get("micro_f1",  0),
+            "SSOnly_Micro_F1":    ss_so.get("micro_f1", 0),
+            "SS_TP":  ss_m.get("tp", 0), "SS_FP":  ss_m.get("fp", 0), "SS_FN":  ss_m.get("fn", 0),
             "Int_Micro_P":        iv_m.get("precision", 0),
             "Int_Micro_R":        iv_m.get("recall",    0),
             "Int_Micro_F1":       iv_m.get("f1",        0),
             "Int_Macro_F1":       iv_M.get("f1",        0),
-            "SS_TP":  ss_m.get("tp", 0), "SS_FP":  ss_m.get("fp", 0),
-            "SS_FN":  ss_m.get("fn", 0),
-            "Int_TP": iv_m.get("tp", 0), "Int_FP": iv_m.get("fp", 0),
-            "Int_FN": iv_m.get("fn", 0),
+            "Category_Micro_F1":  iv_c.get("micro_f1",  0),
+            "Target_Micro_F1":    iv_t.get("micro_f1",  0),
+            "Int_TP": iv_m.get("tp", 0), "Int_FP": iv_m.get("fp", 0), "Int_FN": iv_m.get("fn", 0),
         })
 
     ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
