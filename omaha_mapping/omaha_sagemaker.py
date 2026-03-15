@@ -626,7 +626,7 @@ Examples
 - assessing wound
 
 Common mappings
-blood pressure / pulse / oxygen / temperature
+measuring blood pressure / pulse / oxygen / temperature
 → Surveillance | signs/symptoms-physical
 
 checking wound
