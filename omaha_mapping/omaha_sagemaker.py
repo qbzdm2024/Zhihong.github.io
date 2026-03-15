@@ -369,9 +369,9 @@ def _load_local_model(config: dict):
             "MODELS_TO_COMPARE."
         )
 
-    from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline, BitsAndBytesConfig
+    from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 
-    model_id    = config["model"]
+    model_id     = config["model"]
     load_in_4bit = config.get("load_in_4bit", True)
 
     log.info(f"Loading local model: {model_id}  (4-bit={load_in_4bit})")
@@ -382,14 +382,26 @@ def _load_local_model(config: dict):
         from huggingface_hub import login
         login(token=HF_TOKEN, add_to_git_credential=False)
 
+    # Try 4-bit quantisation; fall back to float16 if bitsandbytes is missing
     quant_cfg = None
     if load_in_4bit:
-        quant_cfg = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-        )
+        try:
+            from transformers import BitsAndBytesConfig
+            import bitsandbytes  # noqa: F401  — just to verify it's installed
+            quant_cfg = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+            )
+            log.info("4-bit quantisation enabled (bitsandbytes found)")
+        except (ImportError, Exception) as bnb_err:
+            log.warning(
+                f"bitsandbytes not available ({bnb_err}). "
+                "Falling back to float16 (uses ~14 GB VRAM for 7/8B models — "
+                "fine on A10G 24 GB). Run: pip install bitsandbytes>=0.43 to enable 4-bit."
+            )
+            load_in_4bit = False  # use fp16 path below
 
     tokenizer = AutoTokenizer.from_pretrained(model_id, token=HF_TOKEN)
     model     = AutoModelForCausalLM.from_pretrained(
