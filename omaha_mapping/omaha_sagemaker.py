@@ -504,68 +504,73 @@ def call_llm(prompt: str, llm_name: str = ACTIVE_LLM,
 # ══════════════════════════════════════════════════════════════════════════════
 
 SS_PROMPT_TEMPLATE = """\
-You are a clinical coding assistant. Map the CURRENT TURN to Omaha System signs/symptoms.
+You are a clinical coding assistant mapping conversation to the Omaha System.
 
-Context (surrounding conversation — for reference only, do NOT classify context):
+STEP 1 — FILTER (answer mentally before outputting anything):
+Does the CURRENT TURN contain an EXPLICIT, PERSONAL, ABNORMAL health problem or symptom?
+  → If NO  → output NONE immediately. Do not continue.
+  → If YES → go to Step 2.
+
+Reasons to output NONE (most turns will be NONE):
+  - The speaker is a nurse/clinician describing what they WILL DO or ARE DOING (actions/procedures)
+  - Normal readings: "98.2 no fever", "96% oxygen", "80 pulse" → NONE
+  - Patient confirms or acknowledges something: "Okay.", "Yeah.", "Beautiful." → NONE
+  - Question only: "Do you have a wound?", "Are you taking medication?" → NONE
+  - Greetings, scheduling, administrative: "Today is February 19", "Can I put the mic here?" → NONE
+  - Someone else's health problem, not the patient's own → NONE
+  - Vague or normal: "I feel weird", "I worked late", "I do exercise" → NONE
+
+STEP 2 — CLASSIFY (only if a clear personal abnormal symptom exists):
+  - Select the SINGLE MOST RELEVANT classification from the options below.
+  - Use EXACT wording from the options. No synonyms, no additions.
+  - Common mappings:
+      "high BP" / "145/92" → Circulation | abnormal blood pressure reading
+      "can't breathe" / "SOB" → Respiration | abnormal breath patterns
+      "swollen" / "retain water" → Circulation | edema
+      "taking medication for [condition]" → Health-related Behaviors Domain | Medication regimen | other
+        AND the condition itself if abnormal (e.g. asthma → Respiration | other)
+
+Context (do NOT classify these turns):
 {context}
 
-CURRENT TURN to classify:
+CURRENT TURN:
 {query}
 
-INSTRUCTIONS:
-1. Review the CURRENT TURN for healthcare-related issues across these domains:
-   - Environmental Domain (e.g., environment safety, sanitation, income)
-   - Psychological Domain (e.g., sadness, anxiety, grief, caregiver strain)
-   - Physiological Domain (e.g., circulation, respiration, pain, skin, neuro)
-   - Health-related Behaviors Domain (e.g., nutrition, medication regimen, sleep/rest patterns)
-
-2. DO NOT classify if:
-   - The issue affects others or describes a general concern (e.g., COVID-19, air quality) with no personal abnormal symptom.
-   - The query is vague or lacks abnormality (e.g., "I feel weird", "I feel okay").
-   - It describes NORMAL behavior or NORMAL readings (e.g., "98.2, no fever", "96 oxygen, excellent", "doing exercise", "worked late").
-   - The query is a question, greeting, or administrative logistics only.
-   - A normal medical reading (normal BP, glucose, temperature, O2) — do NOT classify these.
-
-3. EXACT WORDING ONLY — use the options list verbatim. No synonyms, no modifications, no additions (e.g., do NOT add "(5 days)" or other context).
-   - "swollen" / "retain water" / "edema" → Circulation | edema
-   - "145/92" / "high BP" / "elevated blood pressure" → Circulation | abnormal blood pressure reading
-   - "can't breathe" / "SOB" / "shortness of breath" / "abnormal breath" → Respiration | abnormal breath patterns
-   - "tired" / "fatigue" / "exhausted" → Mental health | somatic complaints/fatigue
-   - medication use → Health-related Behaviors Domain | Medication regimen | other
-
-4. List up to 3 classifications, one per numbered line. If nothing clearly qualifies → NONE.
-
-5. DO NOT OVERINFER: if the turn does not clearly describe an abnormal personal health problem, respond NONE.
-
-Available Omaha options (retrieved by relevance):
+Available options:
 {options}
 
-OUTPUT FORMAT — respond ONLY with numbered classifications or NONE. No explanations.
+OUTPUT — respond with EXACTLY ONE of these formats, nothing else:
 1. Domain: [exact] | Problem: [exact] | Signs/Symptoms: [exact]
-2. Domain: [exact] | Problem: [exact] | Signs/Symptoms: [exact]
-3. Domain: [exact] | Problem: [exact] | Signs/Symptoms: [exact]
 
 NONE
 
 Examples:
-Query: "When I got back from my walk today; it is 145/92."
-1. Domain: Physiological Domain | Problem: Circulation | Signs/Symptoms: abnormal blood pressure reading
-
-Query: "This is temperature. Temperature. 98.2. No fever. Very good."
+Query (nurse): "I'm going to check your blood pressure, heart, and lungs. And then I'm going to take care of your wound."
 NONE
 
-Query: "You have the shower? Can I put the microphone here?"
-NONE
+Query (patient): "And when I take that pill, yeah, that works a little."
+1. Domain: Health-related Behaviors Domain | Problem: Medication regimen | Signs/Symptoms: other
 
-Query: "I take medication for asthma."
+Query (patient): "Yeah. I'm taking medication. I take medication for asthma."
 1. Domain: Physiological Domain | Problem: Respiration | Signs/Symptoms: other
-2. Domain: Health-related Behaviors Domain | Problem: Medication regimen | Signs/Symptoms: other
 
-Query: "I can not breath at night."
+Query (nurse): "This is temperature. 98.2. No fever. Very good."
+NONE
+
+Query (nurse): "So are you taking any medications?"
+NONE
+
+Query (patient): "I can not breath at night."
 1. Domain: Physiological Domain | Problem: Respiration | Signs/Symptoms: abnormal breath patterns
 
-Query: "So I wasn't better. I sit in my bed. I pull up one leg and it blow up."
+Query (patient): "I sit in my bed. I pull up one leg and it blow up."
 1. Domain: Physiological Domain | Problem: Pain | Signs/Symptoms: compensated movement/guarding
+
+Query (patient): "When I got back from my walk, it is 145/92."
+1. Domain: Physiological Domain | Problem: Circulation | Signs/Symptoms: abnormal blood pressure reading
+
+Query (nurse): "Okay. All right. So we're going to check your blood pressure, heart, and lungs. And then I'll check the wound."
+NONE
 """
 
 INTERVENTION_PROMPT_TEMPLATE = """
@@ -714,9 +719,15 @@ Query:
 
 1. Category: Case Management | Target: medication coordination/ordering
 
+Query: "So over the weekend, I go to take a shower with soap and water."
+1. Category: Teaching, Guidance, and Counseling | Target: personal hygiene
+
 Query:
 "Okay."
 
+NONE
+
+Query: "Oh, let me see. For five days."
 NONE
 """
 
@@ -1046,8 +1057,8 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
     ss_relevant_rows  = 0
     int_relevant_rows = 0
 
-    # ── SS component counters (domain / problem / ss-only) ────────────────────
-    dom_tp  = dom_fp  = dom_fn  = 0
+    # ── SS component counters (problem / ss-only only — domain omitted because
+    #    ground-truth labels are always "Problem_SS", never "Domain_Problem_SS") ──
     prob_tp = prob_fp = prob_fn = 0
     ss_only_tp = ss_only_fp = ss_only_fn = 0
 
@@ -1086,28 +1097,17 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             tp, fp, fn = row_level_match(pred_ss_labels, human_ss)
             ss_tp += tp; ss_fp += fp; ss_fn += fn
 
-            # Component metrics: extract domain/problem/ss from human label
-            # Human label format may be "Problem_SS" or "SS" or "Domain_Problem_SS"
-            human_parts = [p.strip() for h in human_ss for p in re.split(r"[_\|]+", h) if p.strip()]
-            # For domain-level: compare first token of human label vs predicted domain
-            human_domains  = []
+            # Component metrics — GT format is always "Problem_SS" (2 parts):
+            # first underscore-separated token = Problem, rest = SS
             human_problems = []
             human_ss_only  = []
             for h in human_ss:
                 parts = [p.strip() for p in re.split(r"[_\|]+", h) if p.strip()]
-                if len(parts) >= 3:
-                    human_domains.append(parts[0])
-                    human_problems.append(parts[1])
-                    human_ss_only.append("_".join(parts[2:]))
-                elif len(parts) == 2:
+                if len(parts) >= 2:
                     human_problems.append(parts[0])
-                    human_ss_only.append(parts[1])
+                    human_ss_only.append("_".join(parts[1:]))
                 elif len(parts) == 1:
                     human_ss_only.append(parts[0])
-
-            if human_domains or pred_domains:
-                tp2, fp2, fn2 = row_level_match(pred_domains, human_domains)
-                dom_tp += tp2; dom_fp += fp2; dom_fn += fn2
 
             if human_problems or pred_problems:
                 tp2, fp2, fn2 = row_level_match(pred_problems, human_problems)
@@ -1156,7 +1156,6 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
 
     ss_p,       ss_r,       ss_f1       = compute_prf(ss_tp,      ss_fp,      ss_fn)
     int_p,      int_r,      int_f1      = compute_prf(i_tp,       i_fp,       i_fn)
-    dom_p,      dom_r,      dom_f1      = compute_prf(dom_tp,     dom_fp,     dom_fn)
     prob_p,     prob_r,     prob_f1     = compute_prf(prob_tp,    prob_fp,    prob_fn)
     ss_only_p,  ss_only_r,  ss_only_f1  = compute_prf(ss_only_tp, ss_only_fp, ss_only_fn)
     cat_p,      cat_r,      cat_f1      = compute_prf(cat_tp,     cat_fp,     cat_fn)
@@ -1170,9 +1169,7 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
         "int_precision": int_p, "int_recall": int_r, "int_f1": int_f1,
         "int_tp": i_tp, "int_fp": i_fp, "int_fn": i_fn,
         "int_relevant_rows": int_relevant_rows,
-        # SS components
-        "dom_precision":     dom_p,     "dom_recall":     dom_r,     "dom_f1":     dom_f1,
-        "dom_tp": dom_tp,   "dom_fp": dom_fp,   "dom_fn": dom_fn,
+        # SS components (domain omitted — GT is always Problem_SS, never Domain_Problem_SS)
         "prob_precision":    prob_p,    "prob_recall":    prob_r,    "prob_f1":    prob_f1,
         "prob_tp": prob_tp, "prob_fp": prob_fp, "prob_fn": prob_fn,
         "ss_only_precision": ss_only_p, "ss_only_recall": ss_only_r, "ss_only_f1": ss_only_f1,
@@ -1273,8 +1270,7 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     # Combined label counters
     global_ss_tp = global_ss_fp = global_ss_fn = 0
     global_i_tp  = global_i_fp  = global_i_fn  = 0
-    # SS component counters
-    global_dom_tp   = global_dom_fp   = global_dom_fn   = 0
+    # SS component counters (domain omitted — GT is always Problem_SS)
     global_prob_tp  = global_prob_fp  = global_prob_fn  = 0
     global_ssonly_tp= global_ssonly_fp= global_ssonly_fn= 0
     # Intervention component counters
@@ -1284,7 +1280,6 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     _ZERO_METRICS = {k: 0 for k in [
         "ss_precision","ss_recall","ss_f1","ss_tp","ss_fp","ss_fn","ss_relevant_rows",
         "int_precision","int_recall","int_f1","int_tp","int_fp","int_fn","int_relevant_rows",
-        "dom_precision","dom_recall","dom_f1","dom_tp","dom_fp","dom_fn",
         "prob_precision","prob_recall","prob_f1","prob_tp","prob_fp","prob_fn",
         "ss_only_precision","ss_only_recall","ss_only_f1","ss_only_tp","ss_only_fp","ss_only_fn",
         "cat_precision","cat_recall","cat_f1","cat_tp","cat_fp","cat_fn",
@@ -1308,7 +1303,6 @@ def run_inference(llm_name: str, resources: dict) -> dict:
 
         global_ss_tp += metrics["ss_tp"];  global_ss_fp += metrics["ss_fp"];  global_ss_fn += metrics["ss_fn"]
         global_i_tp  += metrics["int_tp"]; global_i_fp  += metrics["int_fp"]; global_i_fn  += metrics["int_fn"]
-        global_dom_tp    += metrics["dom_tp"];     global_dom_fp    += metrics["dom_fp"];     global_dom_fn    += metrics["dom_fn"]
         global_prob_tp   += metrics["prob_tp"];    global_prob_fp   += metrics["prob_fp"];    global_prob_fn   += metrics["prob_fn"]
         global_ssonly_tp += metrics["ss_only_tp"]; global_ssonly_fp += metrics["ss_only_fp"]; global_ssonly_fn += metrics["ss_only_fn"]
         global_cat_tp    += metrics["cat_tp"];     global_cat_fp    += metrics["cat_fp"];     global_cat_fn    += metrics["cat_fn"]
@@ -1327,7 +1321,6 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     # ── Aggregate ─────────────────────────────────────────────────────────────
     gss_p,    gss_r,    gss_f1    = compute_prf(global_ss_tp,     global_ss_fp,     global_ss_fn)
     gi_p,     gi_r,     gi_f1     = compute_prf(global_i_tp,      global_i_fp,      global_i_fn)
-    gdom_p,   gdom_r,   gdom_f1   = compute_prf(global_dom_tp,    global_dom_fp,    global_dom_fn)
     gprob_p,  gprob_r,  gprob_f1  = compute_prf(global_prob_tp,   global_prob_fp,   global_prob_fn)
     gssonly_p,gssonly_r,gssonly_f1= compute_prf(global_ssonly_tp, global_ssonly_fp, global_ssonly_fn)
     gcat_p,   gcat_r,   gcat_f1   = compute_prf(global_cat_tp,    global_cat_fp,    global_cat_fn)
@@ -1343,8 +1336,6 @@ def run_inference(llm_name: str, resources: dict) -> dict:
             "micro":    {"precision": gss_p,     "recall": gss_r,     "f1": gss_f1,
                          "tp": global_ss_tp, "fp": global_ss_fp, "fn": global_ss_fn},
             "macro":    {"f1": round(_macro("ss_f1"), 4)},
-            "domain":   {"micro_p": gdom_p,    "micro_r": gdom_r,    "micro_f1": gdom_f1,
-                         "tp": global_dom_tp,   "fp": global_dom_fp,   "fn": global_dom_fn},
             "problem":  {"micro_p": gprob_p,   "micro_r": gprob_r,   "micro_f1": gprob_f1,
                          "tp": global_prob_tp,  "fp": global_prob_fp,  "fn": global_prob_fn},
             "ss_only":  {"micro_p": gssonly_p, "micro_r": gssonly_r, "micro_f1": gssonly_f1,
@@ -1371,7 +1362,6 @@ def run_inference(llm_name: str, resources: dict) -> dict:
             "SS_Precision":    m["ss_precision"],   "SS_Recall":    m["ss_recall"],    "SS_F1":    m["ss_f1"],
             "SS_TP": m["ss_tp"], "SS_FP": m["ss_fp"], "SS_FN": m["ss_fn"],
             # SS components
-            "Domain_F1":       m["dom_f1"],
             "Problem_F1":      m["prob_f1"],
             "SS_Only_F1":      m["ss_only_f1"],
             # Intervention combined
@@ -1385,7 +1375,7 @@ def run_inference(llm_name: str, resources: dict) -> dict:
         "Sheet": "MICRO_AGGREGATE",
         "SS_Precision": gss_p,    "SS_Recall": gss_r,    "SS_F1": gss_f1,
         "SS_TP": global_ss_tp, "SS_FP": global_ss_fp, "SS_FN": global_ss_fn,
-        "Domain_F1": gdom_f1, "Problem_F1": gprob_f1, "SS_Only_F1": gssonly_f1,
+        "Problem_F1": gprob_f1, "SS_Only_F1": gssonly_f1,
         "Int_Precision": gi_p, "Int_Recall": gi_r, "Int_F1": gi_f1,
         "Int_TP": global_i_tp, "Int_FP": global_i_fp, "Int_FN": global_i_fn,
         "Category_F1": gcat_f1, "Target_F1": gtgt_f1,
@@ -1393,7 +1383,6 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     rows.append({
         "Sheet": "MACRO_AVERAGE",
         "SS_F1": round(_macro("ss_f1"),4),
-        "Domain_F1": round(_macro("dom_f1"),4),
         "Problem_F1": round(_macro("prob_f1"),4),
         "SS_Only_F1": round(_macro("ss_only_f1"),4),
         "Int_F1": round(_macro("int_f1"),4),
@@ -1416,7 +1405,6 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     print(f"{'-'*70}")
     for lbl, p, r, f in [
         ("SS (combined label)",    gss_p,    gss_r,    gss_f1),
-        ("  └ Domain only",        gdom_p,   gdom_r,   gdom_f1),
         ("  └ Problem only",       gprob_p,  gprob_r,  gprob_f1),
         ("  └ Sign/Symptom only",  gssonly_p,gssonly_r,gssonly_f1),
         ("Intervention (combined)",gi_p,     gi_r,     gi_f1),
@@ -1476,7 +1464,7 @@ def compare_models(models_to_compare: list[str] = None):
     # ── Side-by-side comparison table (console) ────────────────────────────────
     W = 22
     print(f"\n{'='*80}\nMODEL COMPARISON — Micro F1 by component\n{'='*80}")
-    print(f"{'Model':<{W}}  {'SS_F1':>7} {'Dom_F1':>7} {'Prob_F1':>8} {'SSOnly_F1':>10}"
+    print(f"{'Model':<{W}}  {'SS_F1':>7} {'Prob_F1':>8} {'SSOnly_F1':>10}"
           f"  {'Int_F1':>7} {'Cat_F1':>7} {'Tgt_F1':>7}")
     print("-" * 80)
 
@@ -1489,7 +1477,6 @@ def compare_models(models_to_compare: list[str] = None):
         print(
             f"{mn:<{W}}"
             f"  {ss.get('micro',{}).get('f1',0):>7.4f}"
-            f" {ss.get('domain',{}).get('micro_f1',0):>7.4f}"
             f" {ss.get('problem',{}).get('micro_f1',0):>8.4f}"
             f" {ss.get('ss_only',{}).get('micro_f1',0):>10.4f}"
             f"  {iv.get('micro',{}).get('f1',0):>7.4f}"
@@ -1527,7 +1514,6 @@ def compare_models(models_to_compare: list[str] = None):
             continue
         ss_m  = s.get("signs_symptoms", {}).get("micro",    {})
         ss_M  = s.get("signs_symptoms", {}).get("macro",    {})
-        ss_d  = s.get("signs_symptoms", {}).get("domain",   {})
         ss_p  = s.get("signs_symptoms", {}).get("problem",  {})
         ss_so = s.get("signs_symptoms", {}).get("ss_only",  {})
         iv_m  = s.get("interventions",  {}).get("micro",    {})
@@ -1540,7 +1526,6 @@ def compare_models(models_to_compare: list[str] = None):
             "SS_Micro_R":         ss_m.get("recall",    0),
             "SS_Micro_F1":        ss_m.get("f1",        0),
             "SS_Macro_F1":        ss_M.get("f1",        0),
-            "Domain_Micro_F1":    ss_d.get("micro_f1",  0),
             "Problem_Micro_F1":   ss_p.get("micro_f1",  0),
             "SSOnly_Micro_F1":    ss_so.get("micro_f1", 0),
             "SS_TP":  ss_m.get("tp", 0), "SS_FP":  ss_m.get("fp", 0), "SS_FN":  ss_m.get("fn", 0),
