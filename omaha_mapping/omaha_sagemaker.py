@@ -524,7 +524,7 @@ Instructions:
    - Not vague descriptions without clear abnormality
 
 2. IF NO HEALTH PROBLEM EXISTS:
-   Respond immediately with: "No sufficient information available"
+   Respond immediately with: "None"
 
 3. IF HEALTH PROBLEM EXISTS:
    a. Select the SINGLE MOST RELEVANT option from Context using EXACT WORDING
@@ -583,7 +583,9 @@ CURRENT TURN:
 {query}
 
 TASK
-Identify Omaha System intervention(s) expressed in the CURRENT TURN.
+1. FIRST determine if the query describes a nurse/clincian's behavior related to teaching and guidance, treamtent and procedure, case management, or surveillance:
+2. If not, classify it as "None"
+3. If yes, Identify Omaha System intervention(s) expressed in the CURRENT TURN.
 
 IMPORTANT RULES
 1. Only classify clinician actions in the CURRENT TURN.
