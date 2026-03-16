@@ -74,8 +74,8 @@ ANNOTATION_KEY   = "Fake example_Sandy/omaha-mapping/Completed_annotation.xlsx"
 OUTPUT_PREFIX    = "Fake example_Sandy/omaha-mapping/output/"
 
 # ── Embedding model (runs on CPU; swap for a stronger model if GPU available) ─
-#EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
-EMBEDDING_MODEL = "Snowflake/snowflake-arctic-embed-l"       # higher quality
+EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
+#EMBEDDING_MODEL = "Snowflake/snowflake-arctic-embed-l"       # higher quality
 # EMBEDDING_MODEL = "thenlper/gte-large"                       # strong clinical
 
 # ── LLM configuration ─────────────────────────────────────────────────────────
