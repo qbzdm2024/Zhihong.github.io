@@ -569,7 +569,7 @@ Signs/Symptoms: abnormal breath pattern
 
 """
 
-"""
+
 
 INTERVENTION_PROMPT_TEMPLATE = """
 You are a clinical coding assistant mapping conversation turns to Omaha System interventions.
