@@ -504,49 +504,51 @@ def call_llm(prompt: str, llm_name: str = ACTIVE_LLM,
 # ══════════════════════════════════════════════════════════════════════════════
 
 SS_PROMPT_TEMPLATE = """
-<|begin_of_text|><|start_header_id|>user<|end_header_id|>
-user
-
-Your answer should be only the identified {domain, problem, and sign or symptoms} link OR "No sufficient information available". You cannot provide additional answer.
-
-Context:
-{% for doc in documents %}
-  Domain: {{ doc.meta['domain'] }}
-  Problem: {{ doc.meta['problem'] }}
-  Signs/Symptoms: {{ doc.meta['signs_or_symptoms'] }}
-{% endfor %}
+Identify the health problems from the conversation between the nurse and the patient provided in the query below, and map it to the MOST RELEVANT Omaha System classification.
 
 Instructions:
-1. FIRST determine if the query describes any health problem meeting these criteria:
-   - Explicit mention of abnormal symptoms/distress/dysfunction
-   - Not a general question/public health concern
-   - Not normal behavior/test results
-   - Not vague descriptions without clear abnormality
+1. Review the query for any direct mentions of healthcare-related issues across these domains:
+   - Environmental Domain (e.g., environment safety, insurance)
+   - Psychological Domain (e.g., feelings of fatigue, low mood)
+   - Physiological Domain
+   - Health-related Behaviors Domain (e.g., nutrition, medication regimen)
 
-2. IF NO HEALTH PROBLEM EXISTS:
-   Respond immediately with: "None"
+2. DO NOT classify if:
+   - The issue affects others or describes a general environmental/public health concern (e.g., COVID-19, flu, air quality, needing rest or sleep, test costs, availability, payment details) without any indication of abnormal symptoms, distress, or dysfuction.
+   - The query is too vague or lacks abnormality (e.g., "I feel weird").
+   - It describes normal behavior (e.g., "Worked late", "doing excercise", needing rest or sleep, test costs, availability, payment details) unless there is clear evidence of abnormal symptoms, distress, or dysfunction.
+   - The query is a question or request for information (e.g., "Do I have high BP?").
+   - A normal medical reading (e.g., BP, glucose).
 
-3. IF HEALTH PROBLEM EXISTS:
-   a. Select the SINGLE MOST RELEVANT option from Context using EXACT WORDING
-   b. Match using these priority rules:
-      - Match exact symptom terminology first
-      - Match problem category second
-      - Match domain last
-   c. NEVER use synonyms/rephrasing - only exact matches from Context
+3. Select the single MOST RELEVANT classification from the provided options that best matches the query’s domain, problem, and signs/symptoms.
+4. IMPORTANT: The final answer MUST USE THE EXACT WORDING from the provided options without modifications, rephrasing, or synonyms.
+   - Example: If the query mentioned "swollen" or related term ('retain water'),  you must map it to sign/symptom of "edema" under the "Circulation" problem (do not change it to "inflammation" or "oral health" problems).
+   - If no close match exists, respond with:
+     No sufficient information available
+5. DO NOT Overinfer:
+If the query does not clearly describe a healthcare problem, lacks enough background information to support the sign/symptom, or if no option closely aligns with the query, respond with:
+No sufficient information availableQuery:
 
-4. STRICT PROHIBITIONS:
-   - No classification for questions/requests
-   - No inference beyond explicit information
-   - No partial matches
-   - No combining multiple options
+{{query}}
 
-5. **Term Conversion Rules** - Convert these common phrases to Omaha terms:
-   - "Shortness of breath" → "abnormal breath patterns"
-   - "Trouble breathing" → "abnormal breath patterns"
-   - "Swollen or retain water" → "edema" under the "Circulation" problem
-   - "High BP numbers" → "abnormal blood pressure reading"
+Options:
+{% for doc in documents %}
+{{ loop.index }}.
+- Domain: {{ doc.meta.get('domain', 'N/A') }}
+- Problem: {{ doc.meta.get('problem', 'N/A') }}
+- Signs/Symptoms: {{ doc.meta.get('signs_or_symptoms', 'N/A') }}
+{% endfor %}
 
-Examples:
+Response Format:
+If a relevant match is found, provide ONLY ONE classification using the exact wording from the selected option in this format:
+Domain: [Exact match]
+Problem: [Exact match]
+Signs/Symptoms: [Exact match]
+If no match:
+No sufficient information available
+
+Example Queries and Responses:
+
 Example 1:
 Query: "when I got back from my walk today; it is 145/92."
 Response:
@@ -563,13 +565,10 @@ Example 3:
 Query: "I can not breath at night."
 Response:
 Domain: Physiological Domain
-Problem: Respiration
-Signs/Symptoms: abnormal breath patterns
+Problem: Circulation
+Signs/Symptoms: abnormal breath pattern
 
-Question: {{query}}<|eot_id|>
-
-<|start_header_id|>assistant<|end_header_id|>
-
+"""
 
 """
 
