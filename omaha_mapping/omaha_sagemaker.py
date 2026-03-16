@@ -336,7 +336,7 @@ def build_index(docs: list[dict], model: SentenceTransformer) -> np.ndarray:
     """Encode all documents and return embedding matrix (n_docs × dim)."""
     texts = [d["text"] for d in docs]
     log.info(f"Encoding {len(texts)} documents …")
-    embeddings = model.encode(texts, batch_size=64, show_progress_bar=False,
+    embeddings = model.encode(texts, batch_size=64, show_progress_bar=True,
                               normalize_embeddings=True)
     return embeddings.astype("float32")
 
