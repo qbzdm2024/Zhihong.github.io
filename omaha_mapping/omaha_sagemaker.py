@@ -504,7 +504,7 @@ def call_llm(prompt: str, llm_name: str = ACTIVE_LLM,
 # ══════════════════════════════════════════════════════════════════════════════
 
 SS_PROMPT_TEMPLATE = """
-Identify the health problems from the conversation between the nurse and the patient provided in the query below, and map it to the MOST RELEVANT Omaha System classification.
+Analyze the healthcare query provided below and identify the MOST RELEVANT Omaha System classification.
 
 Instructions:
 1. Review the query for any direct mentions of healthcare-related issues across these domains:
@@ -512,53 +512,48 @@ Instructions:
    - Psychological Domain (e.g., feelings of fatigue, low mood)
    - Physiological Domain
    - Health-related Behaviors Domain (e.g., nutrition, medication regimen)
+2. If the problem pertains to issues affecting others (e.g., family members, children) or describes general environmental or administrative issues (e.g., insurance paperwork, scheduling, date inquiries) that do not directly affect the patient him/herself, ignore it.
+3. From the provided options, select the single MOST RELEVANT classification that best matches the query’s domain, problem, and signs/symptoms.
+4. IMPORTANT: Your final answer MUST USE THE EXACT WORDING from one of the provided options without any modifications, rephrasing, or synonyms. For example, if the query uses a synonym like "swollen," you MUST map it to "edema" exactly as it appears in the options.
+5. EXTRA RULE: If the query contains "swollen" or any variant (e.g., "swelling"), choose the option that lists "edema" with the "Circulation" problem in the Signs/Symptoms field. Do not substitute any other term such as "inflammation."
+6. DO NOT OVERINFER. If the query does not clearly describe a healthcare problem, lacks sufficient information to support the presence of a healthcare issue, or if no option closely aligns with the query, respond with "No sufficient information available." For example, vague or ambiguous statements such as "I didn't know. I heard voices." should not be interpreted as a healthcare problem.
+7. If the query is phrased as a question, assume that no healthcare problem can be confirmed and respond with "No sufficient information available."
+8. If the query includes a blood pressure reading, glucose level, or any other medical measurement, determine whether the value is abnormal. If abnormal, respond with the corresponding problem mapped to the Omaha System; if normal, respond with "No sufficient information available."
+9. NORMAL BEHAVIOR RULE: If the query describes typical, expected behavior or general administrative/healthcare information (e.g., exercising, working late, needing rest or sleep, test costs, scheduling, date inquiries, availability, payment details) without any indication of abnormal symptoms, distress, or dysfunction, then no healthcare problem is identified. However, if the query simply states a symptom (e.g., "I am tired today") without additional context indicating normal behavior, treat it as a potential healthcare problem only if supported by corresponding classification options.
+10. NEGATIVE QUERY RULE: If the overall tone or content of the query is purely administrative, factual, or routine (e.g., inquiries about dates, insurance paperwork, normal vital sign values, casual remarks about sleep or work schedules) or includes negative phrasing that does not describe a specific abnormal health condition, respond with "No sufficient information available."
 
-2. DO NOT classify if:
-   - The issue affects others or describes a general environmental/public health concern (e.g., COVID-19, flu, air quality, needing rest or sleep, test costs, availability, payment details) without any indication of abnormal symptoms, distress, or dysfuction.
-   - The query is too vague or lacks abnormality (e.g., "I feel weird").
-   - It describes normal behavior (e.g., "Worked late", "doing excercise", needing rest or sleep, test costs, availability, payment details) unless there is clear evidence of abnormal symptoms, distress, or dysfunction.
-   - The query is a question or request for information (e.g., "Do I have high BP?").
-   - A normal medical reading (e.g., BP, glucose).
+11. CHAIN-OF-THOUGHT: In your final output, include a brief chain-of-thought explanation immediately following your classification. This explanation should outline the key reasoning steps without revealing sensitive internal processing details.
 
-3. Select the single MOST RELEVANT classification from the provided options that best matches the query’s domain, problem, and signs/symptoms.
-4. IMPORTANT: The final answer MUST USE THE EXACT WORDING from the provided options without modifications, rephrasing, or synonyms.
-   - Example: If the query mentioned "swollen" or related term ('retain water'),  you must map it to sign/symptom of "edema" under the "Circulation" problem (do not change it to "inflammation" or "oral health" problems).
-   - If no close match exists, respond with: None
-5. DO NOT Overinfer:
-If the query does not clearly describe a healthcare problem, lacks enough background information to support the sign/symptom, or if no option closely aligns with the query, respond with:
-None
-
-{{query}}
+Query:
+{query}
 
 Options:
-{% for doc in documents %}
-{{ loop.index }}.
-- Domain: {{ doc.meta.get('domain', 'N/A') }}
-- Problem: {{ doc.meta.get('problem', 'N/A') }}
-- Signs/Symptoms: {{ doc.meta.get('signs_or_symptoms', 'N/A') }}
-{% endfor %}
+{options}
 
-Response Format:
-If a relevant match is found, provide ONLY ONE classification using the exact wording from the selected option in this format:
+Response format:
+If a relevant match is found, provide ONLY ONE classification in this format:
+
 Domain: [Exact match]
 Problem: [Exact match]
 Signs/Symptoms: [Exact match]
-If no match:
-None
+
+If no healthcare problem is identified or no close match is found:
+NONE
 
 Example Queries and Responses:
-
 Example 1:
 Query: "when I got back from my walk today; it is 145/92."
 Response:
 Domain: Physiological Domain
 Problem: Circulation
 Signs/Symptoms: abnormal blood pressure reading
+Chain-of-Thought: The query mentioned a high blood pressure reading (145/92, which is above the normal range), directly mapping to "abnormal blood pressure reading" under the Circulation option.
 
 Example 2:
 Query: "You have the shower?"
 Response:
-None
+No sufficient information available
+Chain-of-Thought: The query is phrased as a question, so no specific healthcare-related information can be confirmed.
 
 Example 3:
 Query: "I can not breath at night."
@@ -566,6 +561,8 @@ Response:
 Domain: Physiological Domain
 Problem: Circulation
 Signs/Symptoms: abnormal breath pattern
+Chain-of-Thought: "cannot breath" here is interpreted as an irregular or abnormal breathing pattern rather than a complete inability to breathe independently (which would typically require mechanical assistance). Therefore, the best matching option is "abnormal breath pattern." Do not change the wording.
+
 
 """
 
