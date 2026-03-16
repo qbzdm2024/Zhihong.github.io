@@ -503,74 +503,74 @@ def call_llm(prompt: str, llm_name: str = ACTIVE_LLM,
 # SECTION 5 — PROMPT TEMPLATES
 # ══════════════════════════════════════════════════════════════════════════════
 
-SS_PROMPT_TEMPLATE = """\
-You are a clinical coding assistant mapping conversation to the Omaha System.
+SS_PROMPT_TEMPLATE = """
+<|begin_of_text|><|start_header_id|>user<|end_header_id|>
+user
 
-STEP 1 — FILTER (answer mentally before outputting anything):
-Does the CURRENT TURN contain an EXPLICIT, PERSONAL, ABNORMAL health problem or symptom?
-  → If NO  → output NONE immediately. Do not continue.
-  → If YES → go to Step 2.
+Your answer should be only the identified {domain, problem, and sign or symptoms} link OR "No sufficient information available". You cannot provide additional answer.
 
-Reasons to output NONE (most turns will be NONE):
-  - The speaker is a nurse/clinician describing what they WILL DO or ARE DOING (actions/procedures)
-  - Normal readings: "98.2 no fever", "96% oxygen", "80 pulse" → NONE
-  - Patient confirms or acknowledges something: "Okay.", "Yeah.", "Beautiful." → NONE
-  - Question only: "Do you have a wound?", "Are you taking medication?" → NONE
-  - Greetings, scheduling, administrative: "Today is February 19", "Can I put the mic here?" → NONE
-  - Someone else's health problem, not the patient's own → NONE
-  - Vague or normal: "I feel weird", "I worked late", "I do exercise" → NONE
+Context:
+{% for doc in documents %}
+  Domain: {{ doc.meta['domain'] }}
+  Problem: {{ doc.meta['problem'] }}
+  Signs/Symptoms: {{ doc.meta['signs_or_symptoms'] }}
+{% endfor %}
 
-STEP 2 — CLASSIFY (only if a clear personal abnormal symptom exists):
-  - Select the SINGLE MOST RELEVANT classification from the options below.
-  - Use EXACT wording from the options. No synonyms, no additions.
-  - Common mappings:
-      "high BP" / "145/92" → Circulation | abnormal blood pressure reading
-      "can't breathe" / "SOB" → Respiration | abnormal breath patterns
-      "swollen" / "retain water" → Circulation | edema
-      "taking medication for [condition]" → Health-related Behaviors Domain | Medication regimen | other
-        AND the condition itself if abnormal (e.g. asthma → Respiration | other)
+Instructions:
+1. FIRST determine if the query describes any health problem meeting these criteria:
+   - Explicit mention of abnormal symptoms/distress/dysfunction
+   - Not a general question/public health concern
+   - Not normal behavior/test results
+   - Not vague descriptions without clear abnormality
 
-Context (do NOT classify these turns):
-{context}
+2. IF NO HEALTH PROBLEM EXISTS:
+   Respond immediately with: "No sufficient information available"
 
-CURRENT TURN:
-{query}
+3. IF HEALTH PROBLEM EXISTS:
+   a. Select the SINGLE MOST RELEVANT option from Context using EXACT WORDING
+   b. Match using these priority rules:
+      - Match exact symptom terminology first
+      - Match problem category second
+      - Match domain last
+   c. NEVER use synonyms/rephrasing - only exact matches from Context
 
-Available options:
-{options}
+4. STRICT PROHIBITIONS:
+   - No classification for questions/requests
+   - No inference beyond explicit information
+   - No partial matches
+   - No combining multiple options
 
-OUTPUT — respond with EXACTLY ONE of these formats, nothing else:
-1. Domain: [exact] | Problem: [exact] | Signs/Symptoms: [exact]
-
-NONE
+5. **Term Conversion Rules** - Convert these common phrases to Omaha terms:
+   - "Shortness of breath" → "abnormal breath patterns"
+   - "Trouble breathing" → "abnormal breath patterns"
+   - "Swollen or retain water" → "edema" under the "Circulation" problem
+   - "High BP numbers" → "abnormal blood pressure reading"
 
 Examples:
-Query (nurse): "I'm going to check your blood pressure, heart, and lungs. And then I'm going to take care of your wound."
-NONE
+Example 1:
+Query: "when I got back from my walk today; it is 145/92."
+Response:
+Domain: Physiological Domain
+Problem: Circulation
+Signs/Symptoms: abnormal blood pressure reading
 
-Query (patient): "And when I take that pill, yeah, that works a little."
-1. Domain: Health-related Behaviors Domain | Problem: Medication regimen | Signs/Symptoms: other
+Example 2:
+Query: "You have the shower?"
+Response:
+No sufficient information available
 
-Query (patient): "Yeah. I'm taking medication. I take medication for asthma."
-1. Domain: Physiological Domain | Problem: Respiration | Signs/Symptoms: other
+Example 3:
+Query: "I can not breath at night."
+Response:
+Domain: Physiological Domain
+Problem: Respiration
+Signs/Symptoms: abnormal breath patterns
 
-Query (nurse): "This is temperature. 98.2. No fever. Very good."
-NONE
+Question: {{query}}<|eot_id|>
 
-Query (nurse): "So are you taking any medications?"
-NONE
+<|start_header_id|>assistant<|end_header_id|>
 
-Query (patient): "I can not breath at night."
-1. Domain: Physiological Domain | Problem: Respiration | Signs/Symptoms: abnormal breath patterns
 
-Query (patient): "I sit in my bed. I pull up one leg and it blow up."
-1. Domain: Physiological Domain | Problem: Pain | Signs/Symptoms: compensated movement/guarding
-
-Query (patient): "When I got back from my walk, it is 145/92."
-1. Domain: Physiological Domain | Problem: Circulation | Signs/Symptoms: abnormal blood pressure reading
-
-Query (nurse): "Okay. All right. So we're going to check your blood pressure, heart, and lungs. And then I'll check the wound."
-NONE
 """
 
 INTERVENTION_PROMPT_TEMPLATE = """
