@@ -6,20 +6,25 @@ sent to the LLM, the raw response, and the parsed result — without
 loading S3 or running the whole annotation sheet.
 
 Usage (SageMaker terminal):
-    python test_single_turn.py
     python test_single_turn.py --turn "I can't breathe at night."
     python test_single_turn.py --turn "I'll check your blood pressure." --task intervention
-    python test_single_turn.py --turn "My ankles are swollen." --task both
-    python test_single_turn.py --turn "Okay." --context "Nurse: How are you feeling? Patient: Okay."
+    python test_single_turn.py --turn "My ankles are swollen." --task both --verbose
+    python test_single_turn.py --turn "..." --ss-prompt-file my_ss_prompt.txt
+    python test_single_turn.py --turn "..." --int-prompt-file my_int_prompt.txt
+    python test_single_turn.py --turn "..." --model gpt-4o --top-k 10 --embedding-model sentence-transformers/all-mpnet-base-v2
 
 Options:
-    --turn TEXT       The conversation turn to classify (prompted if omitted)
-    --context TEXT    Optional surrounding context (rows before/after)
-    --task            ss | intervention | both   (default: both)
-    --model           LLM config name from omaha_sagemaker.LLM_CONFIGS (default: gpt-4o-mini)
-    --top-k           Number of Omaha options to retrieve (default: 15)
-    --omaha-file      Local path to Omaha Excel (auto-detected if omitted)
-    --show-prompt     Print the full prompt sent to the LLM (default: True)
+    --turn TEXT              Conversation turn to classify (prompted if omitted)
+    --context TEXT           Surrounding context text (optional)
+    --task                   ss | intervention | both   (default: both)
+    --model TEXT             LLM config name (default: gpt-4o-mini)
+    --top-k INT              Number of Omaha options to retrieve (default: 15)
+    --embedding-model TEXT   SentenceTransformer model name (default: from omaha_sagemaker.py)
+    --context-window INT     Rows of context around the turn (default: from omaha_sagemaker.py)
+    --omaha-file TEXT        Local path to Omaha Excel (auto-detected if omitted)
+    --ss-prompt-file TEXT    Path to a .txt file containing a custom SS prompt template
+    --int-prompt-file TEXT   Path to a .txt file containing a custom intervention prompt template
+    --verbose                Show retrieved options, full prompt, and raw LLM response
 """
 
 import argparse
@@ -114,7 +119,10 @@ def test_turn(
     task: str = "both",           # "ss" | "intervention" | "both"
     model_name: str = "gpt-4o-mini",
     top_k: int = 15,
+    embedding_model: str = None,  # None → use om.EMBEDDING_MODEL
     omaha_file: str = None,
+    ss_prompt_template: str = None,    # None → use om.SS_PROMPT_TEMPLATE
+    int_prompt_template: str = None,   # None → use om.INTERVENTION_PROMPT_TEMPLATE
     verbose: bool = False,
 ):
     import logging
@@ -141,9 +149,16 @@ def test_turn(
         ss_df.columns  = [c.strip() for c in ss_df.columns]
         int_df.columns = [c.strip() for c in int_df.columns]
 
+    # ── Override prompt templates if custom ones were provided ────────────────
+    if ss_prompt_template:
+        om.SS_PROMPT_TEMPLATE = ss_prompt_template
+    if int_prompt_template:
+        om.INTERVENTION_PROMPT_TEMPLATE = int_prompt_template
+
     # ── Build embedding index (once) ──────────────────────────────────────────
     from sentence_transformers import SentenceTransformer
-    embed_model = SentenceTransformer(om.EMBEDDING_MODEL, device="cpu")
+    _embed_model_name = embedding_model or om.EMBEDDING_MODEL
+    embed_model = SentenceTransformer(_embed_model_name, device="cpu")
 
     ss_docs  = om.build_ss_documents(ss_df)
     int_docs = om.build_intervention_documents(int_df)
@@ -154,9 +169,14 @@ def test_turn(
     if verbose:
         print()
         divider("SINGLE-TURN TEST", "═")
-        print(f"  {BOLD('Model:')}   {model_name}")
-        print(f"  {BOLD('Task:')}    {task}")
-        print(f"  {BOLD('Top-K:')}   {top_k}")
+        print(f"  {BOLD('Model:')}            {model_name}")
+        print(f"  {BOLD('Task:')}             {task}")
+        print(f"  {BOLD('Top-K:')}            {top_k}")
+        print(f"  {BOLD('Embedding model:')}  {_embed_model_name}")
+        if ss_prompt_template:
+            print(f"  {BOLD('SS prompt:')}        (custom)")
+        if int_prompt_template:
+            print(f"  {BOLD('Int prompt:')}       (custom)")
         print()
         divider("CONVERSATION TURN")
         print(YELLOW(f"  {turn}"))
@@ -254,20 +274,26 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--turn",       default=None,
+    parser.add_argument("--turn",             default=None,
                         help="Conversation turn to classify")
-    parser.add_argument("--context",    default="",
+    parser.add_argument("--context",          default="",
                         help="Surrounding context text (optional)")
-    parser.add_argument("--task",       default="both",
+    parser.add_argument("--task",             default="both",
                         choices=["ss", "intervention", "both"],
                         help="Which mapping to run (default: both)")
-    parser.add_argument("--model",      default="gpt-4o-mini",
+    parser.add_argument("--model",            default="gpt-4o-mini",
                         help="LLM config name (default: gpt-4o-mini)")
-    parser.add_argument("--top-k",      type=int, default=15,
+    parser.add_argument("--top-k",            type=int, default=15,
                         help="Omaha options to retrieve (default: 15)")
-    parser.add_argument("--omaha-file", default=None,
+    parser.add_argument("--embedding-model",  default=None,
+                        help="SentenceTransformer model name (default: from omaha_sagemaker.py)")
+    parser.add_argument("--omaha-file",       default=None,
                         help="Local path to Omaha Excel file")
-    parser.add_argument("--verbose",    action="store_true",
+    parser.add_argument("--ss-prompt-file",   default=None,
+                        help="Path to .txt file with custom SS prompt template")
+    parser.add_argument("--int-prompt-file",  default=None,
+                        help="Path to .txt file with custom intervention prompt template")
+    parser.add_argument("--verbose",          action="store_true",
                         help="Show full prompt, retrieved options, and raw LLM response")
     args = parser.parse_args()
 
@@ -294,13 +320,31 @@ def main():
     if not turn:
         sys.exit("No turn provided.")
 
+    # Load custom prompt templates from files if provided
+    ss_prompt_template = None
+    if args.ss_prompt_file:
+        if not os.path.isfile(args.ss_prompt_file):
+            sys.exit(RED(f"ERROR: SS prompt file not found: {args.ss_prompt_file}"))
+        with open(args.ss_prompt_file, "r") as f:
+            ss_prompt_template = f.read()
+
+    int_prompt_template = None
+    if args.int_prompt_file:
+        if not os.path.isfile(args.int_prompt_file):
+            sys.exit(RED(f"ERROR: Intervention prompt file not found: {args.int_prompt_file}"))
+        with open(args.int_prompt_file, "r") as f:
+            int_prompt_template = f.read()
+
     test_turn(
         turn=turn,
         context=args.context,
         task=args.task,
         model_name=args.model,
         top_k=args.top_k,
+        embedding_model=args.embedding_model,
         omaha_file=args.omaha_file,
+        ss_prompt_template=ss_prompt_template,
+        int_prompt_template=int_prompt_template,
         verbose=args.verbose,
     )
 

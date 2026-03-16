@@ -872,6 +872,7 @@ def parse_intervention_output(text: str) -> list[dict]:
             return []
 
     results = []
+    seen = set()
     pattern = re.compile(
         r"Category\s*:\s*(?P<category>[^|\n]+)\|\s*Target\s*:\s*(?P<target>[^\n]+)",
         re.IGNORECASE,
@@ -879,7 +880,9 @@ def parse_intervention_output(text: str) -> list[dict]:
     for m in pattern.finditer(answer):
         category = _clean_field(m.group("category"))
         target   = _clean_field(m.group("target"))
-        if category and target:
+        key = (category.lower(), target.lower())
+        if category and target and key not in seen:
+            seen.add(key)
             results.append({
                 "category": category,
                 "target":   target,
