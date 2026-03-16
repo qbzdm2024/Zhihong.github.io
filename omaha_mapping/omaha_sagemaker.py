@@ -962,6 +962,10 @@ def process_sheet(
         # ── Signs/Symptoms prediction ───────────────────────────────────────
         ss_retrieved  = retrieve(query, ss_docs, ss_embeddings, embed_model)
         ss_prompt     = build_ss_prompt(query, context, ss_retrieved)
+        # Strip Llama3 special tokens for API models (GPT, Azure) — they are
+        # literal characters to these models and hurt output format compliance.
+        if LLM_CONFIGS[llm_name]["provider"] != "local":
+            ss_prompt = re.sub(r"<\|[^|>]+\|>", "", ss_prompt).strip()
         ss_raw        = call_llm(ss_prompt, llm_name)
         ss_preds      = parse_ss_output(ss_raw)
 
@@ -1131,8 +1135,6 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             ss_relevant_rows += 1
             tp, fp, fn = row_level_match(pred_ss_labels, human_ss)
             ss_tp += tp; ss_fp += fp; ss_fn += fn
-        else:
-            ss_tn += 1   # both human and pred are NONE → true negative
 
             # Component metrics — GT format is always "Problem_SS" (2 parts):
             # first underscore-separated token = Problem, rest = SS
@@ -1153,6 +1155,9 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             if human_ss_only or pred_ss_only:
                 tp2, fp2, fn2 = row_level_match(pred_ss_only, human_ss_only)
                 ss_only_tp += tp2; ss_only_fp += fp2; ss_only_fn += fn2
+
+        else:
+            ss_tn += 1   # both human and pred are NONE → true negative
 
         # ── Interventions ────────────────────────────────────────────────────
         human_int = [str(row[f"OS_I_{j}"]).strip()
