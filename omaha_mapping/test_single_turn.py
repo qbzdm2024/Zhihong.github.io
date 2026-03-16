@@ -115,7 +115,7 @@ def test_turn(
     model_name: str = "gpt-4o-mini",
     top_k: int = 15,
     omaha_file: str = None,
-    show_prompt: bool = True,
+    verbose: bool = False,
 ):
     # ── Load Omaha definitions ─────────────────────────────────────────────────
     omaha_path = _find_omaha_excel(omaha_file)
@@ -156,66 +156,78 @@ def test_turn(
 
     # ── Signs/Symptoms ────────────────────────────────────────────────────────
     if task in ("ss", "both"):
-        print()
-        divider("SIGNS / SYMPTOMS MAPPING")
-
         retrieved_ss = om.retrieve(turn, ss_docs, ss_embeddings, embed_model, top_k)
         ss_prompt    = om.build_ss_prompt(turn, context, retrieved_ss)
 
-        print(DIM(f"  Retrieved {len(retrieved_ss)} SS options."))
-
-        if show_prompt:
+        if verbose:
+            print()
+            divider("SIGNS / SYMPTOMS MAPPING")
+            print(DIM(f"  Retrieved {len(retrieved_ss)} SS options."))
             print()
             divider(f"SS PROMPT ({len(ss_prompt)} chars)", "·")
             for line in ss_prompt.splitlines():
                 print(DIM(f"  {line}"))
 
-        print()
-        divider("SS RAW RESPONSE", "·")
         ss_raw = om.call_llm(ss_prompt, model_name)
-        print(GREEN(f"  {ss_raw}"))
 
-        print()
-        divider("SS PARSED RESULT", "·")
+        if verbose:
+            print()
+            divider("SS RAW RESPONSE", "·")
+            print(GREEN(f"  {ss_raw}"))
+
         ss_parsed = om.parse_ss_output(ss_raw)
-        if ss_parsed:
-            for i, r in enumerate(ss_parsed, 1):
-                print(GREEN(f"  [{i}] Domain: {r['domain']}"))
-                print(GREEN(f"       Problem: {r['problem']}"))
-                print(GREEN(f"       Signs/Symptoms: {r['ss']}"))
-        else:
-            print(YELLOW("  → None (no classification)"))
 
     # ── Interventions ─────────────────────────────────────────────────────────
     if task in ("intervention", "both"):
-        print()
-        divider("INTERVENTION MAPPING")
-
         retrieved_int = om.retrieve(turn, int_docs, int_embeddings, embed_model, top_k)
         int_prompt    = om.build_intervention_prompt(turn, context, retrieved_int)
 
-        print(DIM(f"  Retrieved {len(retrieved_int)} intervention options."))
-
-        if show_prompt:
+        if verbose:
+            print()
+            divider("INTERVENTION MAPPING")
+            print(DIM(f"  Retrieved {len(retrieved_int)} intervention options."))
             print()
             divider(f"INTERVENTION PROMPT ({len(int_prompt)} chars)", "·")
             for line in int_prompt.splitlines():
                 print(DIM(f"  {line}"))
 
-        print()
-        divider("INTERVENTION RAW RESPONSE", "·")
         int_raw = om.call_llm(int_prompt, model_name)
-        print(GREEN(f"  {int_raw}"))
 
-        print()
-        divider("INTERVENTION PARSED RESULT", "·")
+        if verbose:
+            print()
+            divider("INTERVENTION RAW RESPONSE", "·")
+            print(GREEN(f"  {int_raw}"))
+
         int_parsed = om.parse_intervention_output(int_raw)
+
+    # ── Final Results ─────────────────────────────────────────────────────────
+    print()
+    divider("RESULTS", "═")
+    print(YELLOW(f"  Turn: {turn}"))
+    print()
+
+    if task in ("ss", "both"):
+        print(BOLD("  Signs / Symptoms:"))
+        if ss_parsed:
+            for i, r in enumerate(ss_parsed, 1):
+                print(GREEN(f"    [{i}] Domain:         {r['domain']}"))
+                print(GREEN(f"         Problem:        {r['problem']}"))
+                print(GREEN(f"         Signs/Symptoms: {r['ss']}"))
+        else:
+            print(YELLOW("    → None"))
+
+    if task in ("both",):
+        print()
+
+    if task in ("intervention", "both"):
+        print(BOLD("  Intervention:"))
         if int_parsed:
             for i, r in enumerate(int_parsed, 1):
-                print(GREEN(f"  [{i}] Category: {r['category']} | Target: {r['target']}"))
+                print(GREEN(f"    [{i}] Category: {r['category']} | Target: {r['target']}"))
         else:
-            print(YELLOW("  → None (no intervention)"))
+            print(YELLOW("    → None"))
 
+    print()
     divider("", "═")
     print()
 
@@ -243,8 +255,8 @@ def main():
                         help="Omaha options to retrieve (default: 15)")
     parser.add_argument("--omaha-file", default=None,
                         help="Local path to Omaha Excel file")
-    parser.add_argument("--no-prompt",  action="store_true",
-                        help="Hide the full prompt (only show response)")
+    parser.add_argument("--verbose",    action="store_true",
+                        help="Show full prompt, retrieved options, and raw LLM response")
     args = parser.parse_args()
 
     # Validate model name
@@ -277,7 +289,7 @@ def main():
         model_name=args.model,
         top_k=args.top_k,
         omaha_file=args.omaha_file,
-        show_prompt=not args.no_prompt,
+        verbose=args.verbose,
     )
 
 
