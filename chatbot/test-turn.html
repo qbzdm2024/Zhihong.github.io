@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Single-Turn Prompt Tester — HF Chatbot</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      background: #0f1117;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 340px 1fr;
+      grid-template-rows: auto 1fr;
+      gap: 0;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────────────── */
+    header {
+      grid-column: 1 / -1;
+      background: #1a1d26;
+      border-bottom: 1px solid #2a2d3e;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { font-size: 15px; font-weight: 600; color: #fff; }
+    header p  { font-size: 11px; color: #888; margin-top: 2px; }
+    .badge {
+      background: #2d3250;
+      border: 1px solid #3d4170;
+      color: #8b9fe8;
+      font-size: 10px;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-weight: 600;
+      letter-spacing: .5px;
+    }
+
+    /* ── Left Panel (config + input) ────────────────────────────────────────── */
+    .left-panel {
+      background: #1a1d26;
+      border-right: 1px solid #2a2d3e;
+      padding: 16px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .panel-section {
+      background: #20232e;
+      border: 1px solid #2a2d3e;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .panel-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .8px;
+      text-transform: uppercase;
+      color: #8b9fe8;
+      padding: 8px 12px;
+      background: #24273a;
+      border-bottom: 1px solid #2a2d3e;
+    }
+    .panel-section-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+    label { font-size: 11px; color: #aaa; display: block; margin-bottom: 3px; }
+    input[type=text], input[type=password], select, textarea {
+      width: 100%;
+      background: #131520;
+      border: 1px solid #2a2d3e;
+      border-radius: 5px;
+      color: #e0e0e0;
+      font-size: 12px;
+      font-family: inherit;
+      padding: 7px 9px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    input[type=text]:focus, input[type=password]:focus, select:focus, textarea:focus {
+      border-color: #5b6af0;
+    }
+    textarea { resize: vertical; }
+    select option { background: #1a1d26; }
+
+    .toggle-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .toggle-btn {
+      flex: 1;
+      min-width: 70px;
+      padding: 5px 8px;
+      background: #131520;
+      border: 1px solid #2a2d3e;
+      border-radius: 5px;
+      color: #aaa;
+      font-size: 11px;
+      cursor: pointer;
+      text-align: center;
+      transition: all .15s;
+    }
+    .toggle-btn.active {
+      background: #2d3250;
+      border-color: #5b6af0;
+      color: #8b9fe8;
+      font-weight: 600;
+    }
+
+    /* RAG slider */
+    .rag-row { display: flex; align-items: center; gap: 8px; }
+    .rag-row input[type=range] { flex: 1; accent-color: #5b6af0; }
+    .rag-val { font-size: 12px; font-weight: 600; color: #8b9fe8; min-width: 16px; text-align: right; }
+
+    /* Conversation history */
+    .history-turn {
+      background: #131520;
+      border: 1px solid #2a2d3e;
+      border-radius: 5px;
+      padding: 8px;
+      font-size: 11px;
+      position: relative;
+    }
+    .history-turn .role-label { font-weight: 700; color: #5b6af0; margin-bottom: 3px; font-size: 10px; text-transform: uppercase; }
+    .history-turn textarea { margin-top: 4px; min-height: 50px; font-size: 11px; }
+    .remove-turn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      background: none;
+      border: none;
+      color: #555;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .remove-turn:hover { color: #e05c5c; }
+
+    .btn-small {
+      font-size: 11px;
+      padding: 5px 10px;
+      border-radius: 5px;
+      border: 1px solid #2a2d3e;
+      background: #131520;
+      color: #aaa;
+      cursor: pointer;
+      transition: all .15s;
+    }
+    .btn-small:hover { border-color: #5b6af0; color: #8b9fe8; }
+
+    /* Run button */
+    #run-btn {
+      width: 100%;
+      padding: 10px;
+      background: linear-gradient(135deg, #4a5af0, #6a3af0);
+      border: none;
+      border-radius: 7px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      letter-spacing: .3px;
+      transition: opacity .15s;
+    }
+    #run-btn:hover { opacity: .9; }
+    #run-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* ── Right Panel (output) ───────────────────────────────────────────────── */
+    .right-panel {
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+
+    .out-block {
+      background: #1a1d26;
+      border: 1px solid #2a2d3e;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    .out-block-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: #20232e;
+      border-bottom: 1px solid #2a2d3e;
+      cursor: pointer;
+      user-select: none;
+    }
+    .out-block-header:hover { background: #24273a; }
+    .out-block-title { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+    .out-block-meta { font-size: 10px; color: #666; }
+    .chevron { font-size: 10px; color: #555; transition: transform .2s; }
+    .out-block.collapsed .chevron { transform: rotate(-90deg); }
+    .out-block.collapsed .out-block-body { display: none; }
+    .out-block-body { padding: 12px; }
+
+    pre {
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: 'Menlo', 'Consolas', monospace;
+      font-size: 11.5px;
+      line-height: 1.6;
+      color: #c9d1e0;
+    }
+    pre.system-prompt { color: #a8c4ff; }
+    pre.response-text { color: #b8f0b8; }
+    pre.chunk-text { color: #f0d8a0; }
+
+    .chunk-card {
+      background: #131520;
+      border: 1px solid #2a2d3e;
+      border-radius: 5px;
+      padding: 10px;
+      margin-bottom: 8px;
+    }
+    .chunk-card:last-child { margin-bottom: 0; }
+    .chunk-meta { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 10px; color: #888; }
+    .chunk-score { color: #5b6af0; font-weight: 700; }
+    .chunk-source { color: #f0a060; }
+
+    /* Usage pills */
+    .usage-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .usage-pill {
+      background: #131520;
+      border: 1px solid #2a2d3e;
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 11px;
+    }
+    .usage-pill span { color: #8b9fe8; font-weight: 700; }
+
+    /* Empty / error states */
+    .empty-state {
+      text-align: center;
+      color: #444;
+      padding: 60px 20px;
+      font-size: 13px;
+    }
+    .error-banner {
+      background: #3a1010;
+      border: 1px solid #a03030;
+      border-radius: 6px;
+      padding: 10px 14px;
+      color: #f08080;
+      font-size: 12px;
+    }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Detected intent badges */
+    .intent-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .intent-badge {
+      font-size: 10px;
+      padding: 2px 8px;
+      border-radius: 20px;
+      border: 1px solid;
+    }
+    .intent-badge.yes { background: #1a3a1a; border-color: #3a8040; color: #80c880; }
+    .intent-badge.no  { background: #1a1a2a; border-color: #2a2a4a; color: #5a5a8a; }
+
+    /* Status bar */
+    #status-bar {
+      grid-column: 1 / -1;
+      height: 28px;
+      background: #141622;
+      border-top: 1px solid #2a2d3e;
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      font-size: 11px;
+      color: #666;
+      gap: 16px;
+    }
+    #status-bar .dot { width: 6px; height: 6px; border-radius: 50%; background: #444; }
+    #status-bar .dot.green { background: #40c840; }
+    #status-bar .dot.red   { background: #e05c5c; }
+    #status-bar .dot.yellow { background: #e0b040; }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header>
+  <div>
+    <h1>💙 Single-Turn Prompt Tester</h1>
+    <p>Test one conversation turn in isolation · Inspect system prompt · Retrieved chunks · Raw response</p>
+  </div>
+  <span class="badge">DEV TOOL</span>
+</header>
+
+<!-- ── Left Panel ──────────────────────────────────────────────────────────── -->
+<div class="left-panel">
+
+  <!-- API / Model -->
+  <div class="panel-section">
+    <div class="panel-section-title">🔑 API &amp; Model</div>
+    <div class="panel-section-body">
+      <div>
+        <label>OpenAI API Key</label>
+        <input type="password" id="api-key" placeholder="sk-..." autocomplete="off" />
+      </div>
+      <div>
+        <label>Model</label>
+        <select id="model-select">
+          <option value="gpt-4o-mini">gpt-4o-mini (fast)</option>
+          <option value="gpt-4o">gpt-4o</option>
+          <option value="o1-mini">o1-mini</option>
+          <option value="o1">o1</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Message -->
+  <div class="panel-section">
+    <div class="panel-section-title">💬 User Message</div>
+    <div class="panel-section-body">
+      <textarea id="user-message" rows="4" placeholder="Type the user message to test…"></textarea>
+
+      <!-- Quick presets -->
+      <div>
+        <label>Quick presets</label>
+        <div style="display:flex; flex-direction:column; gap:4px; margin-top:2px;">
+          <button class="btn-small preset-btn" data-msg="I've been gaining weight and my ankles are swollen. What should I do?">Swelling + weight gain</button>
+          <button class="btn-small preset-btn" data-msg="I have severe chest pain and can't breathe. I feel like I'm going to pass out.">Chest pain emergency</button>
+          <button class="btn-small preset-btn" data-msg="What foods should I avoid with heart failure?">Diet question</button>
+          <button class="btn-small preset-btn" data-msg="My heart is racing and I feel dizzy.">Cardiac (non-HF context)</button>
+          <button class="btn-small preset-btn" data-msg="How much exercise is safe for someone with heart failure?">Exercise question</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Prompt Mode -->
+  <div class="panel-section">
+    <div class="panel-section-title">🎛 System Prompt Mode</div>
+    <div class="panel-section-body">
+      <label>Override mode (leave Auto to let engines decide)</label>
+      <div class="toggle-row" id="mode-toggles">
+        <button class="toggle-btn active" data-mode="auto">Auto</button>
+        <button class="toggle-btn" data-mode="education">Education</button>
+        <button class="toggle-btn" data-mode="triage">Triage</button>
+        <button class="toggle-btn" data-mode="cardiacNonTriage">Cardiac</button>
+      </div>
+      <div style="font-size:10px; color:#666; margin-top:2px;">
+        <strong>Auto</strong> = detect intent from message text, same as production.<br>
+        <strong>Triage</strong> = force triage mode (isTriageMode=true).<br>
+        <strong>Cardiac</strong> = cardiacNonTriage mode.
+      </div>
+    </div>
+  </div>
+
+  <!-- RAG -->
+  <div class="panel-section">
+    <div class="panel-section-title">📚 RAG Retrieval</div>
+    <div class="panel-section-body">
+      <div>
+        <label>Number of chunks to retrieve</label>
+        <div class="rag-row">
+          <input type="range" id="rag-k" min="1" max="12" value="6" />
+          <span class="rag-val" id="rag-k-val">6</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Conversation History -->
+  <div class="panel-section">
+    <div class="panel-section-title">🕑 Prior History (optional)</div>
+    <div class="panel-section-body">
+      <div style="font-size:10px; color:#666;">
+        Add prior turns to simulate mid-conversation context. Most prompt refinement works fine with no history.
+      </div>
+      <div id="history-turns"></div>
+      <div style="display:flex; gap:6px;">
+        <button class="btn-small" id="add-user-turn">+ User</button>
+        <button class="btn-small" id="add-assistant-turn">+ Assistant</button>
+        <button class="btn-small" id="clear-history-btn">Clear</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Run -->
+  <button id="run-btn">▶ Run Single Turn</button>
+
+</div>
+
+<!-- ── Right Panel (output) ─────────────────────────────────────────────────── -->
+<div class="right-panel" id="right-panel">
+  <div class="empty-state" id="empty-state">
+    Configure and run a single turn to see results here.
+  </div>
+</div>
+
+<!-- ── Scripts ──────────────────────────────────────────────────────────────── -->
+<script src="./js/knowledge-base.js"></script>
+<script src="./js/triage-engine.js"></script>
+<script src="./js/chat-engine.js"></script>
+<script>
+(function () {
+  "use strict";
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  const kb = new KnowledgeBase();
+  const triage = new TriageEngine();
+  const engine = new ChatEngine(kb, triage);
+  let kbReady = false;
+  let historyTurns = []; // [{role, text}]
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  kb.initialize().then(() => {
+    kbReady = true;
+    updateStatus("ready");
+    console.log("[tester] KB loaded:", kb.chunks.length, "chunks");
+  }).catch(e => {
+    updateStatus("error", "KB load failed: " + e.message);
+  });
+
+  // Restore saved API key
+  const savedKey = localStorage.getItem("hf_chatbot_openai_key") || localStorage.getItem("hf_chatbot_api_key") || "";
+  if (savedKey) document.getElementById("api-key").value = savedKey;
+
+  // ── RAG slider ─────────────────────────────────────────────────────────────
+  const ragSlider = document.getElementById("rag-k");
+  const ragVal    = document.getElementById("rag-k-val");
+  ragSlider.addEventListener("input", () => { ragVal.textContent = ragSlider.value; });
+
+  // ── Mode toggles ───────────────────────────────────────────────────────────
+  let selectedMode = "auto";
+  document.getElementById("mode-toggles").addEventListener("click", e => {
+    const btn = e.target.closest(".toggle-btn");
+    if (!btn) return;
+    document.querySelectorAll(".toggle-btn").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    selectedMode = btn.dataset.mode;
+  });
+
+  // ── Preset buttons ─────────────────────────────────────────────────────────
+  document.querySelectorAll(".preset-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.getElementById("user-message").value = btn.dataset.msg;
+    });
+  });
+
+  // ── History management ─────────────────────────────────────────────────────
+  function renderHistory() {
+    const container = document.getElementById("history-turns");
+    container.innerHTML = "";
+    historyTurns.forEach((turn, i) => {
+      const div = document.createElement("div");
+      div.className = "history-turn";
+      div.innerHTML = `
+        <div class="role-label">${turn.role}</div>
+        <textarea rows="2" data-idx="${i}">${escapeHtml(turn.text)}</textarea>
+        <button class="remove-turn" data-idx="${i}" title="Remove">✕</button>
+      `;
+      container.appendChild(div);
+    });
+    // Bind events
+    container.querySelectorAll("textarea").forEach(ta => {
+      ta.addEventListener("input", e => {
+        historyTurns[+e.target.dataset.idx].text = e.target.value;
+      });
+    });
+    container.querySelectorAll(".remove-turn").forEach(btn => {
+      btn.addEventListener("click", e => {
+        historyTurns.splice(+e.target.dataset.idx, 1);
+        renderHistory();
+      });
+    });
+  }
+
+  document.getElementById("add-user-turn").addEventListener("click", () => {
+    historyTurns.push({ role: "user", text: "" });
+    renderHistory();
+  });
+  document.getElementById("add-assistant-turn").addEventListener("click", () => {
+    historyTurns.push({ role: "assistant", text: "" });
+    renderHistory();
+  });
+  document.getElementById("clear-history-btn").addEventListener("click", () => {
+    historyTurns = [];
+    renderHistory();
+  });
+
+  // ── Run ────────────────────────────────────────────────────────────────────
+  document.getElementById("run-btn").addEventListener("click", runTurn);
+
+  async function runTurn() {
+    const apiKey = document.getElementById("api-key").value.trim();
+    const model  = document.getElementById("model-select").value;
+    const msg    = document.getElementById("user-message").value.trim();
+    const ragK   = parseInt(ragSlider.value, 10);
+
+    if (!apiKey) { showError("Please enter your OpenAI API key."); return; }
+    if (!msg)    { showError("Please enter a user message."); return; }
+    if (!kbReady){ showError("Knowledge base is still loading. Wait a moment."); return; }
+
+    // Persist key
+    localStorage.setItem("hf_chatbot_openai_key", apiKey);
+    engine.setApiKey(apiKey);
+    engine.setModel(model);
+
+    // Inject prior history into engine (without polluting across runs)
+    engine.conversationHistory = historyTurns
+      .filter(t => t.text.trim())
+      .map(t => ({ role: t.role, content: t.text }));
+
+    // ── Detect intent ─────────────────────────────────────────────────────
+    const intent       = engine.detectIntent(msg);
+    const symptoms     = triage.detectSymptoms(msg);
+    const isPersonal   = triage.isPersonalSymptomReport(msg);
+
+    // ── Resolve mode ──────────────────────────────────────────────────────
+    let triageMode      = false;
+    let cardiacNonTriage = false;
+
+    if (selectedMode === "triage") {
+      triageMode = true;
+    } else if (selectedMode === "cardiacNonTriage") {
+      cardiacNonTriage = true;
+    } else if (selectedMode === "auto") {
+      triageMode       = isPersonal && symptoms.length > 0;
+      // Simple cardiac-non-triage heuristic (mirrors app.js logic)
+      const cardiacKw  = /\b(heart\s*racing|palpitation|irregular\s*(heart)?beat|rapid\s*pulse|fast\s*heart)\b/i.test(msg);
+      cardiacNonTriage = cardiacKw && !triageMode;
+    }
+
+    // Build the system prompt right now so we can display it
+    const retrievedChunks = kb.retrieve(msg, ragK);
+    const context         = kb.buildContext(retrievedChunks);
+    const systemPrompt    = engine.buildSystemPrompt(context, triageMode, null, cardiacNonTriage);
+
+    // ── Set UI to loading ─────────────────────────────────────────────────
+    const runBtn = document.getElementById("run-btn");
+    runBtn.disabled = true;
+    runBtn.innerHTML = '<span class="spinner"></span> Running…';
+    updateStatus("running");
+
+    const startTime = Date.now();
+    let result = null;
+    let error  = null;
+
+    try {
+      // We bypass engine.chat() to avoid double-retrieval and to fully control options.
+      // Instead, call OpenAI directly mirroring engine.chat().
+      const messages = [
+        { role: "system", content: systemPrompt },
+        ...engine.conversationHistory,
+        { role: "user", content: msg }
+      ];
+
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({ model, max_tokens: 1500, messages })
+      });
+
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `API error ${response.status}`);
+      }
+      const data = await response.json();
+      result = {
+        content: data.choices[0]?.message?.content || "",
+        usage: data.usage,
+        finishReason: data.choices[0]?.finish_reason
+      };
+    } catch (e) {
+      error = e.message;
+    }
+
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+
+    runBtn.disabled = false;
+    runBtn.innerHTML = "▶ Run Single Turn";
+
+    if (error) {
+      updateStatus("error", error);
+      showError(error);
+      return;
+    }
+
+    updateStatus("done", `${elapsed}s · ${result.usage?.total_tokens ?? "?"} tokens`);
+    renderOutput({
+      msg, intent, symptoms, isPersonal, triageMode, cardiacNonTriage,
+      systemPrompt, retrievedChunks, context, result, elapsed, ragK
+    });
+  }
+
+  // ── Render Output ──────────────────────────────────────────────────────────
+  function renderOutput(data) {
+    const panel = document.getElementById("right-panel");
+    panel.innerHTML = "";
+
+    // ── Summary row ────────────────────────────────────────────────────────
+    panel.appendChild(makeBlock("🔍 Detected Intent & Context", "intent-block", false, () => {
+      const badges = [
+        badge("isQuestion",      data.intent.isQuestion),
+        badge("isGreeting",      data.intent.isGreeting),
+        badge("isOffTopic",      data.intent.isOffTopic),
+        badge("isPersonalReport",data.isPersonal),
+        badge("triageMode",      data.triageMode),
+        badge("cardiacNonTriage",data.cardiacNonTriage),
+      ];
+      const symptomsLine = data.symptoms.length
+        ? `<div style="margin-top:8px;font-size:11px;color:#f0d8a0;">Detected symptoms: <strong>${data.symptoms.join(", ")}</strong></div>`
+        : `<div style="margin-top:8px;font-size:11px;color:#666;">No triage symptoms detected.</div>`;
+      const badgeRow = document.createElement("div");
+      badgeRow.className = "intent-badges";
+      badges.forEach(b => badgeRow.appendChild(b));
+      const frag = document.createDocumentFragment();
+      frag.appendChild(badgeRow);
+      const sym = document.createElement("div");
+      sym.innerHTML = symptomsLine;
+      frag.appendChild(sym);
+      return frag;
+    }));
+
+    // ── Usage ──────────────────────────────────────────────────────────────
+    if (data.result.usage) {
+      const u = data.result.usage;
+      panel.appendChild(makeBlock("📊 Token Usage", "usage-block", false, () => {
+        const row = document.createElement("div");
+        row.className = "usage-row";
+        row.innerHTML = `
+          <div class="usage-pill">Prompt <span>${u.prompt_tokens ?? "?"}</span></div>
+          <div class="usage-pill">Completion <span>${u.completion_tokens ?? "?"}</span></div>
+          <div class="usage-pill">Total <span>${u.total_tokens ?? "?"}</span></div>
+          <div class="usage-pill">Elapsed <span>${data.elapsed}s</span></div>
+          <div class="usage-pill">Finish <span>${data.result.finishReason}</span></div>
+          <div class="usage-pill">RAG chunks <span>${data.ragK}</span></div>
+        `;
+        return row;
+      }));
+    }
+
+    // ── Response ───────────────────────────────────────────────────────────
+    panel.appendChild(makeBlock("💬 Assistant Response", "response-block", false, () => {
+      const pre = document.createElement("pre");
+      pre.className = "response-text";
+      pre.textContent = data.result.content;
+      return pre;
+    }));
+
+    // ── System Prompt ──────────────────────────────────────────────────────
+    panel.appendChild(makeBlock(
+      `📋 System Prompt  <span style="color:#555;font-weight:400;">(${data.systemPrompt.length} chars)</span>`,
+      "system-prompt-block", true, () => {
+      const pre = document.createElement("pre");
+      pre.className = "system-prompt";
+      pre.textContent = data.systemPrompt;
+      return pre;
+    }));
+
+    // ── Retrieved chunks ───────────────────────────────────────────────────
+    panel.appendChild(makeBlock(
+      `📚 Retrieved Chunks  <span style="color:#555;font-weight:400;">(${data.retrievedChunks.length})</span>`,
+      "chunks-block", true, () => {
+      const frag = document.createDocumentFragment();
+      data.retrievedChunks.forEach((chunk, i) => {
+        const card = document.createElement("div");
+        card.className = "chunk-card";
+        const score = typeof chunk.score === "number" ? chunk.score.toFixed(4) : "n/a";
+        const srcName = chunk.source?.name || chunk.sourceId || "Unknown";
+        card.innerHTML = `
+          <div class="chunk-meta">
+            <span>#${i + 1} · id: <code style="color:#aaa;">${escapeHtml(chunk.id || "")}</code></span>
+            <span class="chunk-score">score: ${score}</span>
+          </div>
+          <div class="chunk-meta">
+            <span class="chunk-source">Source: ${escapeHtml(srcName)}</span>
+            <span style="color:#666;">${chunk.tags ? chunk.tags.join(", ") : ""}</span>
+          </div>
+        `;
+        const pre = document.createElement("pre");
+        pre.className = "chunk-text";
+        pre.textContent = chunk.text || "";
+        card.appendChild(pre);
+        frag.appendChild(card);
+      });
+      return frag;
+    }));
+
+    // ── Full messages array sent to API ────────────────────────────────────
+    const fullMessages = [
+      { role: "system", content: data.systemPrompt },
+      ...historyTurns.filter(t => t.text.trim()).map(t => ({ role: t.role, content: t.text })),
+      { role: "user", content: data.msg }
+    ];
+    panel.appendChild(makeBlock(
+      `📨 Full Messages Array  <span style="color:#555;font-weight:400;">(${fullMessages.length} messages)</span>`,
+      "messages-block", true, () => {
+      const pre = document.createElement("pre");
+      pre.style.color = "#c0b0f0";
+      pre.textContent = JSON.stringify(fullMessages, null, 2);
+      return pre;
+    }));
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function makeBlock(titleHtml, id, collapsed, contentFn) {
+    const block = document.createElement("div");
+    block.className = "out-block" + (collapsed ? " collapsed" : "");
+    block.id = id;
+
+    const header = document.createElement("div");
+    header.className = "out-block-header";
+    header.innerHTML = `
+      <span class="out-block-title">${titleHtml}</span>
+      <span class="chevron">▼</span>
+    `;
+    header.addEventListener("click", () => block.classList.toggle("collapsed"));
+
+    const body = document.createElement("div");
+    body.className = "out-block-body";
+    const content = contentFn();
+    if (content instanceof Node) body.appendChild(content);
+
+    block.appendChild(header);
+    block.appendChild(body);
+    return block;
+  }
+
+  function badge(label, value) {
+    const el = document.createElement("span");
+    el.className = "intent-badge " + (value ? "yes" : "no");
+    el.textContent = (value ? "✓ " : "✗ ") + label;
+    return el;
+  }
+
+  function showError(msg) {
+    const panel = document.getElementById("right-panel");
+    document.getElementById("empty-state")?.remove();
+    const banner = document.createElement("div");
+    banner.className = "error-banner";
+    banner.textContent = "Error: " + msg;
+    panel.prepend(banner);
+  }
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // ── Status bar ─────────────────────────────────────────────────────────────
+  const statusBar = document.createElement("div");
+  statusBar.id = "status-bar";
+  statusBar.innerHTML = `<span class="dot" id="status-dot"></span><span id="status-text">Loading knowledge base…</span>`;
+  document.body.appendChild(statusBar);
+
+  function updateStatus(state, msg) {
+    const dot  = document.getElementById("status-dot");
+    const text = document.getElementById("status-text");
+    dot.className = "dot " + { ready: "green", error: "red", running: "yellow", done: "green" }[state];
+    text.textContent = {
+      ready:   "KB ready — " + kb.chunks.length + " chunks loaded",
+      error:   "Error: " + (msg || "unknown"),
+      running: "Running…",
+      done:    "Done · " + (msg || "")
+    }[state] || msg || "";
+  }
+
+})();
+</script>
+</body>
+</html>
