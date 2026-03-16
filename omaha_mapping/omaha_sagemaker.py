@@ -523,11 +523,10 @@ Instructions:
 3. Select the single MOST RELEVANT classification from the provided options that best matches the query’s domain, problem, and signs/symptoms.
 4. IMPORTANT: The final answer MUST USE THE EXACT WORDING from the provided options without modifications, rephrasing, or synonyms.
    - Example: If the query mentioned "swollen" or related term ('retain water'),  you must map it to sign/symptom of "edema" under the "Circulation" problem (do not change it to "inflammation" or "oral health" problems).
-   - If no close match exists, respond with:
-     No sufficient information available
+   - If no close match exists, respond with: None
 5. DO NOT Overinfer:
 If the query does not clearly describe a healthcare problem, lacks enough background information to support the sign/symptom, or if no option closely aligns with the query, respond with:
-No sufficient information availableQuery:
+None
 
 {{query}}
 
@@ -545,7 +544,7 @@ Domain: [Exact match]
 Problem: [Exact match]
 Signs/Symptoms: [Exact match]
 If no match:
-No sufficient information available
+None
 
 Example Queries and Responses:
 
@@ -559,7 +558,7 @@ Signs/Symptoms: abnormal blood pressure reading
 Example 2:
 Query: "You have the shower?"
 Response:
-No sufficient information available
+None
 
 Example 3:
 Query: "I can not breath at night."
