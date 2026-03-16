@@ -93,8 +93,8 @@ def main():
     print(f"Int combined  P={i_p:.4f}   R={i_r:.4f}   F1={i_f1:.4f}")
     print(f"Int target    P={t_p:.4f}   R={t_r:.4f}   F1={t_f1:.4f}")
     print(f"{'='*60}")
-    print(f"TP/FP/FN (SS):   {_agg('ss_tp')}/{_agg('ss_fp')}/{_agg('ss_fn')}")
-    print(f"TP/FP/FN (Int):  {_agg('int_tp')}/{_agg('int_fp')}/{_agg('int_fn')}")
+    print(f"TP/FP/FN/TN (SS):  {_agg('ss_tp')}/{_agg('ss_fp')}/{_agg('ss_fn')}/{_agg('ss_tn')}")
+    print(f"TP/FP/FN/TN (Int): {_agg('int_tp')}/{_agg('int_fp')}/{_agg('int_fn')}/{_agg('int_tn')}")
 
 if __name__ == "__main__":
     main()

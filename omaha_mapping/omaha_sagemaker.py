@@ -1052,8 +1052,8 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
         Int: category, target separately
     """
     # ── Combined label counters ───────────────────────────────────────────────
-    ss_tp = ss_fp = ss_fn = 0
-    i_tp  = i_fp  = i_fn  = 0
+    ss_tp = ss_fp = ss_fn = ss_tn = 0
+    i_tp  = i_fp  = i_fn  = i_tn  = 0
     ss_relevant_rows  = 0
     int_relevant_rows = 0
 
@@ -1096,6 +1096,8 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             ss_relevant_rows += 1
             tp, fp, fn = row_level_match(pred_ss_labels, human_ss)
             ss_tp += tp; ss_fp += fp; ss_fn += fn
+        else:
+            ss_tn += 1   # both human and pred are NONE → true negative
 
             # Component metrics — GT format is always "Problem_SS" (2 parts):
             # first underscore-separated token = Problem, rest = SS
@@ -1135,7 +1137,10 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             int_relevant_rows += 1
             tp, fp, fn = row_level_match(pred_int_labels, human_int)
             i_tp += tp; i_fp += fp; i_fn += fn
+        else:
+            i_tn += 1    # both human and pred are NONE → true negative
 
+        if human_int or pred_int_labels:
             human_cats = []
             human_tgts = []
             for h in human_int:
@@ -1164,10 +1169,10 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
     return {
         # Combined labels
         "ss_precision":  ss_p,  "ss_recall":  ss_r,  "ss_f1":  ss_f1,
-        "ss_tp": ss_tp, "ss_fp": ss_fp, "ss_fn": ss_fn,
+        "ss_tp": ss_tp, "ss_fp": ss_fp, "ss_fn": ss_fn, "ss_tn": ss_tn,
         "ss_relevant_rows": ss_relevant_rows,
         "int_precision": int_p, "int_recall": int_r, "int_f1": int_f1,
-        "int_tp": i_tp, "int_fp": i_fp, "int_fn": i_fn,
+        "int_tp": i_tp, "int_fp": i_fp, "int_fn": i_fn, "int_tn": i_tn,
         "int_relevant_rows": int_relevant_rows,
         # SS components (domain omitted — GT is always Problem_SS, never Domain_Problem_SS)
         "prob_precision":    prob_p,    "prob_recall":    prob_r,    "prob_f1":    prob_f1,
@@ -1268,8 +1273,8 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     sheet_metrics = []
 
     # Combined label counters
-    global_ss_tp = global_ss_fp = global_ss_fn = 0
-    global_i_tp  = global_i_fp  = global_i_fn  = 0
+    global_ss_tp = global_ss_fp = global_ss_fn = global_ss_tn = 0
+    global_i_tp  = global_i_fp  = global_i_fn  = global_i_tn  = 0
     # SS component counters (domain omitted — GT is always Problem_SS)
     global_prob_tp  = global_prob_fp  = global_prob_fn  = 0
     global_ssonly_tp= global_ssonly_fp= global_ssonly_fn= 0
@@ -1278,8 +1283,8 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     global_tgt_tp   = global_tgt_fp   = global_tgt_fn   = 0
 
     _ZERO_METRICS = {k: 0 for k in [
-        "ss_precision","ss_recall","ss_f1","ss_tp","ss_fp","ss_fn","ss_relevant_rows",
-        "int_precision","int_recall","int_f1","int_tp","int_fp","int_fn","int_relevant_rows",
+        "ss_precision","ss_recall","ss_f1","ss_tp","ss_fp","ss_fn","ss_tn","ss_relevant_rows",
+        "int_precision","int_recall","int_f1","int_tp","int_fp","int_fn","int_tn","int_relevant_rows",
         "prob_precision","prob_recall","prob_f1","prob_tp","prob_fp","prob_fn",
         "ss_only_precision","ss_only_recall","ss_only_f1","ss_only_tp","ss_only_fp","ss_only_fn",
         "cat_precision","cat_recall","cat_f1","cat_tp","cat_fp","cat_fn",
@@ -1301,8 +1306,8 @@ def run_inference(llm_name: str, resources: dict) -> dict:
         metrics["sheet"] = sheet_name
         sheet_metrics.append(metrics)
 
-        global_ss_tp += metrics["ss_tp"];  global_ss_fp += metrics["ss_fp"];  global_ss_fn += metrics["ss_fn"]
-        global_i_tp  += metrics["int_tp"]; global_i_fp  += metrics["int_fp"]; global_i_fn  += metrics["int_fn"]
+        global_ss_tp += metrics["ss_tp"];  global_ss_fp += metrics["ss_fp"];  global_ss_fn += metrics["ss_fn"];  global_ss_tn += metrics["ss_tn"]
+        global_i_tp  += metrics["int_tp"]; global_i_fp  += metrics["int_fp"]; global_i_fn  += metrics["int_fn"]; global_i_tn  += metrics["int_tn"]
         global_prob_tp   += metrics["prob_tp"];    global_prob_fp   += metrics["prob_fp"];    global_prob_fn   += metrics["prob_fn"]
         global_ssonly_tp += metrics["ss_only_tp"]; global_ssonly_fp += metrics["ss_only_fp"]; global_ssonly_fn += metrics["ss_only_fn"]
         global_cat_tp    += metrics["cat_tp"];     global_cat_fp    += metrics["cat_fp"];     global_cat_fn    += metrics["cat_fn"]
@@ -1334,7 +1339,7 @@ def run_inference(llm_name: str, resources: dict) -> dict:
         "fuzzy_threshold": FUZZY_THRESHOLD,
         "signs_symptoms": {
             "micro":    {"precision": gss_p,     "recall": gss_r,     "f1": gss_f1,
-                         "tp": global_ss_tp, "fp": global_ss_fp, "fn": global_ss_fn},
+                         "tp": global_ss_tp, "fp": global_ss_fp, "fn": global_ss_fn, "tn": global_ss_tn},
             "macro":    {"f1": round(_macro("ss_f1"), 4)},
             "problem":  {"micro_p": gprob_p,   "micro_r": gprob_r,   "micro_f1": gprob_f1,
                          "tp": global_prob_tp,  "fp": global_prob_fp,  "fn": global_prob_fn},
@@ -1343,7 +1348,7 @@ def run_inference(llm_name: str, resources: dict) -> dict:
         },
         "interventions": {
             "micro":    {"precision": gi_p,      "recall": gi_r,      "f1": gi_f1,
-                         "tp": global_i_tp,  "fp": global_i_fp,  "fn": global_i_fn},
+                         "tp": global_i_tp,  "fp": global_i_fp,  "fn": global_i_fn,  "tn": global_i_tn},
             "macro":    {"f1": round(_macro("int_f1"), 4)},
             "category": {"micro_p": gcat_p, "micro_r": gcat_r, "micro_f1": gcat_f1,
                          "tp": global_cat_tp, "fp": global_cat_fp, "fn": global_cat_fn},
@@ -1360,13 +1365,13 @@ def run_inference(llm_name: str, resources: dict) -> dict:
             "Sheet":           m["sheet"],
             # Combined labels
             "SS_Precision":    m["ss_precision"],   "SS_Recall":    m["ss_recall"],    "SS_F1":    m["ss_f1"],
-            "SS_TP": m["ss_tp"], "SS_FP": m["ss_fp"], "SS_FN": m["ss_fn"],
+            "SS_TP": m["ss_tp"], "SS_FP": m["ss_fp"], "SS_FN": m["ss_fn"], "SS_TN": m["ss_tn"],
             # SS components
             "Problem_F1":      m["prob_f1"],
             "SS_Only_F1":      m["ss_only_f1"],
             # Intervention combined
             "Int_Precision":   m["int_precision"],  "Int_Recall":   m["int_recall"],   "Int_F1":   m["int_f1"],
-            "Int_TP": m["int_tp"], "Int_FP": m["int_fp"], "Int_FN": m["int_fn"],
+            "Int_TP": m["int_tp"], "Int_FP": m["int_fp"], "Int_FN": m["int_fn"], "Int_TN": m["int_tn"],
             # Intervention components
             "Category_F1":     m["cat_f1"],
             "Target_F1":       m["tgt_f1"],
@@ -1374,10 +1379,10 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     rows.append({
         "Sheet": "MICRO_AGGREGATE",
         "SS_Precision": gss_p,    "SS_Recall": gss_r,    "SS_F1": gss_f1,
-        "SS_TP": global_ss_tp, "SS_FP": global_ss_fp, "SS_FN": global_ss_fn,
+        "SS_TP": global_ss_tp, "SS_FP": global_ss_fp, "SS_FN": global_ss_fn, "SS_TN": global_ss_tn,
         "Problem_F1": gprob_f1, "SS_Only_F1": gssonly_f1,
         "Int_Precision": gi_p, "Int_Recall": gi_r, "Int_F1": gi_f1,
-        "Int_TP": global_i_tp, "Int_FP": global_i_fp, "Int_FN": global_i_fn,
+        "Int_TP": global_i_tp, "Int_FP": global_i_fp, "Int_FN": global_i_fn, "Int_TN": global_i_tn,
         "Category_F1": gcat_f1, "Target_F1": gtgt_f1,
     })
     rows.append({
@@ -1417,8 +1422,8 @@ def run_inference(llm_name: str, resources: dict) -> dict:
           f"(ss_only: {round(_macro('ss_only_f1'),4):.4f})")
     print(f"Macro Int F1:          {round(_macro('int_f1'),4):.4f}   "
           f"(target:  {round(_macro('tgt_f1'),4):.4f})")
-    print(f"TP/FP/FN (SS):         {global_ss_tp}/{global_ss_fp}/{global_ss_fn}")
-    print(f"TP/FP/FN (Int):        {global_i_tp}/{global_i_fp}/{global_i_fn}")
+    print(f"TP/FP/FN/TN (SS):      {global_ss_tp}/{global_ss_fp}/{global_ss_fn}/{global_ss_tn}")
+    print(f"TP/FP/FN/TN (Int):     {global_i_tp}/{global_i_fp}/{global_i_fn}/{global_i_tn}")
     print(f"{'='*70}")
     print(f"Saved: s3://{S3_BUCKET}/{results_key}")
 
@@ -1528,14 +1533,14 @@ def compare_models(models_to_compare: list[str] = None):
             "SS_Macro_F1":        ss_M.get("f1",        0),
             "Problem_Micro_F1":   ss_p.get("micro_f1",  0),
             "SSOnly_Micro_F1":    ss_so.get("micro_f1", 0),
-            "SS_TP":  ss_m.get("tp", 0), "SS_FP":  ss_m.get("fp", 0), "SS_FN":  ss_m.get("fn", 0),
+            "SS_TP":  ss_m.get("tp", 0), "SS_FP":  ss_m.get("fp", 0), "SS_FN":  ss_m.get("fn", 0), "SS_TN": ss_m.get("tn", 0),
             "Int_Micro_P":        iv_m.get("precision", 0),
             "Int_Micro_R":        iv_m.get("recall",    0),
             "Int_Micro_F1":       iv_m.get("f1",        0),
             "Int_Macro_F1":       iv_M.get("f1",        0),
             "Category_Micro_F1":  iv_c.get("micro_f1",  0),
             "Target_Micro_F1":    iv_t.get("micro_f1",  0),
-            "Int_TP": iv_m.get("tp", 0), "Int_FP": iv_m.get("fp", 0), "Int_FN": iv_m.get("fn", 0),
+            "Int_TP": iv_m.get("tp", 0), "Int_FP": iv_m.get("fp", 0), "Int_FN": iv_m.get("fn", 0), "Int_TN": iv_m.get("tn", 0),
         })
 
     ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
