@@ -741,9 +741,30 @@ def build_ss_prompt(query: str, context: str, retrieved_docs: list[dict]) -> str
             f"{i}. Domain: {doc['domain']} | Problem: {doc['problem']} "
             f"| Signs/Symptoms: {doc['ss']}\n"
         )
-    return SS_PROMPT_TEMPLATE.format(
-        context=context, query=query, options=options_text.strip()
+    # Build Jinja2-style doc block (replaces {% for doc in documents %}...{% endfor %})
+    doc_block = ""
+    for doc in retrieved_docs:
+        doc_block += (
+            f"  Domain: {doc['domain']}\n"
+            f"  Problem: {doc['problem']}\n"
+            f"  Signs/Symptoms: {doc['ss']}\n"
+        )
+    prompt = SS_PROMPT_TEMPLATE
+    # Replace Jinja2 for-loop block with pre-built doc context
+    prompt = re.sub(
+        r"\{%-?\s*for\b.*?%\}.*?\{%-?\s*endfor\s*-?%\}",
+        doc_block.strip(),
+        prompt,
+        flags=re.DOTALL | re.IGNORECASE,
     )
+    # Replace {{query}} (Jinja2) and {query} (Python format) with actual query
+    prompt = re.sub(r"\{\{\s*query\s*\}\}", query, prompt)
+    prompt = prompt.replace("{query}", query)
+    # Replace {options} (Python format) with options list if template uses it
+    prompt = prompt.replace("{options}", options_text.strip())
+    # Replace {context} (Python format) with surrounding context
+    prompt = prompt.replace("{context}", context)
+    return prompt
 
 
 def build_intervention_prompt(query: str, context: str,
@@ -805,22 +826,34 @@ def parse_ss_output(text: str) -> list[dict]:
             return []
 
     results = []
-    pattern = re.compile(
+    seen = set()  # deduplicate in case both patterns match the same line
+
+    # Pattern 1: pipe-separated  "Domain: X | Problem: Y | Signs/Symptoms: Z"
+    pattern_pipe = re.compile(
         r"Domain\s*:\s*(?P<domain>[^|\n]+)\|\s*Problem\s*:\s*(?P<problem>[^|\n]+)\|"
         r"\s*Signs/Symptoms\s*:\s*(?P<ss>[^\n]+)",
         re.IGNORECASE,
     )
-    for m in pattern.finditer(answer):
-        domain  = _clean_field(m.group("domain"))
-        problem = _clean_field(m.group("problem"))
-        ss      = _clean_field(m.group("ss"))
-        if problem and ss:
-            results.append({
-                "domain":  domain,
-                "problem": problem,
-                "ss":      ss,
-                "label":   f"{problem}_{ss}",
-            })
+    # Pattern 2: multi-line  "Domain: X\nProblem: Y\nSigns/Symptoms: Z"
+    pattern_multi = re.compile(
+        r"Domain\s*:\s*(?P<domain>[^\n]+)\n\s*Problem\s*:\s*(?P<problem>[^\n]+)\n"
+        r"\s*Signs/Symptoms\s*:\s*(?P<ss>[^\n]+)",
+        re.IGNORECASE,
+    )
+    for pat in (pattern_pipe, pattern_multi):
+        for m in pat.finditer(answer):
+            domain  = _clean_field(m.group("domain"))
+            problem = _clean_field(m.group("problem"))
+            ss      = _clean_field(m.group("ss"))
+            key = (problem.lower(), ss.lower())
+            if problem and ss and key not in seen:
+                seen.add(key)
+                results.append({
+                    "domain":  domain,
+                    "problem": problem,
+                    "ss":      ss,
+                    "label":   f"{problem}_{ss}",
+                })
     return results
 
 
