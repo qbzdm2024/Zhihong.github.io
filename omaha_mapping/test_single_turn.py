@@ -117,6 +117,12 @@ def test_turn(
     omaha_file: str = None,
     verbose: bool = False,
 ):
+    import logging
+    # Suppress noisy INFO logs from omaha_sagemaker and sentence-transformers unless verbose
+    if not verbose:
+        logging.getLogger("omaha_sagemaker").setLevel(logging.WARNING)
+        logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+
     # ── Load Omaha definitions ─────────────────────────────────────────────────
     omaha_path = _find_omaha_excel(omaha_file)
     if omaha_path is None:
@@ -124,12 +130,20 @@ def test_turn(
         print("  Place 'Omaha_system list with definition.xlsx' in the repo root or pass --omaha-file.")
         sys.exit(1)
 
-    ss_df, int_df = load_omaha_local(omaha_path)
+    if verbose:
+        ss_df, int_df = load_omaha_local(omaha_path)
+    else:
+        import pandas as pd
+        sheets = pd.read_excel(omaha_path, sheet_name=None, engine="openpyxl")
+        names = list(sheets.keys())
+        ss_df  = sheets[names[0]].dropna(how="all").reset_index(drop=True)
+        int_df = sheets[names[1]].dropna(how="all").reset_index(drop=True)
+        ss_df.columns  = [c.strip() for c in ss_df.columns]
+        int_df.columns = [c.strip() for c in int_df.columns]
 
     # ── Build embedding index (once) ──────────────────────────────────────────
-    print(DIM("  Loading embedding model …"))
     from sentence_transformers import SentenceTransformer
-    embed_model = SentenceTransformer(om.EMBEDDING_MODEL)
+    embed_model = SentenceTransformer(om.EMBEDDING_MODEL, device="cpu")
 
     ss_docs  = om.build_ss_documents(ss_df)
     int_docs = om.build_intervention_documents(int_df)
@@ -137,22 +151,20 @@ def test_turn(
     ss_embeddings  = om.build_index(ss_docs,  embed_model)
     int_embeddings = om.build_index(int_docs, embed_model)
 
-    # ── Print header ──────────────────────────────────────────────────────────
-    print()
-    divider("SINGLE-TURN TEST", "═")
-    print(f"  {BOLD('Model:')}   {model_name}")
-    print(f"  {BOLD('Task:')}    {task}")
-    print(f"  {BOLD('Top-K:')}   {top_k}")
-    print()
-
-    # ── Input ─────────────────────────────────────────────────────────────────
-    divider("CONVERSATION TURN")
-    print(YELLOW(f"  {turn}"))
-    if context.strip():
+    if verbose:
         print()
-        print(DIM("  Context:"))
-        for line in context.strip().splitlines():
-            print(DIM(f"    {line}"))
+        divider("SINGLE-TURN TEST", "═")
+        print(f"  {BOLD('Model:')}   {model_name}")
+        print(f"  {BOLD('Task:')}    {task}")
+        print(f"  {BOLD('Top-K:')}   {top_k}")
+        print()
+        divider("CONVERSATION TURN")
+        print(YELLOW(f"  {turn}"))
+        if context.strip():
+            print()
+            print(DIM("  Context:"))
+            for line in context.strip().splitlines():
+                print(DIM(f"    {line}"))
 
     # ── Signs/Symptoms ────────────────────────────────────────────────────────
     if task in ("ss", "both"):
