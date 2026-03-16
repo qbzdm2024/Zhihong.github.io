@@ -1107,6 +1107,8 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
 
     # ── Sample GT labels for diagnosis (logged once) ──────────────────────────
     gt_sample_logged = False
+    fn_diag_count    = 0          # log first few FN examples for diagnosis
+    fp_diag_count    = 0          # log first few FP examples for diagnosis
 
     for _, row in df_out.iterrows():
         # ── Signs/Symptoms ───────────────────────────────────────────────────
@@ -1135,6 +1137,30 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             ss_relevant_rows += 1
             tp, fp, fn = row_level_match(pred_ss_labels, human_ss)
             ss_tp += tp; ss_fp += fp; ss_fn += fn
+
+            # ── Diagnostic logging for FN and FP ────────────────────────────
+            # FN: GT has label but model predicted nothing (or wrong label)
+            if fn > 0 and fn_diag_count < 5:
+                raw_out = str(row.get("LLM_SS_raw", "")).strip()
+                turn    = str(row.get("Conversation", "")).strip()[:120]
+                log.info(
+                    f"[FN-SS #{fn_diag_count+1}] Turn: {turn!r}\n"
+                    f"           GT:    {human_ss}\n"
+                    f"           Pred:  {pred_ss_labels}\n"
+                    f"           Raw:   {raw_out[:200]!r}"
+                )
+                fn_diag_count += 1
+            # FP: model predicted something not in GT
+            if fp > 0 and fp_diag_count < 3:
+                raw_out = str(row.get("LLM_SS_raw", "")).strip()
+                turn    = str(row.get("Conversation", "")).strip()[:120]
+                log.info(
+                    f"[FP-SS #{fp_diag_count+1}] Turn: {turn!r}\n"
+                    f"           GT:    {human_ss}\n"
+                    f"           Pred:  {pred_ss_labels}\n"
+                    f"           Raw:   {raw_out[:200]!r}"
+                )
+                fp_diag_count += 1
 
             # Component metrics — GT format is always "Problem_SS" (2 parts):
             # first underscore-separated token = Problem, rest = SS
