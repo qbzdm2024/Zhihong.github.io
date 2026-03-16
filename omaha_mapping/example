@@ -1,0 +1,315 @@
+Speaker	Spk	 SONY_RB_21921 [2]	Conversation	Meaningful	Note / reason / comment	OS_SS_1	OS_SS_2	OS_SS_3	OS_I_1	OS_I_2	OS_I_3	Jiyoun	Danielle
+Patient	S1	S1 00:00	And when I take that pill, yeah, that work a little [good?] then.	Negative									
+Nurse	S2	S2 00:08	Can I put the microphone here? Thank you very much. Okay. This is a recording for Roberto [Burgos?]. Today is February 19. Patient's case number is 29757601. Thank you very much. So I'm going to check your blood pressure, heart, and lungs. And then I'm going to take care of your wound, okay?	Positive	V/S check == surveillence				Surveillance_signs/symptoms-physical				
+Patient	S1	S1 00:36	Okay.	Negative									
+Nurse	S2	S2 00:37	If you have questions, please ask me. So are you taking any medications?	Positive	medication review == surveillence				Surveillance_medication administration				
+Patient	S1	S1 00:41	For what?	Negative									
+Nurse	S2	S2 00:42	I don't know.	Negative									
+Patient	S1	S1 00:44	Yeah. I'm taking medication. Yeah. I take medication for asthma, for-- is that [inaudible]? She wouldn't know what to here.	Positive	history of asthma	Respiration_other							
+Nurse	S2	S2 00:57	Okay. So when we're finished with the wound, I'll check your medications.	Positive	wound care - treatment, medication reconciliation == surveillance 				Treatments and Procedures_dressing change/wound care	Surveillance_medication administration			
+Patient	S1	S1 01:01	Okay.	Negative									
+Nurse	S2	S2 01:02	This is temperature. Temperature. 98.2. No fever. Very good.	Positive	V/S check == surveillence				Surveillance_signs/symptoms-physical				
+Patient	S1	S1 01:10	Yeah. No fever at all.	Negative									
+Nurse	S2	S2 01:10	No fever.	Negative									
+Patient	S1	S1 01:11	Beautiful. You saved my life. [laughter]	Negative									
+Nurse	S2	S2 01:16	Okay. All right. So we're going to check your blood pressure, heart, and lungs. And then I'll check the wound. How long do you have this wound for?	Positive	"V/S check == surveillence
+wound assess"				Surveillance_signs/symptoms-physical	Surveillance_dressing change/wound care			
+Patient	S1	S1 01:28	Oh, let me see. For five days. Five days.	Positive	duration of symptoms = 5 days	Skin_lesion/pressure ulcer 			Surveillance_dressing change/wound care				
+Nurse	S2	S2 01:37	Five days?	Negative									
+Patient	S1	S1 01:37	Yeah.	Negative									
+Nurse	S2	S2 01:38	Okay. Okay. It just opened, or you hit yourself, or--?	Positive	open wound	Skin_lesion/pressure ulcer 							
+Patient	S1	S1 01:44	No, no, no. It's a [inaudible].	Negative									
+Nurse	S2	S2 01:46	[crosstalk].	Negative									
+Patient	S1	S1 01:46	[inaudible].	Negative									
+Nurse	S2	S2 01:47 	Okay. 80 is the pulse. Let me put another thing here because I actually didn't start-- I'm listening. Tell me.	Positive	VS check - surveillance				Surveillance_signs/symptoms-physical				
+Patient	S1	S1 01:57	So I wasn't better. You know? Just like a [inaudible]. So I sit in my bed. I need to lay down. And I pull up one leg--	Negative									
+Nurse	S2	S2 02:19	Okay. Very good. 96 oxygen. Excellent.	Positive	VS check - surveillance				Surveillance_signs/symptoms-physical				
+Patient	S1	S1 02:22	--and I put my one leg beside the bed. And I lift the one. I lift the [left leg?] one. I lift one, then it [blow up?]. I don't know how it got [inaudible]. Yeah. Lift the [left leg?] one. Lift the one I put in bed. And I got two shoes with me before I was	Negative									
+Nurse	S2	S2 03:19	Oh, okay, okay. I'm listening. So what happened afterwards? Or do you want to tell me after I check blood pressure?	Positive	VS check - surveillance								
+Patient	S1	S1 03:27	No, no, no, no, no. No, no. One second.	Negative									
+Nurse	S2	S2 03:30	No problem.	Negative									
+Patient	S1	S1 03:31	So when I lift it up, this one like this. When it [shoot?], I hit that one this time.	Negative									
+Nurse	S2	S2 03:40	Oh, okay. You hit it. I see. I see. No problem. Okay. So traumatic wound.	Positive	mechanism of injury, traumatic wound 	Skin_lesion/pressure ulcer 							
+Patient	S1	S1 03:46	Yeah, yeah. Traumatic.	Positive	mechanism of injury, traumatic wound 	Skin_lesion/pressure ulcer 							
+Nurse	S2	S2 03:47	A little traumatic. I see.	Positive	mechanism of injury, traumatic wound 	Skin_lesion/pressure ulcer 							
+Patient	S1	S1 03:48	[inaudible] the old man I am.	Negative									
+Nurse	S2	S2 03:51	Oh, God bless. God bless. I saw your age. God bless. 144/82. Okay. A little up. A little bit, but not bad.	Positive	"V/S check == surveillence
+Slightly high BP"	Circulation_abnormal blood pressure reading 			Surveillance_signs/symptoms-physical				
+Patient	S1	S1 04:08	Not bad?	Negative									
+Nurse	S2	S2 04:09	Not bad.	Negative									
+Patient	S1	S1 04:11	That's nice. [laughter] Yeah, that's nice.	Negative									
+Nurse	S2	S2 04:13	Of course. Of course. I'm going to check your heart and lungs, and then I'm going to check the wound, okay?	Positive	"VS check - surveillence
+wound assessment"				Surveillance_signs/symptoms-physical	Surveillance_dressing change/wound care			
+Patient	S1	S1 04:19	Okay.	Negative									
+Nurse	S2	S2 04:22	Okay. Thank you very much. And breathe. Very good. And breathe. Okay. Clear. Very good. A little wheezing. A little asthma wheezing. A little bit.	Positive	"Lung sound check == surveillence
+Asthma wheezing"	Respiration_abnormal breath sounds 			Surveillance_signs/symptoms-physical				
+Patient	S1	S1 04:41	Yeah. I got [crosstalk].	Negative									
+Nurse	S2	S2 04:43	Yeah. No problem. But it's a little bit. Okay. Very good. All right. So would you like to sit down there?	Negative									
+Patient	S1	S1 04:50	Yeah, yeah, yeah. Why not?	Negative									
+Nurse	S2	S2 04:52	Yep. Thank you very much. I'm going to write you my phone number, my name. Any problems, call me or call the office, okay?	Positive	Overall case management to improve communication between the client and provider				Case Management_other				
+Patient	S1	S1 05:12	Okay. Well, I'm glad you're here.	Negative									
+Nurse	S2	S2 05:20	Hmm?	Negative									
+Patient	S1	S1 05:20	I said I'm glad you're here.	Negative									
+Nurse	S2	S2 05:22	Oh, thank you so much. Of course I'm here.	Negative									
+Patient	S1	S1 05:24	[inaudible].	Negative									
+Nurse	S2	S2 05:28	Okay. My name is Nick. That's my phone. This is the office phone. Okay?	Positive	Overall case management to improve communication between the client and provider				Case Management_other				
+Patient	S1	S1 05:32	Okay. Good.	Negative									
+Nurse	S2	S2 05:34	I spoke with Lillian. I told her my number too so she can call me also.	Negative									
+Patient	S1	S1 05:41	Okay.	Negative									
+Patient	S1	S1 05:56	You think if it's the--	Negative									
+Nurse	S2	S2 06:00	Okay. Perfect. Perfect. Don't worry. I will take it from here. I will manage. No trouble.	Negative									
+Patient	S1	S1 06:18	Look a little ugly.	Negative									
+Nurse	S2	S2 06:20	What? Me? [laughter]	Negative									
+Patient	S1	S1 06:21	No. No, no, no.	Negative									
+Nurse	S2	S2 06:22	Well, yeah, this is ugly. [laughter]	Negative									
+Patient	S1	S1 06:26	Ugly. [laughter] Well, it look like [inaudible]. Part of the life.	Negative									
+Nurse	S2	S2 06:35	No problem. I do the wound cares every day. I see all kinds of wounds.	Positive	Nurse did woud care.				Treatments and Procedures_dressing change/wound care	Surveillance_dressing change/wound care			
+Patient	S1	S1 06:40	Oh yeah.	Negative									
+Nurse	S2	S2 06:42	All kinds of wounds, so let's see. Okay, okay. No problem.	Negative									
+Patient	S1	S1 06:55	It doesn't look bad for you?	Negative									
+Nurse	S2	S2 06:57	No, it looks okay. It's a blister. They're going to pop up later. You have blisters. Blisters. They're going to pop up later. Later. They're going to dry up or they're going to pop up later. No problem. Okay. You taking any antibiotics? No?	Positive	"Issue: wound = blister
+Teaching on the blister
+surveillence of abx"	Skin_lesion/pressure ulcer 			Teaching, Guidance, and Counseling_dressing change/wound care	Surveillance_medication administration			
+Patient	S1	S1 07:17	Yeah. I take antibiotics. Yes. That's what I needed. That's what I'm waiting for.	Positive	antibiotics, need rx 				Treatments and Procedures_medication coordination/ordering				
+Nurse	S2	S2 07:23	Okay.	Negative									
+Patient	S1	S1 07:23	Yeah. The strong one. The best one.	Negative									
+Nurse	S2	S2 07:26	Okay.	Negative									
+Patient	S1	S1 07:27	I used it before.	Negative									
+Nurse	S2	S2 07:28	Okay. Did somebody prescribe you antibiotics or no?	Positive	asking medication prescription.				Treatments and Procedures_medication coordination/ordering				
+Patient	S1	S1 07:32	Huh?	Negative									
+Nurse	S2	S2 07:32	Somebody prescribe you antibiotics yet or no?	Positive	"QUESTION Utterence == 
+solution 1: combine Q&A utterence."	Health care supervision_fails to seek care for symptoms requiring evaluation/treatment 							
+Patient	S1	S1 07:35	No. Nobody.	Positive	ANSWER Utterence, the client wants to get abx. But it was revealed that nobody prescribed it before in next conversation. That means, the client has health care supervision issue.	Health care supervision_fails to seek care for symptoms requiring evaluation/treatment 							
+Nurse	S2	S2 07:35	Okay. I'll call your doctor and we'll take it from there.	Positive	Case management == contact PCP / for abx				Treatments and Procedures_medication coordination/ordering	Case Management_other			
+Patient	S1	S1 07:39	Yeah.	Negative									
+Nurse	S2	S2 07:41	Okay. I'm going to take a picture of your wound, and I'm going to take care of it. Okay?	Positive	assess wound	Skin_lesion/pressure ulcer 			Surveillance_dressing change/wound care	Treatments and Procedures_dressing change/wound care			
+Patient	S1	S1 07:45	Okay, okay. Whatever you say.	Negative									
+Nurse	S2	S2 07:46	Okay. Very good. Thank you.	Negative									
+Nurse	S2	S2 08:16	Okay. So you see? It is red.	Positive	redness in wound	Skin_inflammation 							
+Patient	S1	S1 08:22	Yeah.	Negative									
+Nurse	S2	S2 08:23	So redness should not get bigger. If redness gets bigger, it goes here, no good.	Positive	teaching on wound infection				Teaching, Guidance, and Counseling_signs/symptoms-physical	Teaching, Guidance, and Counseling_dressing change/wound care			
+Patient	S1	S1 08:29	No good.	Negative									
+Nurse	S2	S2 08:29	Call me, call Lillian. We'll take it from there.	Positive	case management				Case Management_other				
+Patient	S1	S1 08:33	Yeah, yeah, yeah, yeah. Okay.	Negative									
+Nurse	S2	S2 08:34	Yes? Because the redness will mean more infection. So far, it's okay.	Positive	teaching on wound infection				Teaching, Guidance, and Counseling_signs/symptoms-physical	Teaching, Guidance, and Counseling_dressing change/wound care			
+Patient	S1	S1 08:38	Yeah. [inaudible].	Negative									
+Nurse	S2	S2 08:42	Hmm?	Negative									
+Patient	S1	S1 08:42	[You get the?] [inaudible], it don't move from here, I think. See, it's [inaudible].	Negative									
+Nurse	S2	S2 08:51	Can I mark with a marker here for you or no? [laughter] You want me to write?	Negative									
+Patient	S1	S1 08:56	Yeah. Do it. Okay. So you think I can use the alcohol on my leg.	Positive	Lack of knowledge in wound care.]	Skin_other							
+Nurse	S2	S2 09:09	Yeah.	Negative									
+Patient	S1	S1 09:10	No good?	Negative									
+Nurse	S2	S2 09:11	What? Alcohol?	Negative									
+Patient	S1	S1 09:12	Because it's [inaudible]. Water. Hot water.	Negative									
+Nurse	S2	S2 09:16	Hot water?	Negative									
+Patient	S1	S1 09:17	Yes.	Negative									
+Nurse	S2	S2 09:18	Regular water.	Positive	wound intervention				Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 09:19	Yeah.	Negative									
+Nurse	S2	S2 09:20	Regular water.	Negative									
+Patient	S1	S1 09:21	[inaudible] because when I pour the hot water over here, that came all off.	Positive	"The cliente pour the hot water on the leg.
+Lack of knowledge? personal care? Skin burn?"	Skin_other							
+Nurse	S2	S2 09:27	Yeah. No, no, no. You see? That's a burn. A blister.	Positive	Burn blister	Skin_lesion/pressure ulcer 							
+Patient	S1	S1 09:31	Yeah, yeah.	Negative									
+Nurse	S2	S2 09:32	Burn blister with the water.	Positive	Teaching how to clean the wound				Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 09:34	Yeah.	Negative									
+Nurse	S2	S2 09:44	You can clean it with regular water.	Positive	Teaching how to clean the wound				Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 09:47	Yeah?	Negative									
+Nurse	S2	S2 09:47	Warm water. First you try to put your hands-- if it's okay for your hands, it will--	Negative									
+Patient	S1	S1 09:53	Leaking, and sometimes, well, it leak [inaudible]. Leaking.	Positive	wound drainage	Skin_drainage 							
+Nurse	S2	S2 10:01	It's what?	Negative									
+Patient	S1	S1 10:01	Leaking some, yeah, leaky.	Positive	wound drainage	Skin_drainage 							
+Nurse	S2	S2 10:06	It's leaking. I know. And it will leak. It will leak every day until it heals.	Positive	wound drainage & teaching on the progress of wound	Skin_drainage 			Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 10:12	Oh yeah?	Negative									
+Nurse	S2	S2 10:12	Yeah.	Negative									
+Patient	S1	S1 10:13	Oh, all right.	Negative									
+Nurse	S2	S2 10:13	It's normal.	Negative									
+Patient	S1	S1 10:14	What could it be, that kind of leak?	Negative									
+Nurse	S2	S2 10:18	It's a blister. Blisters are leaking.	Positive	wound drainage & teaching on the progress of wound	Skin_drainage 			Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 10:20	Oh, yeah, yeah, yeah.	Negative									
+Nurse	S2	S2 10:21	Yeah. They are leaking, and this one is leaking a little bit too. But this one is good. This one is dry. You use alcohol here, it dries it off a little bit.	Positive	teaching on the progress of wound	Skin_drainage 	Skin_lesion/pressure ulcer 		Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 10:29	Yeah, okay.	Negative									
+Nurse	S2	S2 10:29	Yeah. But I'm going to give you this special water. Okay? Normal saline. It's better. It's water with a little salt.	Positive	wound cleaning				Treatments and Procedures_dressing change/wound care				
+Patient	S1	S1 10:43	Oh yeah?	Negative									
+Nurse	S2	S2 10:44	Yeah. It's [crosstalk].	Negative									
+Patient	S1	S1 10:44	But mix it with the alcohol? [inaudible] [work?]?	Negative									
+Nurse	S2	S2 10:50	Alcohol too much. Here, no. No alcohol.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 10:52	No. Okay.	Negative									
+Nurse	S2	S2 10:53	Yeah, yeah. Don't put alcohol here. I think it's a little too much. Yeah. It will break more skin. Alcohol.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 11:00	Oh. Okay. Okay. You got a lot of [beautiful?] in here.	Negative									
+Nurse	S2	S2 11:08	Huh?	Negative									
+Patient	S1	S1 11:09	You got a lot of [beautiful?] in here probably.	Negative									
+Nurse	S2	S2 11:11	This is good. This is good. We're going to take care of it.	Negative									
+Nurse	S2	S2 12:02	Thank you very much. I'm going to take a picture, and then I'll take care of the leg.	Positive	assess wound				Surveillance_dressing change/wound care	Treatments and Procedures_dressing change/wound care			
+Patient	S1	S1 12:37	Beautiful. [laughter] Yeah, yeah. Real clear.	Negative									
+Nurse	S2	S2 12:41	Clear, yes. Okay.	Negative									
+Patient	S1	S1 13:49	You keep [inaudible] here?	Negative									
+Nurse	S2	S2 13:52	Yeah.	Negative									
+Patient	S1	S1 13:53	It's nice here. [inaudible]. I know a lot of people who live here. And they're nice people. Nice people really?	Negative									
+Nurse	S2	S2 14:05	There are nice people all over the world.	Negative									
+Patient	S1	S1 14:07	Yeah, all over the world.	Negative									
+Nurse	S2	S2 14:09	There are bad people, there are good people everywhere. There are all kinds of people.	Negative									
+Patient	S1	S1 14:12	Yeah.	Negative									
+Nurse	S2	S2 14:14	Where are you from?	Negative									
+Patient	S1	S1 14:16	I came from Puerto Rico.	Negative									
+Nurse	S2	S2 14:17	Puerto Rico. Okay. Very nice.	Negative									
+Patient	S1	S1 14:19	Yeah. Probably leave country a long, long, long. I come and live when I was eight.	Negative									
+Nurse	S2	S2 14:24	Whoa. Eight?	Negative									
+Patient	S1	S1 14:25	Yeah.	Negative									
+Nurse	S2	S2 14:26	Wow.	Negative									
+Patient	S1	S1 14:27	I was almost born in this country.	Negative									
+Nurse	S2	S2 14:28	Yeah.	Negative									
+Patient	S1	S1 14:29	Almost.	Negative									
+Nurse	S2	S2 14:30	Wow. Okay. Let me show you what I do. Let me show you what I do. Okay?	Negative									
+Patient	S1	S1 14:39	Mm-hmm.	Negative									
+Nurse	S2	S2 14:40	I'm leaving you this gauze and bandages and everything. We're going to come Monday, Wednesday, Friday for now. Three times a week. Okay? If you need to wrap it over the weekend or open it up and leave it open like this, but here is what I do. This is gauze. You open one. See? It's one. You put saline like this. Half. Half. Half of cap or something like that. All right? So there are two gauze, one to clean and one to put.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care	Treatments and Procedures_dressing change/wound care			
+Patient	S1	S1 15:28	Oh yeah? Okay.	Negative									
+Nurse	S2	S2 15:28	Okay? So I'll use one to clean.	Positive	wound cleaning				Treatments and Procedures_dressing change/wound care				
+Patient	S1	S1 15:31	Don't hurt me too much [crosstalk].	Positive	pain	Pain_expresses discomfort/pain 							
+Nurse	S2	S2 15:32	I'm so sorry. I'm so sorry. I'm going to go very mild, gently.	Negative									
+Nurse	S2	S2 15:50	There. See? That's it. And this one, you put on. Wet. Put it wet.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care	Treatments and Procedures_dressing change/wound care			
+Patient	S1	S1 15:57	Yeah. Put on the top.	Negative									
+Nurse	S2	S2 16:00	On top. But this is wet.	Negative									
+Patient	S1	S1 16:02	Yeah, I know what it is.	Negative									
+Nurse	S2	S2 16:03	Like this. Okay?	Negative									
+Patient	S1	S1 16:12	Beautiful.	Negative									
+Nurse	S2	S2 16:15	One more on top. Here for protection. This one is okay. This one is okay. This one here. That's it. And you bandage it up.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care	Treatments and Procedures_dressing change/wound care			
+Patient	S1	S1 16:27	Oh, beautiful.	Negative									
+Nurse	S2	S2 16:30	Simple. It will heal. It will breathe. But the most important thing is we have to get you antibiotics.	Positive	teaching on wound care/abx				Teaching, Guidance, and Counseling_dressing change/wound care	Teaching, Guidance, and Counseling_medication coordination/ordering			
+Patient	S1	S1 16:37	Yeah, yeah, yeah.	Negative									
+Nurse	S2	S2 16:43	Does it leak a lot or no? A lot of water coming out or no?	Positive	assessing wound drainage	Skin_drainage 			Surveillance_dressing change/wound care				
+Patient	S1	S1 16:46	No, no, no, no. No.	Negative									
+Nurse	S2	S2 16:47	Not much?	Negative									
+Patient	S1	S1 16:48	No. Now we're dry.	Negative									
+Nurse	S2	S2 16:50	Ah, okay.	Negative									
+Patient	S1	S1 16:59	When I to put to change that?	Negative									
+Nurse	S2	S2 17:03	We're going to come on Monday to change it. If it gets wet, you can change. But before Monday, you don't have to change if it's all okay. If it's good, don't change.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 17:21	I can take a bath.  A bath. Go to the bathroom and get the shower. No shower?	Positive	teaching on wound care / but both autherences for Q&A refers one meaning.				Teaching, Guidance, and Counseling_dressing change/wound care				
+Nurse	S2	S2 17:30	Take it off and take a shower.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_personal hygiene				
+Patient	S1	S1 17:32	Huh?	Negative									
+Nurse	S2	S2 17:32	Take it off and take a shower.	Negative									
+Patient	S1	S1 17:34	Okay. Thank you.	Negative									
+Nurse	S2	S2 17:35	Yeah. Yeah. If you want to take a shower, you have to take it off because it's going to become wet and it's no good wet.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 17:41	Yeah, I know what you mean.	Negative									
+Nurse	S2	S2 17:43	Yeah. So you take shower every day or no?	Positive	assess personal care == but actually it was question regarding wound care related to				Surveillance_personal hygiene	Surveillance_dressing change/wound care			
+Patient	S1	S1 17:46	No, no. No. Sometimes.	Positive	assess personal care == but actually it was question regarding wound care related to				Surveillance_personal hygiene				
+Nurse	S2	S2 17:47	So when you take-- you're going to take shower today, tomorrow, Sunday, or no?	Positive	assess personal care == but actually it was question regarding wound care related to				Surveillance_personal hygiene	Surveillance_dressing change/wound care			
+Patient	S1	S1 17:51	Well, if I can hold it a couple of day. Hold off the shower.	Positive	assess personal care == but actually it was question regarding wound care related to				Surveillance_personal hygiene				
+Nurse	S2	S2 17:55	No problem. If you want to take it on Sunday, take everything off, go in the shower. Wash it with water and soap. Soap and water very good, same as this, soap and water. We also use it. And that's it. You keep it open. Or you bandage it up like you want to bandage, and that's it. Monday we can come--	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care	Teaching, Guidance, and Counseling_personal hygiene			
+Patient	S1	S1 18:15	Can I bandage it myself?	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care				
+Nurse	S2	S2 18:16	Of course.	Positive	teaching on wound care				Teaching, Guidance, and Counseling_dressing change/wound care				
+Patient	S1	S1 18:17	Oh, okay.	Negative									
+Nurse	S2	S2 18:19	I leave you everything. If you want. If you want.	Negative									
+Patient	S1	S1 18:22	Yeah, okay. Leaking [inaudible] antibiotic. Soon I take antibiotic I going to be okay.	Positive	waiting for abx	Medication regimen_other							
+Nurse	S2	S2 18:33	Of course.	Negative									
+Patient	S1	S1 18:34	Because I use antibiotic before.	Negative									
+Nurse	S2	S2 18:36	Of course. Okay. That's it. So this is yours.	Negative									
+Patient	S1	S1 18:44	Okay. Beautiful. Yeah, yeah.	Negative									
+Nurse	S2	S2 18:48	Agua. Water. Can I put here?	Negative									
+Patient	S1	S1 18:51	Put it anywhere you want.	Negative									
+Nurse	S2	S2 18:52	Okay. Very good. That's it. Okay, soldier. [laughter] You're good to go.	Negative									
+Patient	S1	S1 19:01	Okay. [laughter]	Negative									
+Nurse	S2	S2 19:19	Okay. This is garbage. Where can I put garbage?	Negative									
+Patient	S1	S1 19:22	Okay. [inaudible]. I take care of that. Leave it here.	Negative									
+Nurse	S2	S2 19:25	Okay. So now I'm going to check your medications. Okay?	Positive	check medication 				Surveillance_medication administration				
+Patient	S1	S1 19:32	Okay.	Negative									
+Nurse	S2	S2 19:33	And I'll try to call your doctor. Okay. Where is your medication?	Positive	case management == contact pcp				Case Management_medication coordination/ordering	Case Management_medical/dental care	Case Management_continuity of care		
+Patient	S1	S1 19:41	[inaudible].	Negative									
+Nurse	S2	S2 19:43	Okay. Thank you. Who's your doctor?	Negative									
+Patient	S1	S1 19:47	Hmm?	Negative									
+Nurse	S2	S2 19:47	Angelo Canedo?	Negative									
+Patient	S1	S1 19:50	Yeah. Angelo Canedo.	Negative									
+Nurse	S2	S2 19:52	Canedo. Okay.	Negative									
+Patient	S1	S1 20:23	This is for [diabetes?]. This is for [diabetes?]. This one is for high blood pressure. And this one is something [I couldn't understand?]. I use two times, two different-- [inaudible] for high blood pressure.	Positive	check medication // history of HTN, DM (but only history)	Circulation_other			Surveillance_medication administration				
+Nurse	S2	S2 20:48	Yes. Once a day, right? Every day, one?	Positive	check medication regimen				Surveillance_medication administration				
+Patient	S1	S1 20:55	One. Yeah, one.	Negative									
+Nurse	S2	S2 21:33	The same thing?	Negative									
+Patient	S1	S1 21:33	That's the same.	Negative									
+Nurse	S2	S2 21:34	[crosstalk].	Negative									
+Patient	S1	S1 21:35	The same [inaudible]. Oh, [inaudible].	Negative									
+Nurse	S2	S2 21:38	Yeah.	Negative									
+Patient	S1	S1 21:40	That was [inaudible]. I can't figure out myself. That's [taking the same thing?].	Positive	medication improper storage	Medication regimen_inadequate system for taking medication 							
+Nurse	S2	S2 21:47	Yeah, same thing. You want to put it together or no?	Negative									
+Patient	S1	S1 21:53	A little. Let me think of something. Take a look really--	Negative									
+Nurse	S2	S2 22:00	I show you. I show you. 5. See? Every tablet is marked with a number if it's the same. What's this?	Positive	medication improper storage	Medication regimen_inadequate system for taking medication 							
+Patient	S1	S1 22:17	See, that's a tablet.	Negative									
+Nurse	S2	S2 22:19	Oh, okay. Hold on. Same tablet. Yep. Same. You see? I, I, and 5, 5, on the other side. See? [crosstalk].	Negative									
+Patient	S1	S1 22:29	Yeah. How much is-- how big milligram is it?	Negative									
+Nurse	S2	S2 22:34	25	Negative									
+Patient	S1	S1 22:35	25	Negative									
+Nurse	S2	S2 22:36	And this is 25. Losartan potassium.	Positive					Surveillance_medication administration	Teaching, Guidance, and Counseling_medication administration			
+Patient	S1	S1 22:42	Yeah. [inaudible].	Negative									
+Nurse	S2	S2 22:44	It's small. And see, not here, but you can read it here. Each tablet contains 25 milligrams losartan potassium. So it's same thing.	Positive	teacing on medication				Teaching, Guidance, and Counseling_medication administration				
+Patient	S1	S1 22:56	Yes. Same. I don't know where I got that [inaudible].	Negative									
+Nurse	S2	S2 22:59	You want me to put this here or no?	Negative									
+Patient	S1	S1 23:01	I don't know because--	Negative									
+Nurse	S2	S2 23:03	Okay. I'm going to put this here. It's up to you. I'm telling you it's the same medication. Okay?	Positive	teacing on medication				Teaching, Guidance, and Counseling_medication administration				
+Patient	S1	S1 23:10	The pharmacy explained it to me. The pharmacy explained to me, how you call it, it don't make no difference. They're the same medicine.	Negative									
+Nurse	S2	S2 23:22	Yeah, same medicine. Just don't take both of them.	Negative									
+Patient	S1	S1 23:25	Yeah. But maybe I have to keep one when I [inaudible] one [it's the only one?].	Negative									
+Nurse	S2	S2 23:29	Exactly. Yes.	Negative									
+Patient	S1	S1 23:32	Because that's little.	Negative									
+Nurse	S2	S2 23:39	You check your sugar? No?	Positive	didn't check glucose (DM pt)				Surveillance_signs/symptoms-physical				
+Patient	S1	S1 23:41	Hmm?	Negative									
+Nurse	S2	S2 23:41	You check your sugar?	Positive	didn't check glucose (DM pt)				Surveillance_signs/symptoms-physical				
+Patient	S1	S1 23:43	I take sugar?	Positive	didn't check glucose (DM pt)								
+Nurse	S2	S2 23:44	You check sugar?	Positive	didn't check glucose (DM pt)				Surveillance_signs/symptoms-physical				
+Patient	S1	S1 23:46	No, no.	Positive	didn't check glucose (DM pt)								
+Nurse	S2	S2 23:46	Oh, you don't have a machine?	Positive	"no glucomenter (DM pt) = no resource
+health care supervision (other)?
+Communication with community resources_inadequate/unavailable resource?"				Surveillance_supplies				
+Patient	S1	S1 23:48	No.	Positive	"no glucomenter (DM pt) = no resource
+health care supervision (other)?
+Communication with community resources_inadequate/unavailable resource?"	Communication with community resources_inadequate/unavailable resource							
+Nurse	S2	S2 23:50	Okay. Anything else you take? That's it? Just two? This one and this one?	Positive	check medication regimen				Surveillance_medication administration				
+Patient	S1	S1 23:55	Yeah.	Negative									
+Nurse	S2	S2 23:56	Two pills?	Positive	check medication regimen				Surveillance_medication administration				
+Patient	S1	S1 23:57	Yeah.	Negative									
+Nurse	S2	S2 23:58	You have asthma medication? No?	Positive	check medication regimen				Surveillance_medication administration				
+Patient	S1	S1 24:00	Asthma medications, yes, yes, yes. Here, here. Here.	Positive	check medication regimen / history of ashtma	Respiration_other			Surveillance_medication administration				
+Nurse	S2	S2 24:15	Okay. Very good. How often? How often you take it?	Positive	check medication regimen				Surveillance_medication administration				
+Patient	S1	S1 24:20	I take it once a day.	Positive	check medication regimen				Surveillance_medication administration				
+Nurse	S2	S2 24:23	Once puff once a day?	Positive	check medication regimen				Surveillance_medication administration				
+Patient	S1	S1 24:25	Yeah.	Negative									
+Nurse	S2	S2 24:33	Okay. Good. Done.	Negative									
+Patient	S1	S1 24:34	Done. Okay.	Negative									
+Nurse	S2	S2 24:36	Thank you. Okay. I'm going to sit down there.	Negative									
+Patient	S1	S1 24:39	What'd you say?	Negative									
+Nurse	S2	S2 24:40	Come. We're going to sit down there.	Negative									
+Patient	S1	S1 24:41	Okay.	Negative									
+Nurse	S2	S2 24:42	Thank you very much.	Negative									
+Voice mail	S3	S3 25:09	Thank you for waiting. Please stay on the line. We value your time, so for fastest service, please visit MyChart [inaudible] patient portal. You can make or request an appointment, medication refills, message your provider, view your test results, get information on your medical history, and much more. You can access MyChart on your smartphone, tablet, or computer. Go to jamaicahospital.org to log in or sign out. You can speak to one of our-- thank you for waiting. We appreciate your patience. Please stay on the line and we'll be with you shortly.	Negative									
+Voice mail	S3	S3 26:09	Thank you for your patience. We value your time, so for fastest service, please visit MyChart [inaudible]-- thank you for waiting. Please stay on the line-- or request an appointment, medication refills, message your provider, view your test results, get information on your medical history, and much more. You can access MyChart on your smartphone, tablet, or computer. Go to jamaicahospital.org to log in or sign out. You can speak to one of our representatives today [inaudible].	Negative									
+Nurse	S2	S2 26:48	Hi, Lillian. This is the nurse for Roberto.	Negative									
+Voice mail	S3	S3 26:50	Thank you for waiting. We appreciate your patience. Please stay on the line and we'll be with you shortly.	Negative									
+Nurse	S2	S2 26:52	Excellent. Okay. On the other phone, I'm calling the doctor. I'm trying to get the antibiotics for Roberto for his wound just in case because it's a little--	Positive	Case management == contact PCP / for abx	"THE COORDINATOR VERIFIED THAT PROPHYLACTIC ANTIBIOTICS WILL BE ORDERED BY DR CANEDO." "TIW WOUND CARE"			Case Management_medication coordination/ordering	Case Management_medical/dental care	Case Management_continuity of care		
+Patient	S1	S1 27:05	She [inaudible]. She called this morning the pharmacy. I'm getting [inaudible].	Negative									
+Nurse	S2	S2 27:09	Yeah. Say again?	Negative									
+Voice mail	S3	S3 27:09	We value your time, so for fastest service, please visit MyChart [inaudible] patient portal.	Negative									
+Nurse	S2	S2 27:15	Could you please do it? Because they've been holding me on the phone with the doctor, and I don't know if I'm going to get [crosstalk] or not.	Negative									
+Voice mail	S3	S3 27:21	[crosstalk], view your test results-- thank you for waiting. Please stay on the line.	Negative									
+Nurse	S2	S2 27:24	Please. Yes. Thank you so much. I appreciate it. So I took a picture-- it's okay. It's fine. I'll check it next time I come. I took a picture. We'll compare. I marked the redness with a marker, and I explained to Roberto that redness should not get bigger because there is a little redness around the wound. Okay? So we'll observe. I bandaged it up. I used wet to dry. I cleansed it with normal saline, and I applied wet to dry gauze. And I explained to Roberto what to do. I left him a bag of supplies. I told him that he-- if he wants, he can change it until Monday. If he doesn't, he can keep it. If he wants to take a shower on Saturday or Sunday, he has to take it off and then just wash it with soap and water in the shower and then either keep it open afterwards, nice and dry, or bandage it back up with the bandage. I left him bandage. And that's it. We're going to come Monday, Wednesday, Friday for now. The only thing is that he is diabetic, and we have to be very careful. So he has to get his antibiotic because it will be very important for the healing process. No, no. It's up in the air. Do you have a number for the doctor? Maybe you have a better one.	Positive	"wound assessed; redness; education; treatement
+diabetic == risk of infection == abx"	Skin_inflammation 			Surveillance_dressing change/wound care	Treatments and Procedures_dressing change/wound care			
+Nurse	S2	S2 29:42	You want me to send the picture to you? Yeah. Okay, okay. Well, that's good enough. No, no. The leg is okay. [laughter] The leg is okay. Just he needs antibiotics. That's all. Yeah. Yeah.	Positive	Abx request				Case Management_medication coordination/ordering	Case Management_medication prescription			
+Nurse	S2	S2 31:05	Well, I'm going to leave, but I'm going to-- is this the cell phone that I called you? 5367? You have a cell phone? Which one is it? 431? Oh. Okay. I don't have this one. Let me have it then. Sorry. Okay. Let me have this. Just a second. Just a second. Okay. So it's 516--	Negative									
+Patient	S1	S1 31:40	Excuse me. Let me go to the bathroom and take a leak.	Negative									
+Nurse	S2	S2 31:41	Absolutely. Absolutely. Absolutely. 425.	Negative									
+Patient	S1	S1 31:43	Thank you. Thank you. I appreciate it.	Negative									
+Nurse	S2	S2 31:47	5367. Okay. Okay. [inaudible] right now with my phone number because we can all communicate on the phone. [inaudible]. Because the [inaudible] is fine. Everything is [inaudible] with his [inaudible]. The only thing is right here. [inaudible] antibiotics [inaudible]. No. Hopefully not now. I mean, with antibiotics [inaudible]. Yeah. [inaudible]. Yeah. So over the weekend, I go to [inaudible] take everything off, to take a shower with soap and water [inaudible]. Yeah. Yeah, yeah. Definitely. I'll tell him. [inaudible] next week. The snow is going to melt Tuesday at least. Oh, Roberto. Can you stay at home over the weekend to make sure the ice melts and snow melts, and next week you'll go out? Is it okay for you?	Positive	skin care/ Safety reinforce				Teaching, Guidance, and Counseling_safety	Teaching, Guidance, and Counseling_personal hygiene	Teaching, Guidance, and Counseling_dressing change/wound care		
+Patient	S1	S1 33:52	To go where?	Negative									
+Nurse	S2	S2 33:53	I don't know. You wanted to go out somewhere, maybe pay your bills or something?	Negative									
+Patient	S1	S1 33:57	Why'd you ask me? Yeah, I did it.	Negative									
+Nurse	S2	S2 34:00	Okay.	Negative									
+Patient	S1	S1 34:01	[inaudible]. You know why? I pay my bill by the-- how do you call it? My light bill, telephone bill, all that stuff. So I pay [inaudible]-- how do you call it? By the--	Negative									
+Nurse	S2	S2 34:17	Oh no. We'll come Monday. [crosstalk].	Negative									
+Patient	S1	S1 34:19	I go to the cash check and pay. And I just do it-- and I just do it [crosstalk].	Negative									
+Nurse	S2	S2 34:25	Okay. Roberto, I left you my cell phone number here, and I left you office number. If you need a nurse to come over the weekend, give us a call, okay?	Negative									
+Patient	S1	S1 34:33	Okay. I will.	Negative									
+Nurse	S2	S2 34:34	Okay. Okay, Lillian. Thank you so much. [inaudible], call me, but please try to get the antibiotics from the doctor. And if they would like to speak with me, you've got my cell phone. Anytime. Okay. Thank you very much. Talk to you later. Have a great day. Bye-bye.	Negative									
+Patient	S1	S1 34:53	Who is that?	Negative									
+Nurse	S2	S2 34:54	That's it for today.	Negative									
+Patient	S1	S1 34:56	Yeah. [inaudible]. Beautiful. Good enough.	Negative									
+Nurse	S2	S2 34:58	Yeah. Everything good. Lillian is going to try to get the antibiotics from the doctor.	Positive					Case Management_medication coordination/ordering				
+Patient	S1	S1 35:04	Say that again?	Negative									
+Nurse	S2	S2 35:05	Lillian is going to get your antibiotics from the doctor.	Negative									
+Patient	S1	S1 35:08	Yeah. She get it for me. I know.	Negative									
+Nurse	S2	S2 35:09	That's it. Okay. I'm going to get this one from you now. Thank you very much. We're going to stop the.	Negative									
