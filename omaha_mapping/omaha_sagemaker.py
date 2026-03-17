@@ -1954,20 +1954,20 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     # Combined label counters
     global_ss_tp = global_ss_fp = global_ss_fn = global_ss_tn = 0
     global_i_tp  = global_i_fp  = global_i_fn  = global_i_tn  = 0
-    # SS component counters (domain omitted — GT is always Problem_SS)
-    global_prob_tp  = global_prob_fp  = global_prob_fn  = 0
-    global_ssonly_tp= global_ssonly_fp= global_ssonly_fn= 0
+    # SS component counters
+    global_prob_tp  = global_prob_fp  = global_prob_fn  = global_prob_tn  = 0
+    global_ssonly_tp= global_ssonly_fp= global_ssonly_fn= global_ssonly_tn= 0
     # Intervention component counters
-    global_cat_tp   = global_cat_fp   = global_cat_fn   = 0
-    global_tgt_tp   = global_tgt_fp   = global_tgt_fn   = 0
+    global_cat_tp   = global_cat_fp   = global_cat_fn   = global_cat_tn   = 0
+    global_tgt_tp   = global_tgt_fp   = global_tgt_fn   = global_tgt_tn   = 0
 
     _ZERO_METRICS = {k: 0 for k in [
         "ss_precision","ss_recall","ss_f1","ss_accuracy","ss_tp","ss_fp","ss_fn","ss_tn","ss_relevant_rows",
         "int_precision","int_recall","int_f1","int_accuracy","int_tp","int_fp","int_fn","int_tn","int_relevant_rows",
-        "prob_precision","prob_recall","prob_f1","prob_tp","prob_fp","prob_fn",
-        "ss_only_precision","ss_only_recall","ss_only_f1","ss_only_tp","ss_only_fp","ss_only_fn",
-        "cat_precision","cat_recall","cat_f1","cat_tp","cat_fp","cat_fn",
-        "tgt_precision","tgt_recall","tgt_f1","tgt_tp","tgt_fp","tgt_fn",
+        "prob_precision","prob_recall","prob_f1","prob_tp","prob_fp","prob_fn","prob_tn",
+        "ss_only_precision","ss_only_recall","ss_only_f1","ss_only_tp","ss_only_fp","ss_only_fn","ss_only_tn",
+        "cat_precision","cat_recall","cat_f1","cat_tp","cat_fp","cat_fn","cat_tn",
+        "tgt_precision","tgt_recall","tgt_f1","tgt_tp","tgt_fp","tgt_fn","tgt_tn",
     ]}
 
     for sheet_name, conv_df in tqdm(annotation_sheets.items(),
@@ -1987,10 +1987,10 @@ def run_inference(llm_name: str, resources: dict) -> dict:
 
         global_ss_tp += metrics["ss_tp"];  global_ss_fp += metrics["ss_fp"];  global_ss_fn += metrics["ss_fn"];  global_ss_tn += metrics["ss_tn"]
         global_i_tp  += metrics["int_tp"]; global_i_fp  += metrics["int_fp"]; global_i_fn  += metrics["int_fn"]; global_i_tn  += metrics["int_tn"]
-        global_prob_tp   += metrics["prob_tp"];    global_prob_fp   += metrics["prob_fp"];    global_prob_fn   += metrics["prob_fn"]
-        global_ssonly_tp += metrics["ss_only_tp"]; global_ssonly_fp += metrics["ss_only_fp"]; global_ssonly_fn += metrics["ss_only_fn"]
-        global_cat_tp    += metrics["cat_tp"];     global_cat_fp    += metrics["cat_fp"];     global_cat_fn    += metrics["cat_fn"]
-        global_tgt_tp    += metrics["tgt_tp"];     global_tgt_fp    += metrics["tgt_fp"];     global_tgt_fn    += metrics["tgt_fn"]
+        global_prob_tp   += metrics["prob_tp"];    global_prob_fp   += metrics["prob_fp"];    global_prob_fn   += metrics["prob_fn"];    global_prob_tn   += metrics["prob_tn"]
+        global_ssonly_tp += metrics["ss_only_tp"]; global_ssonly_fp += metrics["ss_only_fp"]; global_ssonly_fn += metrics["ss_only_fn"]; global_ssonly_tn += metrics["ss_only_tn"]
+        global_cat_tp    += metrics["cat_tp"];     global_cat_fp    += metrics["cat_fp"];     global_cat_fn    += metrics["cat_fn"];     global_cat_tn    += metrics["cat_tn"]
+        global_tgt_tp    += metrics["tgt_tp"];     global_tgt_fp    += metrics["tgt_fp"];     global_tgt_fn    += metrics["tgt_fn"];     global_tgt_tn    += metrics["tgt_tn"]
 
         safe = re.sub(r"[\\/*?:\[\]]", "_", sheet_name)[:31]
         output_sheets[safe] = df_out
@@ -2003,12 +2003,24 @@ def run_inference(llm_name: str, resources: dict) -> dict:
         )
 
     # ── Aggregate ─────────────────────────────────────────────────────────────
-    gss_p,    gss_r,    gss_f1    = compute_prf(global_ss_tp,     global_ss_fp,     global_ss_fn)
-    gi_p,     gi_r,     gi_f1     = compute_prf(global_i_tp,      global_i_fp,      global_i_fn)
-    gprob_p,  gprob_r,  gprob_f1  = compute_prf(global_prob_tp,   global_prob_fp,   global_prob_fn)
-    gssonly_p,gssonly_r,gssonly_f1= compute_prf(global_ssonly_tp, global_ssonly_fp, global_ssonly_fn)
-    gcat_p,   gcat_r,   gcat_f1   = compute_prf(global_cat_tp,    global_cat_fp,    global_cat_fn)
-    gtgt_p,   gtgt_r,   gtgt_f1   = compute_prf(global_tgt_tp,    global_tgt_fp,    global_tgt_fn)
+    (gss_p,    gss_r,    gss_f1,
+     gss_np,   gss_nr,   gss_nf1,
+     gss_mp,   gss_mr,   gss_mf1)   = compute_full_metrics(global_ss_tp,     global_ss_fp,     global_ss_fn,     global_ss_tn)
+    (gi_p,     gi_r,     gi_f1,
+     gi_np,    gi_nr,    gi_nf1,
+     gi_mp,    gi_mr,    gi_mf1)    = compute_full_metrics(global_i_tp,      global_i_fp,      global_i_fn,      global_i_tn)
+    (gprob_p,  gprob_r,  gprob_f1,
+     gprob_np, gprob_nr, gprob_nf1,
+     gprob_mp, gprob_mr, gprob_mf1) = compute_full_metrics(global_prob_tp,   global_prob_fp,   global_prob_fn,   global_prob_tn)
+    (gssonly_p,gssonly_r,gssonly_f1,
+     gso_np,   gso_nr,   gso_nf1,
+     gso_mp,   gso_mr,   gso_mf1)  = compute_full_metrics(global_ssonly_tp, global_ssonly_fp, global_ssonly_fn, global_ssonly_tn)
+    (gcat_p,   gcat_r,   gcat_f1,
+     gcat_np,  gcat_nr,  gcat_nf1,
+     gcat_mp,  gcat_mr,  gcat_mf1)  = compute_full_metrics(global_cat_tp,    global_cat_fp,    global_cat_fn,    global_cat_tn)
+    (gtgt_p,   gtgt_r,   gtgt_f1,
+     gtgt_np,  gtgt_nr,  gtgt_nf1,
+     gtgt_mp,  gtgt_mr,  gtgt_mf1)  = compute_full_metrics(global_tgt_tp,    global_tgt_fp,    global_tgt_fn,    global_tgt_tn)
 
     ss_grand_total  = global_ss_tp + global_ss_fp + global_ss_fn + global_ss_tn
     int_grand_total = global_i_tp  + global_i_fp  + global_i_fn  + global_i_tn
@@ -2023,23 +2035,29 @@ def run_inference(llm_name: str, resources: dict) -> dict:
         "fuzzy_threshold": FUZZY_THRESHOLD,
         "signs_symptoms": {
             "micro":    {"precision": gss_p,  "recall": gss_r,  "f1": gss_f1,
+                         "none_f1": gss_nf1, "macro_f1": gss_mf1,
                          "accuracy": gss_accuracy,
                          "tp": global_ss_tp, "fp": global_ss_fp, "fn": global_ss_fn, "tn": global_ss_tn},
             "macro":    {"f1": round(_macro("ss_f1"), 4)},
             "problem":  {"micro_p": gprob_p,   "micro_r": gprob_r,   "micro_f1": gprob_f1,
-                         "tp": global_prob_tp,  "fp": global_prob_fp,  "fn": global_prob_fn},
+                         "none_f1": gprob_nf1, "macro_f1": gprob_mf1,
+                         "tp": global_prob_tp,  "fp": global_prob_fp,  "fn": global_prob_fn,  "tn": global_prob_tn},
             "ss_only":  {"micro_p": gssonly_p, "micro_r": gssonly_r, "micro_f1": gssonly_f1,
-                         "tp": global_ssonly_tp,"fp": global_ssonly_fp,"fn": global_ssonly_fn},
+                         "none_f1": gso_nf1, "macro_f1": gso_mf1,
+                         "tp": global_ssonly_tp,"fp": global_ssonly_fp,"fn": global_ssonly_fn,"tn": global_ssonly_tn},
         },
         "interventions": {
             "micro":    {"precision": gi_p,   "recall": gi_r,   "f1": gi_f1,
+                         "none_f1": gi_nf1, "macro_f1": gi_mf1,
                          "accuracy": gint_accuracy,
                          "tp": global_i_tp,  "fp": global_i_fp,  "fn": global_i_fn,  "tn": global_i_tn},
             "macro":    {"f1": round(_macro("int_f1"), 4)},
             "category": {"micro_p": gcat_p, "micro_r": gcat_r, "micro_f1": gcat_f1,
-                         "tp": global_cat_tp, "fp": global_cat_fp, "fn": global_cat_fn},
+                         "none_f1": gcat_nf1, "macro_f1": gcat_mf1,
+                         "tp": global_cat_tp, "fp": global_cat_fp, "fn": global_cat_fn, "tn": global_cat_tn},
             "target":   {"micro_p": gtgt_p, "micro_r": gtgt_r, "micro_f1": gtgt_f1,
-                         "tp": global_tgt_tp, "fp": global_tgt_fp, "fn": global_tgt_fn},
+                         "none_f1": gtgt_nf1, "macro_f1": gtgt_mf1,
+                         "tp": global_tgt_tp, "fp": global_tgt_fp, "fn": global_tgt_fn, "tn": global_tgt_tn},
         },
         "per_sheet": sheet_metrics,
     }
@@ -2094,30 +2112,35 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     s3_write_excel(output_sheets, S3_BUCKET, results_key)
 
     # ── Print per-model report ─────────────────────────────────────────────────
-    W = 30
-    print(f"\n{'='*70}")
+    W = 26
+    C = 7
+    print(f"\n{'='*88}")
     print(f"RESULTS  |  {llm_name}")
-    print(f"{'='*70}")
-    print(f"{'Metric':<{W}} {'Micro P':>8} {'Micro R':>8} {'Micro F1':>9} {'Accuracy':>9}")
-    print(f"{'-'*75}")
-    for lbl, p, r, f, acc in [
-        ("SS (combined label)",    gss_p,    gss_r,    gss_f1,    gss_accuracy),
-        ("  └ Problem only",       gprob_p,  gprob_r,  gprob_f1,  float("nan")),
-        ("  └ Sign/Symptom only",  gssonly_p,gssonly_r,gssonly_f1,float("nan")),
-        ("Intervention (combined)",gi_p,     gi_r,     gi_f1,     gint_accuracy),
-        ("  └ Category only",      gcat_p,   gcat_r,   gcat_f1,   float("nan")),
-        ("  └ Target only",        gtgt_p,   gtgt_r,   gtgt_f1,   float("nan")),
-    ]:
-        acc_str = f"{acc:>9.4f}" if acc == acc else "         "  # nan check
-        print(f"{lbl:<{W}} {p:>8.4f} {r:>8.4f} {f:>9.4f}{acc_str}")
-    print(f"{'-'*75}")
-    print(f"Macro SS F1:           {round(_macro('ss_f1'),4):.4f}   "
+    print(f"{'='*88}")
+    print(f"{'Metric':<{W}} {'Pos P':>{C}} {'Pos R':>{C}} {'Pos F1':>{C}} "
+          f"{'None F1':>{C}} {'MacroF1':>{C}} {'Accuracy':>8}")
+    print(f"{'-'*88}")
+
+    def _row(lbl, pos_p, pos_r, pos_f1, none_f1, macro_f1, acc=float("nan")):
+        acc_str = f"{acc:>8.4f}" if acc == acc else "        "
+        print(f"{lbl:<{W}} {pos_p:>{C}.4f} {pos_r:>{C}.4f} {pos_f1:>{C}.4f} "
+              f"{none_f1:>{C}.4f} {macro_f1:>{C}.4f}{acc_str}")
+
+    _row("SS (combined label)",    gss_p,    gss_r,    gss_f1,    gss_nf1,  gss_mf1,  gss_accuracy)
+    _row("  └ Problem only",       gprob_p,  gprob_r,  gprob_f1,  gprob_nf1,gprob_mf1)
+    _row("  └ Sign/Symptom only",  gssonly_p,gssonly_r,gssonly_f1,gso_nf1,  gso_mf1)
+    _row("Intervention (combined)",gi_p,     gi_r,     gi_f1,     gi_nf1,   gi_mf1,   gint_accuracy)
+    _row("  └ Category only",      gcat_p,   gcat_r,   gcat_f1,   gcat_nf1, gcat_mf1)
+    _row("  └ Target only",        gtgt_p,   gtgt_r,   gtgt_f1,   gtgt_nf1, gtgt_mf1)
+
+    print(f"{'-'*88}")
+    print(f"Macro SS F1 (sheet avg):  {round(_macro('ss_f1'),4):.4f}   "
           f"(ss_only: {round(_macro('ss_only_f1'),4):.4f})")
-    print(f"Macro Int F1:          {round(_macro('int_f1'),4):.4f}   "
+    print(f"Macro Int F1 (sheet avg): {round(_macro('int_f1'),4):.4f}   "
           f"(target:  {round(_macro('tgt_f1'),4):.4f})")
-    print(f"TP/FP/FN/TN (SS):      {global_ss_tp}/{global_ss_fp}/{global_ss_fn}/{global_ss_tn}  Accuracy={gss_accuracy:.4f}")
-    print(f"TP/FP/FN/TN (Int):     {global_i_tp}/{global_i_fp}/{global_i_fn}/{global_i_tn}  Accuracy={gint_accuracy:.4f}")
-    print(f"{'='*70}")
+    print(f"TP/FP/FN/TN (SS):   {global_ss_tp}/{global_ss_fp}/{global_ss_fn}/{global_ss_tn}  Accuracy={gss_accuracy:.4f}")
+    print(f"TP/FP/FN/TN (Int):  {global_i_tp}/{global_i_fp}/{global_i_fn}/{global_i_tn}  Accuracy={gint_accuracy:.4f}")
+    print(f"{'='*88}")
     print(f"Saved: s3://{S3_BUCKET}/{results_key}")
 
     return summary
