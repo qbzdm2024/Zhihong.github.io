@@ -396,7 +396,8 @@ def test_turn(
         divider("AGENT 3 — Verification")
 
         if task in ("ss", "both") and ss_parsed:
-            ss_v = om._verify_ss(turn, ss_parsed, ss_docs, ss_emb, embed_model, model_name)
+            ss_v = om._verify_ss(turn, ss_parsed, ss_docs, ss_emb, embed_model,
+                                 model_name, understanding)
             if ss_v != ss_parsed:
                 print(YELLOW("  SS corrected →"))
                 for r in ss_v:
@@ -409,7 +410,7 @@ def test_turn(
 
         if task in ("intervention", "both") and int_parsed:
             int_v = om._verify_int(turn, ctx, int_parsed, int_docs, int_emb,
-                                   embed_model, model_name)
+                                   embed_model, model_name, understanding)
             if int_v != int_parsed:
                 print(YELLOW("  INT corrected →"))
                 for r in int_v:

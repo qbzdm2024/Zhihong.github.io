@@ -545,11 +545,39 @@ KEY CLINICAL PHRASES
 List the exact clinical phrases from the turn verbatim (comma-separated).
 Write "none" if there are none.
 
+PROPOSED OMAHA SS
+Does the turn contain a CONFIRMED patient symptom or finding (not merely a
+nurse plan to check)?
+Signs/Symptoms are ONLY for patient-reported or observed findings.
+A nurse announcing "I will check X" does NOT produce an SS label.
+• If yes — Domain | Problem | Signs/Symptoms (use Omaha System terms).
+• If no  — write "none".
+
+PROPOSED OMAHA INTERVENTION
+What clinical action does the nurse perform or announce?
+Category MUST be exactly one of:
+  Health Teaching, Guidance, and Counseling
+  Treatments and Procedures
+  Case Management
+  Surveillance
+Key rules:
+  "check", "assess", "monitor", "will check", "going to check" → Surveillance
+  "teach", "explain", "instruct", "educate"                    → Health Teaching, Guidance, and Counseling
+  "perform", "apply", "administer", "change dressing"          → Treatments and Procedures
+  "refer", "coordinate", "schedule"                            → Case Management
+List up to 3 in order of relevance.
+• Format: Category | Target
+• If none — write "none".
+
 Respond ONLY in this exact format with no extra text:
 SPEAKER: [patient | clinician | unclear]
 PATIENT PROBLEM: [description, or "none"]
 NURSE ACTION: [description, or "none"]
 KEY PHRASES: [phrase1, phrase2, ... or "none"]
+PROPOSED SS: [Domain | Problem | Signs/Symptoms, or "none"]
+PROPOSED INT 1: [Category | Target, or "none"]
+PROPOSED INT 2: [Category | Target, or "none"]
+PROPOSED INT 3: [Category | Target, or "none"]
 """
 
 
@@ -809,6 +837,50 @@ def understand_turn(query: str, context: str, llm_name: str) -> str:
         prompt = re.sub(r"<\|[^|>]+\|>", "", prompt).strip()
     raw = call_llm(prompt, llm_name)
     return raw.strip()
+
+
+def _parse_proposed_from_understanding(understanding: str) -> dict:
+    """Extract Agent 1's proposed classifications from understand_turn() output.
+
+    Returns a dict with:
+        "ss"  : str  — e.g. "Physiological Domain | Skin | lesion" or "none"
+        "int" : list — up to 3 strings, e.g. ["Surveillance | dressing change/wound care"]
+    """
+    result = {"ss": "none", "int": []}
+    if not understanding:
+        return result
+
+    for line in understanding.splitlines():
+        line = line.strip()
+        m_ss = re.match(r"PROPOSED\s+SS\s*:\s*(.+)", line, re.IGNORECASE)
+        if m_ss:
+            result["ss"] = m_ss.group(1).strip()
+            continue
+        m_int = re.match(r"PROPOSED\s+INT\s+\d\s*:\s*(.+)", line, re.IGNORECASE)
+        if m_int:
+            val = m_int.group(1).strip()
+            if val.lower() != "none":
+                result["int"].append(val)
+
+    return result
+
+
+def _format_proposed_for_verify(proposed: dict, kind: str) -> str:
+    """Format Agent 1 proposed labels into a readable block for verify prompts.
+
+    kind: "ss" or "int"
+    """
+    if kind == "ss":
+        val = proposed.get("ss", "none")
+        if val.lower() == "none":
+            return "Agent 1 proposed: none (no confirmed patient problem detected)"
+        return f"Agent 1 proposed: {val}"
+    else:  # int
+        items = proposed.get("int", [])
+        if not items:
+            return "Agent 1 proposed: none"
+        lines = "\n".join(f"  {i+1}. {v}" for i, v in enumerate(items))
+        return f"Agent 1 proposed:\n{lines}"
 
 
 def build_ss_prompt(query: str, context: str, retrieved_docs: list[dict],
@@ -1147,7 +1219,14 @@ Your job: confirm it is correct, or correct it.
 ━━━ TURN ━━━
 {query}
 
-━━━ PROPOSED CLASSIFICATION ━━━
+━━━ AGENT 1 PROPOSED CLASSIFICATION (zero-shot, no retrieval) ━━━
+{proposed}
+
+Use this as a strong signal. If Agent 1 says "none", the turn likely has no
+patient problem (e.g. a nurse announcing an assessment). Override only if the
+turn text clearly contains a confirmed patient symptom or finding.
+
+━━━ PROPOSED CLASSIFICATION (RAG-based) ━━━
 {prediction}
 
 ━━━ AVAILABLE OPTIONS (top retrieved) ━━━
@@ -1184,7 +1263,17 @@ Your job: confirm they are correct, or correct them.
 ━━━ TURN ━━━
 {query}
 
-━━━ PROPOSED INTERVENTIONS ━━━
+━━━ AGENT 1 PROPOSED CLASSIFICATION (zero-shot, no retrieval) ━━━
+{proposed}
+
+Use Agent 1's category (Surveillance / Treatments and Procedures / etc.) as a
+strong anchor. The RAG classifier sometimes confuses Surveillance with
+Treatments and Procedures — Agent 1's reasoning about the nurse action type
+(checking/assessing vs. performing/applying) is a reliable signal.
+Override Agent 1 only if the turn text clearly describes a procedure, not just
+an assessment.
+
+━━━ PROPOSED INTERVENTIONS (RAG-based) ━━━
 {prediction}
 
 ━━━ AVAILABLE OPTIONS (top retrieved) ━━━
@@ -1211,7 +1300,8 @@ or
 
 def _verify_ss(query: str, ss_preds: list[dict],
                ss_docs: list[dict], ss_embeddings: np.ndarray,
-               embed_model: SentenceTransformer, llm_name: str) -> list[dict]:
+               embed_model: SentenceTransformer, llm_name: str,
+               understanding: str = "") -> list[dict]:
     """Run the SS verification agent on one row. Returns (possibly corrected) predictions."""
     if not ss_preds:
         return ss_preds  # Nothing to verify
@@ -1225,8 +1315,11 @@ def _verify_ss(query: str, ss_preds: list[dict],
         f"{i+1}. Domain: {d['domain']} | Problem: {d['problem']} | Signs/Symptoms: {d['ss']}"
         for i, d in enumerate(retrieved)
     )
+    proposed = _parse_proposed_from_understanding(understanding)
+    proposed_text = _format_proposed_for_verify(proposed, "ss")
     prompt = VERIFY_SS_PROMPT.format(
         query=query,
+        proposed=proposed_text,
         prediction=prediction_text,
         options=options_text,
     )
@@ -1247,7 +1340,8 @@ def _verify_ss(query: str, ss_preds: list[dict],
 
 def _verify_int(query: str, context: str, int_preds: list[dict],
                 int_docs: list[dict], int_embeddings: np.ndarray,
-                embed_model: SentenceTransformer, llm_name: str) -> list[dict]:
+                embed_model: SentenceTransformer, llm_name: str,
+                understanding: str = "") -> list[dict]:
     """Run the INT verification agent on one row. Returns (possibly corrected) predictions."""
     if not int_preds:
         return int_preds
@@ -1256,6 +1350,8 @@ def _verify_int(query: str, context: str, int_preds: list[dict],
         f"{i+1}. Category: {p['category']} | Target: {p['target']}"
         for i, p in enumerate(int_preds)
     )
+    proposed = _parse_proposed_from_understanding(understanding)
+    proposed_text = _format_proposed_for_verify(proposed, "int")
     retrieved = retrieve(query, int_docs, int_embeddings, embed_model)
     options_text = "\n".join(
         f"{i+1}. Category: {d['category']} | Target: {d['target']}"
@@ -1264,6 +1360,7 @@ def _verify_int(query: str, context: str, int_preds: list[dict],
     prompt = VERIFY_INT_PROMPT.format(
         context=context,
         query=query,
+        proposed=proposed_text,
         prediction=prediction_text,
         options=options_text,
     )
@@ -1328,15 +1425,21 @@ def verify_sheet(
             if lbl and lbl != "nan":
                 int_preds.append({"label": lbl, "category": cat, "target": tgt})
 
+        # Retrieve Agent 1 understanding for this row (may be empty string)
+        understanding = str(row.get("LLM_understand_raw", "")).strip()
+        if understanding == "nan":
+            understanding = ""
+
         # Verify SS
         if ss_preds:
             ss_preds = _verify_ss(query, ss_preds, ss_docs, ss_embeddings,
-                                  embed_model, llm_name)
+                                  embed_model, llm_name, understanding)
 
         # Verify INT
         if int_preds:
             int_preds = _verify_int(query, context, int_preds, int_docs,
-                                    int_embeddings, embed_model, llm_name)
+                                    int_embeddings, embed_model, llm_name,
+                                    understanding)
 
         # Write back SS
         for j in range(1, 4):
