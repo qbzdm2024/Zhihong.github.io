@@ -160,7 +160,7 @@ MODELS_TO_COMPARE  = [
 ]
 
 # ── Pipeline settings ─────────────────────────────────────────────────────────
-CONTEXT_WINDOW  = 3    # rows before/after current turn to include as context
+CONTEXT_WINDOW  = 2    # rows before/after current turn to include as context
 TOP_K_RETRIEVAL = 15   # number of Omaha options sent to the LLM
 FUZZY_THRESHOLD = 80   # minimum fuzz.ratio for a match (0–100)
 
