@@ -908,49 +908,6 @@ def understand_turn(query: str, context: str, llm_name: str) -> str:
     return raw.strip()
 
 
-def _parse_proposed_from_understanding(understanding: str) -> dict:
-    """Extract Agent 1's proposed classifications from understand_turn() output.
-
-    Returns a dict with:
-        "ss"  : str  — e.g. "Physiological Domain | Skin | lesion" or "none"
-        "int" : list — up to 3 strings, e.g. ["Surveillance | dressing change/wound care"]
-    """
-    result = {"ss": "none", "int": []}
-    if not understanding:
-        return result
-
-    for line in understanding.splitlines():
-        line = line.strip()
-        m_ss = re.match(r"PROPOSED\s+SS\s*:\s*(.+)", line, re.IGNORECASE)
-        if m_ss:
-            result["ss"] = m_ss.group(1).strip()
-            continue
-        m_int = re.match(r"PROPOSED\s+INT\s+\d\s*:\s*(.+)", line, re.IGNORECASE)
-        if m_int:
-            val = m_int.group(1).strip()
-            if val.lower() != "none":
-                result["int"].append(val)
-
-    return result
-
-
-def _format_proposed_for_verify(proposed: dict, kind: str) -> str:
-    """Format Agent 1 proposed labels into a readable block for verify prompts.
-
-    kind: "ss" or "int"
-    """
-    if kind == "ss":
-        val = proposed.get("ss", "none")
-        if val.lower() == "none":
-            return "Agent 1 proposed: none (no confirmed patient problem detected)"
-        return f"Agent 1 proposed: {val}"
-    else:  # int
-        items = proposed.get("int", [])
-        if not items:
-            return "Agent 1 proposed: none"
-        lines = "\n".join(f"  {i+1}. {v}" for i, v in enumerate(items))
-        return f"Agent 1 proposed:\n{lines}"
-
 
 def build_ss_prompt(query: str, context: str, retrieved_docs: list[dict],
                     understanding: str = "") -> str:
@@ -1171,19 +1128,18 @@ def process_sheet(
     int_docs: list[dict], int_embeddings: np.ndarray,
     embed_model: SentenceTransformer,
     llm_name: str,
-    use_understand: bool = False,
+    use_understand: bool = True,
 ) -> pd.DataFrame:
     """
     Process all rows in one conversation sheet.
     Returns a DataFrame with original columns + LLM predictions.
 
-    3-agent pipeline when use_understand=True:
+    2-agent pipeline:
       Agent 1 — understand_turn()   : Extracts speaker role, patient problem,
                                        nurse action, and key clinical phrases.
       Agent 2 — build_ss/int_prompt : RAG classifier enriched with Agent 1 output.
-      Agent 3 — verify_sheet()      : (optional, called separately) verifies labels.
 
-    When use_understand=False (default) Agent 1 is skipped (original behaviour).
+    Set use_understand=False to skip Agent 1 (single-agent baseline).
     The Agent 1 output is stored in LLM_understand_raw for inspection.
     """
     ss_preds_all  = []
@@ -1263,269 +1219,6 @@ def process_sheet(
     out["LLM_SS_raw"]  = ss_raw_all
     out["LLM_I_raw"]   = int_raw_all
 
-    return out
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# SECTION 7b — VERIFICATION AGENT
-# ══════════════════════════════════════════════════════════════════════════════
-#
-# A second LLM pass that reviews each classification and either confirms it
-# or corrects it.  Optional — add ~1× extra cost but can close the last few
-# F1 points when the primary classifier is ambiguous.
-#
-# Usage (in eval_local.py or Streamlit):
-#     df_out = process_sheet(...)
-#     df_out = verify_sheet(df_out, ss_docs, ss_emb, int_docs, int_emb,
-#                           embed_model, llm_name)
-# ──────────────────────────────────────────────────────────────────────────────
-
-VERIFY_SS_PROMPT = """You are a quality reviewer for Omaha System clinical coding.
-
-A classifier proposed a Signs/Symptoms label for this home healthcare turn.
-Your job: confirm it is correct, or correct it.
-
-━━━ TURN ━━━
-{query}
-
-━━━ AGENT 1 PROPOSED CLASSIFICATION (zero-shot, no retrieval) ━━━
-{proposed}
-
-Use this as a strong signal. If Agent 1 says "none", the turn likely has no
-patient problem (e.g. a nurse announcing an assessment). Override only if the
-turn text clearly contains a confirmed patient symptom or finding.
-
-━━━ PROPOSED CLASSIFICATION (RAG-based) ━━━
-{prediction}
-
-━━━ AVAILABLE OPTIONS (top retrieved) ━━━
-{options}
-
-━━━ DECISION RULES ━━━
-• CONFIRMED  — the proposed classification is correct.
-• NONE       — the turn has no patient health problem (nurse action announcement,
-               normal finding, greeting, filler, or question with no confirmed finding).
-• Better match — if a different option from the list fits better, provide it.
-
-━━━ RESPONSE FORMAT ━━━
-CONFIRMED
-
-or
-
-NONE
-
-or
-
-Domain: [Exact]
-Problem: [Exact]
-Signs/Symptoms: [Exact]
-"""
-
-VERIFY_INT_PROMPT = """You are a quality reviewer for Omaha System clinical coding.
-
-A classifier proposed intervention label(s) for this home healthcare turn.
-Your job: confirm they are correct, or correct them.
-
-━━━ CONTEXT ━━━
-{context}
-
-━━━ TURN ━━━
-{query}
-
-━━━ AGENT 1 PROPOSED CLASSIFICATION (zero-shot, no retrieval) ━━━
-{proposed}
-
-Use Agent 1's category (Surveillance / Treatments and Procedures / etc.) as a
-strong anchor. The RAG classifier sometimes confuses Surveillance with
-Treatments and Procedures — Agent 1's reasoning about the nurse action type
-(checking/assessing vs. performing/applying) is a reliable signal.
-Override Agent 1 only if the turn text clearly describes a procedure, not just
-an assessment.
-
-━━━ PROPOSED INTERVENTIONS (RAG-based) ━━━
-{prediction}
-
-━━━ AVAILABLE OPTIONS (top retrieved) ━━━
-{options}
-
-━━━ DECISION RULES ━━━
-• CONFIRMED  — the proposed interventions are correct.
-• NONE       — the turn has no clinical intervention (greeting, filler, purely social).
-• Better match — list corrected interventions (up to 3) in the same format as below.
-
-━━━ RESPONSE FORMAT ━━━
-CONFIRMED
-
-or
-
-NONE
-
-or
-
-1. Category: [exact] | Target: [exact]
-2. Category: [exact] | Target: [exact]
-"""
-
-
-def _verify_ss(query: str, ss_preds: list[dict],
-               ss_docs: list[dict], ss_embeddings: np.ndarray,
-               embed_model: SentenceTransformer, llm_name: str,
-               understanding: str = "") -> list[dict]:
-    """Run the SS verification agent on one row. Returns (possibly corrected) predictions."""
-    if not ss_preds:
-        return ss_preds  # Nothing to verify
-
-    prediction_text = "\n".join(
-        f"Domain: {p['domain']} | Problem: {p['problem']} | Signs/Symptoms: {p['ss']}"
-        for p in ss_preds
-    )
-    retrieved = retrieve(query, ss_docs, ss_embeddings, embed_model)
-    options_text = "\n".join(
-        f"{i+1}. Domain: {d['domain']} | Problem: {d['problem']} | Signs/Symptoms: {d['ss']}"
-        for i, d in enumerate(retrieved)
-    )
-    proposed = _parse_proposed_from_understanding(understanding)
-    proposed_text = _format_proposed_for_verify(proposed, "ss")
-    prompt = VERIFY_SS_PROMPT.format(
-        query=query,
-        proposed=proposed_text,
-        prediction=prediction_text,
-        options=options_text,
-    )
-    if LLM_CONFIGS[llm_name]["provider"] != "local":
-        prompt = re.sub(r"<\|[^|>]+\|>", "", prompt).strip()
-
-    raw = call_llm(prompt, llm_name)
-    raw_stripped = raw.strip()
-
-    if re.search(r"^\s*CONFIRMED\b", raw_stripped, re.IGNORECASE):
-        return ss_preds
-    if re.search(r"^\s*NONE\b", raw_stripped, re.IGNORECASE):
-        return []
-    # Otherwise parse as a new classification
-    corrected = parse_ss_output(raw_stripped)
-    return corrected if corrected else ss_preds  # fall back if parse fails
-
-
-def _verify_int(query: str, context: str, int_preds: list[dict],
-                int_docs: list[dict], int_embeddings: np.ndarray,
-                embed_model: SentenceTransformer, llm_name: str,
-                understanding: str = "") -> list[dict]:
-    """Run the INT verification agent on one row. Returns (possibly corrected) predictions."""
-    if not int_preds:
-        return int_preds
-
-    prediction_text = "\n".join(
-        f"{i+1}. Category: {p['category']} | Target: {p['target']}"
-        for i, p in enumerate(int_preds)
-    )
-    proposed = _parse_proposed_from_understanding(understanding)
-    proposed_text = _format_proposed_for_verify(proposed, "int")
-    retrieved = retrieve(query, int_docs, int_embeddings, embed_model)
-    options_text = "\n".join(
-        f"{i+1}. Category: {d['category']} | Target: {d['target']}"
-        for i, d in enumerate(retrieved)
-    )
-    prompt = VERIFY_INT_PROMPT.format(
-        context=context,
-        query=query,
-        proposed=proposed_text,
-        prediction=prediction_text,
-        options=options_text,
-    )
-    if LLM_CONFIGS[llm_name]["provider"] != "local":
-        prompt = re.sub(r"<\|[^|>]+\|>", "", prompt).strip()
-
-    raw = call_llm(prompt, llm_name)
-    raw_stripped = raw.strip()
-
-    if re.search(r"^\s*CONFIRMED\b", raw_stripped, re.IGNORECASE):
-        return int_preds
-    if re.search(r"^\s*NONE\b", raw_stripped, re.IGNORECASE):
-        return []
-    corrected = parse_intervention_output(raw_stripped)
-    return corrected if corrected else int_preds
-
-
-def verify_sheet(
-    df_out: pd.DataFrame,
-    ss_docs: list[dict],   ss_embeddings: np.ndarray,
-    int_docs: list[dict],  int_embeddings: np.ndarray,
-    embed_model: SentenceTransformer,
-    llm_name: str,
-    top_k: int = TOP_K_RETRIEVAL,
-) -> pd.DataFrame:
-    """
-    Run a verification pass over every row that has at least one SS or INT
-    prediction.  Returns an updated DataFrame with corrected Pred_* columns.
-    """
-    orig_k = TOP_K_RETRIEVAL
-    # We access top_k via the retrieve() default arg, so temporarily patch it
-    import omaha_sagemaker as _self
-    _self.TOP_K_RETRIEVAL = top_k
-
-    out = df_out.copy()
-
-    for idx in range(len(out)):
-        row   = out.iloc[idx]
-        query = str(row.get("Conversation", "")).strip()
-        if not query or query == "nan":
-            continue
-
-        context = get_context_text(df_out, idx)
-
-        # Reconstruct current SS predictions
-        ss_preds = []
-        for j in range(1, 4):
-            lbl  = str(row.get(f"Pred_SS_{j}", "")).strip()
-            dom  = str(row.get(f"Pred_SS_{j}_domain",  "")).strip()
-            prob = str(row.get(f"Pred_SS_{j}_problem", "")).strip()
-            ss   = str(row.get(f"Pred_SS_{j}_ss",      "")).strip()
-            if lbl and lbl != "nan":
-                ss_preds.append({"label": lbl, "domain": dom,
-                                 "problem": prob, "ss": ss})
-
-        # Reconstruct current INT predictions
-        int_preds = []
-        for j in range(1, 4):
-            lbl = str(row.get(f"Pred_I_{j}", "")).strip()
-            cat = str(row.get(f"Pred_I_{j}_category", "")).strip()
-            tgt = str(row.get(f"Pred_I_{j}_target",   "")).strip()
-            if lbl and lbl != "nan":
-                int_preds.append({"label": lbl, "category": cat, "target": tgt})
-
-        # Retrieve Agent 1 understanding for this row (may be empty string)
-        understanding = str(row.get("LLM_understand_raw", "")).strip()
-        if understanding == "nan":
-            understanding = ""
-
-        # Verify SS
-        if ss_preds:
-            ss_preds = _verify_ss(query, ss_preds, ss_docs, ss_embeddings,
-                                  embed_model, llm_name, understanding)
-
-        # Verify INT
-        if int_preds:
-            int_preds = _verify_int(query, context, int_preds, int_docs,
-                                    int_embeddings, embed_model, llm_name,
-                                    understanding)
-
-        # Write back SS
-        for j in range(1, 4):
-            p = ss_preds[j-1] if len(ss_preds) >= j else {}
-            out.at[idx, f"Pred_SS_{j}"]         = p.get("label",   "")
-            out.at[idx, f"Pred_SS_{j}_domain"]  = p.get("domain",  "")
-            out.at[idx, f"Pred_SS_{j}_problem"] = p.get("problem", "")
-            out.at[idx, f"Pred_SS_{j}_ss"]      = p.get("ss",      "")
-
-        # Write back INT
-        for j in range(1, 4):
-            p = int_preds[j-1] if len(int_preds) >= j else {}
-            out.at[idx, f"Pred_I_{j}"]          = p.get("label",    "")
-            out.at[idx, f"Pred_I_{j}_category"] = p.get("category", "")
-            out.at[idx, f"Pred_I_{j}_target"]   = p.get("target",   "")
-
-    _self.TOP_K_RETRIEVAL = orig_k
     return out
 
 
@@ -1975,7 +1668,8 @@ def run_inference(llm_name: str, resources: dict) -> dict:
         try:
             df_out  = process_sheet(conv_df, ss_docs, ss_embeddings,
                                     int_docs, int_embeddings,
-                                    embed_model, llm_name)
+                                    embed_model, llm_name,
+                                    use_understand=True)
             metrics = evaluate_sheet(df_out)
         except Exception as e:
             log.error(f"Sheet '{sheet_name}' failed: {e}")
@@ -2112,35 +1806,64 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     s3_write_excel(output_sheets, S3_BUCKET, results_key)
 
     # ── Print per-model report ─────────────────────────────────────────────────
-    W = 26
-    C = 7
-    print(f"\n{'='*88}")
+    W  = 26   # label width
+    C  = 7    # metric column width
+    TW = W + C*9 + 8 + 2  # total width: label + 9 metric cols + accuracy + spaces
+
+    print(f"\n{'='*TW}")
     print(f"RESULTS  |  {llm_name}")
-    print(f"{'='*88}")
-    print(f"{'Metric':<{W}} {'Pos P':>{C}} {'Pos R':>{C}} {'Pos F1':>{C}} "
-          f"{'None F1':>{C}} {'MacroF1':>{C}} {'Accuracy':>8}")
-    print(f"{'-'*88}")
+    print(f"{'='*TW}")
+    print(f"{'Metric':<{W}} "
+          f"{'Pos P':>{C}} {'Pos R':>{C}} {'Pos F1':>{C}}  "
+          f"{'None P':>{C}} {'None R':>{C}} {'None F1':>{C}}  "
+          f"{'Macro P':>{C}} {'Macro R':>{C}} {'Macro F1':>{C}}  "
+          f"{'Accuracy':>8}")
+    print(f"{'-'*TW}")
 
-    def _row(lbl, pos_p, pos_r, pos_f1, none_f1, macro_f1, acc=float("nan")):
+    def _row(lbl, pos_p, pos_r, pos_f1,
+             none_p, none_r, none_f1,
+             mac_p,  mac_r,  mac_f1,
+             acc=float("nan")):
         acc_str = f"{acc:>8.4f}" if acc == acc else "        "
-        print(f"{lbl:<{W}} {pos_p:>{C}.4f} {pos_r:>{C}.4f} {pos_f1:>{C}.4f} "
-              f"{none_f1:>{C}.4f} {macro_f1:>{C}.4f}{acc_str}")
+        print(f"{lbl:<{W}} "
+              f"{pos_p:>{C}.4f} {pos_r:>{C}.4f} {pos_f1:>{C}.4f}  "
+              f"{none_p:>{C}.4f} {none_r:>{C}.4f} {none_f1:>{C}.4f}  "
+              f"{mac_p:>{C}.4f} {mac_r:>{C}.4f} {mac_f1:>{C}.4f}  "
+              f"{acc_str}")
 
-    _row("SS (combined label)",    gss_p,    gss_r,    gss_f1,    gss_nf1,  gss_mf1,  gss_accuracy)
-    _row("  └ Problem only",       gprob_p,  gprob_r,  gprob_f1,  gprob_nf1,gprob_mf1)
-    _row("  └ Sign/Symptom only",  gssonly_p,gssonly_r,gssonly_f1,gso_nf1,  gso_mf1)
-    _row("Intervention (combined)",gi_p,     gi_r,     gi_f1,     gi_nf1,   gi_mf1,   gint_accuracy)
-    _row("  └ Category only",      gcat_p,   gcat_r,   gcat_f1,   gcat_nf1, gcat_mf1)
-    _row("  └ Target only",        gtgt_p,   gtgt_r,   gtgt_f1,   gtgt_nf1, gtgt_mf1)
+    _row("SS (combined label)",
+         gss_p,    gss_r,    gss_f1,
+         gss_np,   gss_nr,   gss_nf1,
+         gss_mp,   gss_mr,   gss_mf1,   gss_accuracy)
+    _row("  └ Problem only",
+         gprob_p,  gprob_r,  gprob_f1,
+         gprob_np, gprob_nr, gprob_nf1,
+         gprob_mp, gprob_mr, gprob_mf1)
+    _row("  └ Sign/Symptom only",
+         gssonly_p,gssonly_r,gssonly_f1,
+         gso_np,   gso_nr,   gso_nf1,
+         gso_mp,   gso_mr,   gso_mf1)
+    _row("Intervention (combined)",
+         gi_p,     gi_r,     gi_f1,
+         gi_np,    gi_nr,    gi_nf1,
+         gi_mp,    gi_mr,    gi_mf1,    gint_accuracy)
+    _row("  └ Category only",
+         gcat_p,   gcat_r,   gcat_f1,
+         gcat_np,  gcat_nr,  gcat_nf1,
+         gcat_mp,  gcat_mr,  gcat_mf1)
+    _row("  └ Target only",
+         gtgt_p,   gtgt_r,   gtgt_f1,
+         gtgt_np,  gtgt_nr,  gtgt_nf1,
+         gtgt_mp,  gtgt_mr,  gtgt_mf1)
 
-    print(f"{'-'*88}")
+    print(f"{'-'*TW}")
     print(f"Macro SS F1 (sheet avg):  {round(_macro('ss_f1'),4):.4f}   "
           f"(ss_only: {round(_macro('ss_only_f1'),4):.4f})")
     print(f"Macro Int F1 (sheet avg): {round(_macro('int_f1'),4):.4f}   "
           f"(target:  {round(_macro('tgt_f1'),4):.4f})")
     print(f"TP/FP/FN/TN (SS):   {global_ss_tp}/{global_ss_fp}/{global_ss_fn}/{global_ss_tn}  Accuracy={gss_accuracy:.4f}")
     print(f"TP/FP/FN/TN (Int):  {global_i_tp}/{global_i_fp}/{global_i_fn}/{global_i_tn}  Accuracy={gint_accuracy:.4f}")
-    print(f"{'='*88}")
+    print(f"{'='*TW}")
     print(f"Saved: s3://{S3_BUCKET}/{results_key}")
 
     return summary
