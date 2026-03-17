@@ -1593,12 +1593,42 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
 # double-counting shared patient turns.
 # ══════════════════════════════════════════════════════════════════════════════
 
+_GT_CATEGORY_PREFIXES = [
+    "Health Teaching, Guidance, and Counseling",
+    "Teaching, Guidance, and Counseling",
+    "Treatments and Procedures",
+    "Case Management",
+    "Surveillance",
+]
+_GT_CATEGORY_CANONICAL = {
+    "Health Teaching, Guidance, and Counseling": "Teaching, Guidance, and Counseling",
+}
+_NURSE_SPK_CODES = {"s2", "n", "nurse", "rn", "clinician", "s1"}
+
+
+def _gt_label_to_category(label: str) -> str:
+    """Extract the Omaha category from a ground-truth label like 'Surveillance_wound care'."""
+    for prefix in _GT_CATEGORY_PREFIXES:
+        if label.startswith(prefix):
+            return _GT_CATEGORY_CANONICAL.get(prefix, prefix)
+    # Fallback: everything before the first underscore
+    cat = label.split("_", 1)[0].strip()
+    return _GT_CATEGORY_CANONICAL.get(cat, cat)
+
+
 def compute_time_distribution(df_out: pd.DataFrame) -> dict:
     """
     Compute row-level time distribution for one conversation sheet.
 
+    Auto-detects data source:
+      - LLM results  (omaha_sagemaker.py output): uses LLM_understand_raw for
+        speaker and Pred_I_1_category for intervention category.
+      - Ground-truth annotation file             : uses Spk/Speaker column for
+        speaker and OS_I_1 (first GT label) for intervention category.
+
     Returns a dict with:
-        total_rows, nurse_rows, patient_rows, unclear_rows, nurse_pct
+        total_rows, nurse_rows, patient_rows, unclear_rows, nurse_pct,
+        data_source  ("llm" | "groundtruth")
         label_only / next_nurse / fixed_2 / full_exchange  →  each contains:
             total_int_rows   : rows attributed to any intervention
             int_pct_of_nurse : those rows as % of nurse_rows
@@ -1608,16 +1638,39 @@ def compute_time_distribution(df_out: pd.DataFrame) -> dict:
     if n == 0:
         return {}
 
+    cols = set(df_out.columns)
+
+    # ── Detect data source ────────────────────────────────────────────────────
+    has_llm_col = "LLM_understand_raw" in cols
+    has_pred_col = "Pred_I_1_category" in cols
+    has_gt_col   = any(c in cols for c in ("OS_I_1", "OS_I_2", "OS_I_3"))
+    has_spk_col  = "Spk" in cols or "Speaker" in cols
+
+    use_llm = has_llm_col and has_pred_col
+    data_source = "llm" if use_llm else "groundtruth"
+
+    spk_col = "Spk" if "Spk" in cols else ("Speaker" if "Speaker" in cols else None)
+
     # ── Parse speaker for every row ───────────────────────────────────────────
     speakers = []
     for _, row in df_out.iterrows():
-        raw = str(row.get("LLM_understand_raw", "")).lower()
-        if "speaker: clinician" in raw or "speaker: nurse" in raw:
-            speakers.append("nurse")
-        elif "speaker: patient" in raw:
-            speakers.append("patient")
+        if use_llm:
+            raw = str(row.get("LLM_understand_raw", "")).lower()
+            if "speaker: clinician" in raw or "speaker: nurse" in raw:
+                speakers.append("nurse")
+            elif "speaker: patient" in raw:
+                speakers.append("patient")
+            else:
+                speakers.append("unclear")
         else:
-            speakers.append("unclear")   # close/admin turns → nurse time
+            # Ground-truth mode: use Spk/Speaker column
+            spk = str(row.get(spk_col, "") if spk_col else "").strip().lower()
+            if spk in _NURSE_SPK_CODES:
+                speakers.append("nurse")
+            elif spk and spk not in ("", "nan"):
+                speakers.append("patient")
+            else:
+                speakers.append("unclear")   # blank/unknown → nurse time
 
     # ── Baseline counts ───────────────────────────────────────────────────────
     total_rows   = n
@@ -1626,14 +1679,20 @@ def compute_time_distribution(df_out: pd.DataFrame) -> dict:
     unclear_rows = sum(1 for s in speakers if s == "unclear")
     nurse_pct    = round(nurse_rows / total_rows * 100, 1) if total_rows else 0.0
 
-    # ── Find labeled rows and their predicted intervention category ───────────
-    # Use Pred_I_1_category (first predicted intervention) as the category key.
+    # ── Find labeled rows and their intervention category ────────────────────
     labeled = {}   # {row_index: category_str}
-    rows_list = list(df_out.iterrows())
-    for i, (_, row) in enumerate(rows_list):
-        cat = str(row.get("Pred_I_1_category", "")).strip()
-        if cat and cat.lower() not in ("", "none", "nan"):
-            labeled[i] = cat
+    for i, (_, row) in enumerate(df_out.iterrows()):
+        if use_llm:
+            cat = str(row.get("Pred_I_1_category", "")).strip()
+            if cat and cat.lower() not in ("", "none", "nan"):
+                labeled[i] = cat
+        else:
+            # Ground-truth mode: check OS_I_1 / OS_I_2 / OS_I_3
+            for gt_col in ("OS_I_1", "OS_I_2", "OS_I_3"):
+                lbl = str(row.get(gt_col, "")).strip()
+                if lbl and lbl.lower() not in ("", "none", "nan"):
+                    labeled[i] = _gt_label_to_category(lbl)
+                    break   # use first non-empty GT label only
 
     def _build_windows(strategy: str) -> dict:
         """
@@ -1707,6 +1766,7 @@ def compute_time_distribution(df_out: pd.DataFrame) -> dict:
         "patient_rows":  patient_rows,
         "unclear_rows":  unclear_rows,
         "nurse_pct":     nurse_pct,
+        "data_source":   data_source,
         "label_only":    _summarise(_build_windows("label_only")),
         "next_nurse":    _summarise(_build_windows("next_nurse")),
         "fixed_2":       _summarise(_build_windows("fixed_2")),
