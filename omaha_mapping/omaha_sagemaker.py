@@ -160,7 +160,7 @@ MODELS_TO_COMPARE  = [
 ]
 
 # ── Pipeline settings ─────────────────────────────────────────────────────────
-CONTEXT_WINDOW  = 2    # rows before/after current turn to include as context
+CONTEXT_WINDOW  = 3    # rows before/after current turn to include as context
 TOP_K_RETRIEVAL = 15   # number of Omaha options sent to the LLM
 FUZZY_THRESHOLD = 80   # minimum fuzz.ratio for a match (0–100)
 
@@ -613,13 +613,21 @@ Instructions:
 3. From the provided options, select the single MOST RELEVANT classification that best matches the query’s domain, problem, and signs/symptoms.
 4. IMPORTANT: Your final answer MUST USE THE EXACT WORDING from one of the provided options without any modifications, rephrasing, or synonyms. For example, if the query uses a synonym like "swollen," you MUST map it to "edema" exactly as it appears in the options.
 5. EXTRA RULE: If the query contains "swollen" or any variant (e.g., "swelling"), choose the option that lists "edema" with the "Circulation" problem in the Signs/Symptoms field. Do not substitute any other term such as "inflammation."
-6. DO NOT OVERINFER. If the query does not clearly describe a healthcare problem, lacks sufficient information to support the presence of a healthcare issue, or if no option closely aligns with the query, respond with "No sufficient information available." For example, vague or ambiguous statements such as "I didn't know. I heard voices." should not be interpreted as a healthcare problem.
-7. If the query is phrased as a question, assume that no healthcare problem can be confirmed and respond with "No sufficient information available."
+6. DO NOT OVERINFER. If the query does not clearly describe a healthcare problem, lacks sufficient information to support the presence of a healthcare issue, respond with "None." For example, vague or ambiguous statements such as "I didn't know. I heard voices." should not be interpreted as a healthcare problem. 
 8. If the query includes a blood pressure reading, glucose level, or any other medical measurement, determine whether the value is abnormal. If abnormal, respond with the corresponding problem mapped to the Omaha System; if normal, respond with "No sufficient information available."
 9. NORMAL BEHAVIOR RULE: If the query describes typical, expected behavior or general administrative/healthcare information (e.g., exercising, working late, needing rest or sleep, test costs, scheduling, date inquiries, availability, payment details) without any indication of abnormal symptoms, distress, or dysfunction, then no healthcare problem is identified. However, if the query simply states a symptom (e.g., "I am tired today") without additional context indicating normal behavior, treat it as a potential healthcare problem only if supported by corresponding classification options.
 10. NEGATIVE QUERY RULE: If the overall tone or content of the query is purely administrative, factual, or routine (e.g., inquiries about dates, insurance paperwork, normal vital sign values, casual remarks about sleep or work schedules) or includes negative phrasing that does not describe a specific abnormal health condition, respond with "No sufficient information available."
-
-11. CHAIN-OF-THOUGHT: In your final output, include a brief chain-of-thought explanation immediately following your classification. This explanation should outline the key reasoning steps without revealing sensitive internal processing details.
+11. SKIN / WOUND PRIORITY RULE:
+   - If the query explicitly mentions "wound", "ulcer", "blister", "pressure ulcer", "skin opening", "open area", or "sore", and no stronger evidence supports another specific skin subtype, choose:
+     Domain: Physiological Domain
+     Problem: Skin
+     Signs/Symptoms: lesion/pressure ulcer
+   - Do NOT choose bruising, rash, delayed incisional healing, or other specific skin signs/symptoms unless those exact ideas are explicitly supported by the query.
+12. RESPIRATORY SOUND RULE: If the query mentions wheezing, crackles, rhonchi, or abnormal lung sounds, classify as Signs/Symptoms "abnormal breath sounds", rather than "noisy respirations".
+13. Make the classficaiton only when there is direct evidence. For example, mention of antibiotics alone does NOT confirm infection. Do NOT classify as infection unless infection or clear infectious symptoms are explicitly stated.
+14. PAIN EXPRESSION RULE: If the query explicitly expresses discomfort or fear of pain (for example: “that hurts”, “ouch”, “please be gentle”, “don’t hurt me”, “that’s painful”), classify as Pain_expresses discomfort/pain.
+These statements are considered direct evidence of discomfort or pain and should not be treated as overinference.
+15. CHAIN-OF-THOUGHT: In your final output, include a brief chain-of-thought explanation immediately following your classification. This explanation should outline the key reasoning steps without revealing sensitive internal processing details.
 
 Query:
 {query}
@@ -630,12 +638,23 @@ Options:
 Response format:
 If a relevant match is found, provide ONLY ONE classification in this format:
 
-Domain: [Exact match]
-Problem: [Exact match]
-Signs/Symptoms: [Exact match]
+Domain: [Exact match as provided]
+Problem: [Exact match as provided]
+Signs/Symptoms: [Exact match as provided]
+Chain-of-Thought: [Brief explaniaiton]
 
 If no healthcare problem is identified or no close match is found:
 NONE
+
+Response format:
+If a relevant match is found, provide ONLY ONE classification using the exact wording from the selected option in this format:
+Domain: [Exact match as provided]
+Problem: [Exact match as provided]
+Signs/Symptoms: [Exact match as provided]
+Chain-of-Thought: [A brief explanation of the reasoning process.]
+
+If no healthcare problem is identified or no close match is found:
+None
 
 Example Queries and Responses:
 Example 1:
@@ -649,7 +668,7 @@ Chain-of-Thought: The query mentioned a high blood pressure reading (145/92, whi
 Example 2:
 Query: "You have the shower?"
 Response:
-No sufficient information available
+None
 Chain-of-Thought: The query is phrased as a question, so no specific healthcare-related information can be confirmed.
 
 Example 3:
@@ -661,7 +680,19 @@ Signs/Symptoms: abnormal breath pattern
 Chain-of-Thought: "cannot breath" here is interpreted as an irregular or abnormal breathing pattern rather than a complete inability to breathe independently (which would typically require mechanical assistance). Therefore, the best matching option is "abnormal breath pattern." Do not change the wording.
 
 
+Example 4:
+Query: "How was your wound?"
+Response:
+Domain: Physiological Domain
+Problem: Skin
+Signs/Symptoms: lesion/pressure ulcer
+Chain-of-Thought: This is a general description, there is no indicator of specific cuase, such as "delayed incisional healing."
+
+Example 5:
+Query: "Nurse: I see all kinds of wounds."
+Response: None
 """
+
 
 
 
@@ -712,27 +743,44 @@ ACTION TYPE DEFINITIONS
 
 SURVEILLANCE
 Monitoring, assessing, measuring, reviewing status.
+ASSESSMENT RULE: If the clinician says they will "check", "assess", "listen to", "look at", or "examine"
+a body system or wound, this indicates monitoring. These actions are classified as: → Surveillance
 
 Examples
-- checking blood pressure, pulse, oxygen
+- checking blood pressure, pulse, oxygen, breathing, Respiratory status. Vital sign and monitoring values are Surveillance | signs/symptoms-physical.
 - assessing heart or lungs
 - reviewing medications
 - assessing wound
+- Medication assessment questions are also considered Surveillance.
+
 
 Common mappings
-measuring blood pressure / pulse / oxygen / temperature
+Vital sign measurements or reported vital sign values are classified as:
 → Surveillance | signs/symptoms-physical
 
-checking / assessing heart or lungs (auscultating, listening to heart/lungs)
+Examples of vital sign values include:
+- blood pressure readings (e.g., "144/82", "120 over 80")
+- pulse values (e.g., "pulse is 80")
+- oxygen saturation values (e.g., "oxygen is 96")
+- temperature values
+Even if the clinician only states the value without saying "I measured", the action implies monitoring.
+
+RESPIRATORY ASSESSMENT RULE: When the clinician asks the patient to breathe during an examination 
+(e.g., “breathe”, “deep breath”, “again breathe”, “good”, “clear”), 
+this indicates listening to lung sounds. This is an assessment action and must be classified as: → Surveillance | signs/symptoms-physical
+Do NOT classify this as respiratory care or cardiac care, breathing techniques, or respiratory therapy unless the clinician is actively providing treatment or training.
+
+"I'm going to check your heart and lungs. And breathe. Very good. Again breathe. Clear.
+1. Category: Surveillance | Target: signs/symptoms-physical"
 → Surveillance | signs/symptoms-physical
-NOTE: "cardiac care" is NEVER the correct target for assessment of heart/lung sounds.
-      "signs/symptoms-physical" is the correct target whenever the nurse is monitoring
-      or assessing a patient's physical signs, including heart and lung sounds.
+
+"I'm going to check the wound."
+→ Surveillance | dressing change/wound care
 
 checking wound
 → Surveillance | dressing change/wound care
 
-reviewing medications
+Asking about current medication use, adherence, or whether medications are being taken (e.g.,"So are you taking any medications?")
 → Surveillance | medication administration
 
 
@@ -773,12 +821,17 @@ Examples
 - coordinating care
 
 Example mapping
-calling doctor about medication
-→ Case Management | medication coordination/ordering
-
+If the clinician is giving contact instructions, offering follow-up help, or directing the patient to call the nurse/office:
+- "Call me if you have problems."
+- "Call me, call Lillian. We'll take it from there."
+- "Here is my phone number."
+- "This is the office phone."
+- "We can all communicate on the phone."
+classify as → Case Management | other
 
 MULTI-LABEL RULE
-Use multiple interventions only if the CURRENT TURN clearly contains multiple actions.
+Use up to three interventions only if the CURRENT TURN clearly contains multiple actions. Don't repeate the inteventions and targets.
+Be conversative for multiple interventions. If not sure for multiple, then remove these unsured.  
 
 NONE RULE
 Return NONE if the turn contains no clinical intervention.
@@ -796,50 +849,31 @@ or
 
 NONE
 
-
 EXAMPLES
 
-Query:
-"I will check your blood pressure and pulse."
+Query:"And breathe. Very good. Again breathe. Clear. A little wheezing."
+1. Category: Surveillance | Target: signs/symptoms-physical"
 
-1. Category: Surveillance | Target: signs/symptoms-physical
 
-Query:
-"I'm going to check your heart and lungs."
-
-1. Category: Surveillance | Target: signs/symptoms-physical
-
-Query:
-"Let me listen to your lungs and check your heart rate."
-
-1. Category: Surveillance | Target: signs/symptoms-physical
-
-Query:
-"Let me clean the wound and place a new bandage."
-
+Query: "Let me clean the wound and place a new bandage."
 1. Category: Treatments and Procedures | Target: dressing change/wound care
 
-Query:
-"You should clean the wound with saline and watch for redness."
-
+Query:"You should clean the wound with saline and watch for redness."
 1. Category: Teaching, Guidance, and Counseling | Target: dressing change/wound care
 
-Query:
-"I will call your doctor to arrange the antibiotic prescription."
-
+Query:"I will call your doctor to arrange the antibiotic prescription."
 1. Category: Case Management | Target: medication coordination/ordering
 
-Query: "So over the weekend, I go to take a shower with soap and water."
+Query: "So over the weekend, you need to go to take a shower with soap and water."
 1. Category: Teaching, Guidance, and Counseling | Target: personal hygiene
 
-Query:
-"Okay."
-
-NONE
+Query: "70 is the pulse. 144/82. Okay. A little up."
+1. Category: Surveillance | Target: signs/symptoms-physical"
 
 Query: "Oh, let me see. For five days."
 NONE
 """
+
 
 
 def understand_turn(query: str, context: str, llm_name: str) -> str:
