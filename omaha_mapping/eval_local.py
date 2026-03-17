@@ -136,24 +136,87 @@ def _print_errors(df_out):
     print(sep)
 
 
-def print_metrics(metrics, label):
-    ss_p, ss_r, ss_f1 = om.compute_prf(metrics["ss_tp"], metrics["ss_fp"], metrics["ss_fn"])
-    i_p,  i_r,  i_f1  = om.compute_prf(metrics["int_tp"], metrics["int_fp"], metrics["int_fn"])
-    so_p, so_r, so_f1 = om.compute_prf(metrics["ss_only_tp"], metrics["ss_only_fp"], metrics["ss_only_fn"])
-    t_p,  t_r,  t_f1  = om.compute_prf(metrics["tgt_tp"], metrics["tgt_fp"], metrics["tgt_fn"])
+def _prf_row(prefix, p, r, f1, tp=None, fp=None, fn=None, tn=None):
+    counts = ""
+    if tp is not None: counts += f"  TP={tp} FP={fp} FN={fn}"
+    if tn is not None: counts += f"  TN={tn}"
+    return f"  {prefix:<18}│ P={p:.3f}  R={r:.3f}  F1={f1:.3f}{counts}"
 
-    w = 60
+
+def _sub_section(title, pos_p, pos_r, pos_f1, none_p, none_r, none_f1,
+                 macro_p, macro_r, macro_f1, tp, fp, fn, tn):
+    lines = [f"  {title}"]
+    lines.append(f"    Positive      │ P={pos_p:.3f}  R={pos_r:.3f}  F1={pos_f1:.3f}"
+                 f"  TP={tp} FP={fp} FN={fn}")
+    lines.append(f"    None class    │ P={none_p:.3f}  R={none_r:.3f}  F1={none_f1:.3f}"
+                 f"  TN={tn}")
+    lines.append(f"    ★ Macro       │ P={macro_p:.3f}  R={macro_r:.3f}  F1={macro_f1:.3f}")
+    return "\n".join(lines)
+
+
+def print_metrics(metrics, label):
+    w = 68
     print(f"\n{'═'*w}")
     print(f"  {label}")
-    print(f"{'═'*w}")
-    print(f"  SS  combined  │ P={ss_p:.3f}  R={ss_r:.3f}  F1={ss_f1:.3f}  "
-          f"TP={metrics['ss_tp']} FP={metrics['ss_fp']} FN={metrics['ss_fn']}")
-    print(f"  SS  sign/sym  │ P={so_p:.3f}  R={so_r:.3f}  F1={so_f1:.3f}")
-    print(f"  INT combined  │ P={i_p:.3f}  R={i_r:.3f}  F1={i_f1:.3f}  "
-          f"TP={metrics['int_tp']} FP={metrics['int_fp']} FN={metrics['int_fn']}")
-    print(f"  INT target    │ P={t_p:.3f}  R={t_r:.3f}  F1={t_f1:.3f}")
-    print(f"{'═'*w}")
-    return ss_f1, i_f1
+
+    # ── SIGNS / SYMPTOMS ─────────────────────────────────────────────────────
+    print(f"\n  SIGNS / SYMPTOMS")
+    print(_prf_row("Positive class",
+                   metrics["ss_precision"], metrics["ss_recall"], metrics["ss_f1"],
+                   tp=metrics["ss_tp"], fp=metrics["ss_fp"], fn=metrics["ss_fn"]))
+    print(_prf_row("None class",
+                   metrics["ss_none_p"], metrics["ss_none_r"], metrics["ss_none_f1"],
+                   tn=metrics["ss_tn"]))
+    print(_prf_row("★ Macro",
+                   metrics["ss_macro_p"], metrics["ss_macro_r"], metrics["ss_macro_f1"]))
+    print(f"  {'Accuracy':<18}│ {metrics['ss_accuracy']:.3f}"
+          f"  ({metrics['ss_tp']+metrics['ss_tn']} / "
+          f"{metrics['ss_tp']+metrics['ss_fp']+metrics['ss_fn']+metrics['ss_tn']} turns)")
+
+    print()
+    print(_sub_section("Problem only",
+                       metrics["prob_precision"],    metrics["prob_recall"],    metrics["prob_f1"],
+                       metrics["prob_none_p"],        metrics["prob_none_r"],    metrics["prob_none_f1"],
+                       metrics["prob_macro_p"],       metrics["prob_macro_r"],   metrics["prob_macro_f1"],
+                       metrics["prob_tp"], metrics["prob_fp"], metrics["prob_fn"], metrics["prob_tn"]))
+
+    print()
+    print(_sub_section("Sign/Symptom only",
+                       metrics["ss_only_precision"], metrics["ss_only_recall"], metrics["ss_only_f1"],
+                       metrics["ss_only_none_p"],     metrics["ss_only_none_r"], metrics["ss_only_none_f1"],
+                       metrics["ss_only_macro_p"],    metrics["ss_only_macro_r"],metrics["ss_only_macro_f1"],
+                       metrics["ss_only_tp"], metrics["ss_only_fp"], metrics["ss_only_fn"], metrics["ss_only_tn"]))
+
+    # ── INTERVENTIONS ────────────────────────────────────────────────────────
+    print(f"\n  INTERVENTIONS")
+    print(_prf_row("Positive class",
+                   metrics["int_precision"], metrics["int_recall"], metrics["int_f1"],
+                   tp=metrics["int_tp"], fp=metrics["int_fp"], fn=metrics["int_fn"]))
+    print(_prf_row("None class",
+                   metrics["int_none_p"], metrics["int_none_r"], metrics["int_none_f1"],
+                   tn=metrics["int_tn"]))
+    print(_prf_row("★ Macro",
+                   metrics["int_macro_p"], metrics["int_macro_r"], metrics["int_macro_f1"]))
+    print(f"  {'Accuracy':<18}│ {metrics['int_accuracy']:.3f}"
+          f"  ({metrics['int_tp']+metrics['int_tn']} / "
+          f"{metrics['int_tp']+metrics['int_fp']+metrics['int_fn']+metrics['int_tn']} turns)")
+
+    print()
+    print(_sub_section("Category only",
+                       metrics["cat_precision"], metrics["cat_recall"], metrics["cat_f1"],
+                       metrics["cat_none_p"],     metrics["cat_none_r"], metrics["cat_none_f1"],
+                       metrics["cat_macro_p"],    metrics["cat_macro_r"],metrics["cat_macro_f1"],
+                       metrics["cat_tp"], metrics["cat_fp"], metrics["cat_fn"], metrics["cat_tn"]))
+
+    print()
+    print(_sub_section("Target only",
+                       metrics["tgt_precision"], metrics["tgt_recall"], metrics["tgt_f1"],
+                       metrics["tgt_none_p"],     metrics["tgt_none_r"], metrics["tgt_none_f1"],
+                       metrics["tgt_macro_p"],    metrics["tgt_macro_r"],metrics["tgt_macro_f1"],
+                       metrics["tgt_tp"], metrics["tgt_fp"], metrics["tgt_fn"], metrics["tgt_tn"]))
+
+    print(f"\n{'═'*w}")
+    return metrics["ss_f1"], metrics["int_f1"]
 
 
 # ── main ───────────────────────────────────────────────────────────────────

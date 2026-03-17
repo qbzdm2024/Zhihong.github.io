@@ -1311,6 +1311,26 @@ def compute_prf(tp: int, fp: int, fn: int) -> tuple[float, float, float]:
     return round(precision, 4), round(recall, 4), round(f1, 4)
 
 
+def compute_full_metrics(tp: int, fp: int, fn: int, tn: int) -> tuple:
+    """
+    Compute positive-class, negative-class (None), and macro-averaged P/R/F1.
+
+    For the None class:  TP_none=TN, FP_none=FN, FN_none=FP
+    Macro averages the two classes equally.
+
+    Returns:
+        (pos_p, pos_r, pos_f1,
+         none_p, none_r, none_f1,
+         macro_p, macro_r, macro_f1)
+    """
+    pos_p,  pos_r,  pos_f1  = compute_prf(tp, fp, fn)
+    none_p, none_r, none_f1 = compute_prf(tn, fn, fp)   # swap FP↔FN for None class
+    macro_p  = round((pos_p  + none_p)  / 2, 4)
+    macro_r  = round((pos_r  + none_r)  / 2, 4)
+    macro_f1 = round((pos_f1 + none_f1) / 2, 4)
+    return pos_p, pos_r, pos_f1, none_p, none_r, none_f1, macro_p, macro_r, macro_f1
+
+
 def evaluate_sheet(df_out: pd.DataFrame) -> dict:
     """
     Compute P/R/F1 for SS and Interventions from one processed sheet.
@@ -1329,12 +1349,12 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
 
     # ── SS component counters (problem / ss-only only — domain omitted because
     #    ground-truth labels are always "Problem_SS", never "Domain_Problem_SS") ──
-    prob_tp = prob_fp = prob_fn = 0
-    ss_only_tp = ss_only_fp = ss_only_fn = 0
+    prob_tp = prob_fp = prob_fn = prob_tn = 0
+    ss_only_tp = ss_only_fp = ss_only_fn = ss_only_tn = 0
 
     # ── Intervention component counters (category / target) ───────────────────
-    cat_tp = cat_fp = cat_fn = 0
-    tgt_tp = tgt_fp = tgt_fn = 0
+    cat_tp = cat_fp = cat_fn = cat_tn = 0
+    tgt_tp = tgt_fp = tgt_fn = tgt_tn = 0
 
     # ── Sample GT labels for diagnosis (logged once) ──────────────────────────
     gt_sample_logged = False
@@ -1408,13 +1428,19 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             if human_problems or pred_problems:
                 tp2, fp2, fn2 = row_level_match(pred_problems, human_problems)
                 prob_tp += tp2; prob_fp += fp2; prob_fn += fn2
+            else:
+                prob_tn += 1
 
             if human_ss_only or pred_ss_only:
                 tp2, fp2, fn2 = row_level_match(pred_ss_only, human_ss_only)
                 ss_only_tp += tp2; ss_only_fp += fp2; ss_only_fn += fn2
+            else:
+                ss_only_tn += 1
 
         else:
-            ss_tn += 1   # both human and pred are NONE → true negative
+            ss_tn += 1        # both human and pred are NONE → true negative
+            prob_tn += 1      # no SS labels → no problem component either
+            ss_only_tn += 1   # no SS labels → no sign/symptom component either
 
         # ── Interventions ────────────────────────────────────────────────────
         human_int = [str(row[f"OS_I_{j}"]).strip()
@@ -1435,7 +1461,9 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             tp, fp, fn = row_level_match(pred_int_labels, human_int)
             i_tp += tp; i_fp += fp; i_fn += fn
         else:
-            i_tn += 1    # both human and pred are NONE → true negative
+            i_tn += 1       # both human and pred are NONE → true negative
+            cat_tn += 1     # no INT labels → no category component either
+            tgt_tn += 1     # no INT labels → no target component either
 
         if human_int or pred_int_labels:
             human_cats = []
@@ -1451,17 +1479,39 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
             if human_cats or pred_cats:
                 tp2, fp2, fn2 = row_level_match(pred_cats, human_cats)
                 cat_tp += tp2; cat_fp += fp2; cat_fn += fn2
+            else:
+                cat_tn += 1
 
             if human_tgts or pred_tgts:
                 tp2, fp2, fn2 = row_level_match(pred_tgts, human_tgts)
                 tgt_tp += tp2; tgt_fp += fp2; tgt_fn += fn2
+            else:
+                tgt_tn += 1
 
-    ss_p,       ss_r,       ss_f1       = compute_prf(ss_tp,      ss_fp,      ss_fn)
-    int_p,      int_r,      int_f1      = compute_prf(i_tp,       i_fp,       i_fn)
-    prob_p,     prob_r,     prob_f1     = compute_prf(prob_tp,    prob_fp,    prob_fn)
-    ss_only_p,  ss_only_r,  ss_only_f1  = compute_prf(ss_only_tp, ss_only_fp, ss_only_fn)
-    cat_p,      cat_r,      cat_f1      = compute_prf(cat_tp,     cat_fp,     cat_fn)
-    tgt_p,      tgt_r,      tgt_f1      = compute_prf(tgt_tp,     tgt_fp,     tgt_fn)
+    # ── Positive / None / Macro P·R·F1 for every metric ─────────────────────
+    (ss_p,   ss_r,   ss_f1,
+     ss_np,  ss_nr,  ss_nf1,
+     ss_mp,  ss_mr,  ss_mf1)  = compute_full_metrics(ss_tp,      ss_fp,      ss_fn,      ss_tn)
+
+    (int_p,  int_r,  int_f1,
+     int_np, int_nr, int_nf1,
+     int_mp, int_mr, int_mf1) = compute_full_metrics(i_tp,       i_fp,       i_fn,       i_tn)
+
+    (prob_p,    prob_r,    prob_f1,
+     prob_np,   prob_nr,   prob_nf1,
+     prob_mp,   prob_mr,   prob_mf1)  = compute_full_metrics(prob_tp,    prob_fp,    prob_fn,    prob_tn)
+
+    (so_p,   so_r,   so_f1,
+     so_np,  so_nr,  so_nf1,
+     so_mp,  so_mr,  so_mf1)  = compute_full_metrics(ss_only_tp, ss_only_fp, ss_only_fn, ss_only_tn)
+
+    (cat_p,  cat_r,  cat_f1,
+     cat_np, cat_nr, cat_nf1,
+     cat_mp, cat_mr, cat_mf1) = compute_full_metrics(cat_tp,     cat_fp,     cat_fn,     cat_tn)
+
+    (tgt_p,  tgt_r,  tgt_f1,
+     tgt_np, tgt_nr, tgt_nf1,
+     tgt_mp, tgt_mr, tgt_mf1) = compute_full_metrics(tgt_tp,     tgt_fp,     tgt_fn,     tgt_tn)
 
     # Accuracy: (TP + TN) / (TP + FP + FN + TN)
     # Includes correctly-classified NONE rows as correct predictions.
@@ -1471,25 +1521,52 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
     int_accuracy = round((i_tp  + i_tn)  / int_total, 4) if int_total > 0 else 0.0
 
     return {
-        # Combined labels
-        "ss_precision":  ss_p,  "ss_recall":  ss_r,  "ss_f1":  ss_f1,
+        # ── Signs / Symptoms — combined labels ───────────────────────────────
+        # Positive class (backward-compatible keys)
+        "ss_precision": ss_p,  "ss_recall": ss_r,  "ss_f1": ss_f1,
         "ss_tp": ss_tp, "ss_fp": ss_fp, "ss_fn": ss_fn, "ss_tn": ss_tn,
         "ss_accuracy": ss_accuracy,
         "ss_relevant_rows": ss_relevant_rows,
+        # None class
+        "ss_none_p": ss_np,  "ss_none_r": ss_nr,  "ss_none_f1": ss_nf1,
+        # Macro
+        "ss_macro_p": ss_mp, "ss_macro_r": ss_mr, "ss_macro_f1": ss_mf1,
+
+        # ── Interventions — combined labels ──────────────────────────────────
+        # Positive class (backward-compatible keys)
         "int_precision": int_p, "int_recall": int_r, "int_f1": int_f1,
         "int_tp": i_tp, "int_fp": i_fp, "int_fn": i_fn, "int_tn": i_tn,
         "int_accuracy": int_accuracy,
         "int_relevant_rows": int_relevant_rows,
-        # SS components (domain omitted — GT is always Problem_SS, never Domain_Problem_SS)
-        "prob_precision":    prob_p,    "prob_recall":    prob_r,    "prob_f1":    prob_f1,
-        "prob_tp": prob_tp, "prob_fp": prob_fp, "prob_fn": prob_fn,
-        "ss_only_precision": ss_only_p, "ss_only_recall": ss_only_r, "ss_only_f1": ss_only_f1,
+        # None class
+        "int_none_p": int_np, "int_none_r": int_nr, "int_none_f1": int_nf1,
+        # Macro
+        "int_macro_p": int_mp, "int_macro_r": int_mr, "int_macro_f1": int_mf1,
+
+        # ── SS components ────────────────────────────────────────────────────
+        # Problem (backward-compatible keys + None/Macro)
+        "prob_precision": prob_p, "prob_recall": prob_r, "prob_f1": prob_f1,
+        "prob_tp": prob_tp, "prob_fp": prob_fp, "prob_fn": prob_fn, "prob_tn": prob_tn,
+        "prob_none_p": prob_np, "prob_none_r": prob_nr, "prob_none_f1": prob_nf1,
+        "prob_macro_p": prob_mp, "prob_macro_r": prob_mr, "prob_macro_f1": prob_mf1,
+        # Sign/Symptom only (backward-compatible keys + None/Macro)
+        "ss_only_precision": so_p, "ss_only_recall": so_r, "ss_only_f1": so_f1,
         "ss_only_tp": ss_only_tp, "ss_only_fp": ss_only_fp, "ss_only_fn": ss_only_fn,
-        # Intervention components
+        "ss_only_tn": ss_only_tn,
+        "ss_only_none_p": so_np, "ss_only_none_r": so_nr, "ss_only_none_f1": so_nf1,
+        "ss_only_macro_p": so_mp, "ss_only_macro_r": so_mr, "ss_only_macro_f1": so_mf1,
+
+        # ── Intervention components ───────────────────────────────────────────
+        # Category (backward-compatible keys + None/Macro)
         "cat_precision": cat_p, "cat_recall": cat_r, "cat_f1": cat_f1,
-        "cat_tp": cat_tp, "cat_fp": cat_fp, "cat_fn": cat_fn,
+        "cat_tp": cat_tp, "cat_fp": cat_fp, "cat_fn": cat_fn, "cat_tn": cat_tn,
+        "cat_none_p": cat_np, "cat_none_r": cat_nr, "cat_none_f1": cat_nf1,
+        "cat_macro_p": cat_mp, "cat_macro_r": cat_mr, "cat_macro_f1": cat_mf1,
+        # Target (backward-compatible keys + None/Macro)
         "tgt_precision": tgt_p, "tgt_recall": tgt_r, "tgt_f1": tgt_f1,
-        "tgt_tp": tgt_tp, "tgt_fp": tgt_fp, "tgt_fn": tgt_fn,
+        "tgt_tp": tgt_tp, "tgt_fp": tgt_fp, "tgt_fn": tgt_fn, "tgt_tn": tgt_tn,
+        "tgt_none_p": tgt_np, "tgt_none_r": tgt_nr, "tgt_none_f1": tgt_nf1,
+        "tgt_macro_p": tgt_mp, "tgt_macro_r": tgt_mr, "tgt_macro_f1": tgt_mf1,
     }
 
 # ══════════════════════════════════════════════════════════════════════════════

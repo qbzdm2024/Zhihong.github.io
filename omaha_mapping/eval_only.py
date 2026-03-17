@@ -73,28 +73,63 @@ def main():
             f"Tgt_F1={metrics['tgt_f1']:.3f}"
         )
 
-    # Aggregate
-    import numpy as np
-    from omaha_sagemaker import compute_prf
+    # Aggregate across all sheets
+    from omaha_sagemaker import compute_full_metrics
 
     def _agg(key):
         return sum(m[key] for m in sheet_metrics)
 
-    ss_p, ss_r, ss_f1     = compute_prf(_agg("ss_tp"),      _agg("ss_fp"),      _agg("ss_fn"))
-    so_p, so_r, so_f1     = compute_prf(_agg("ss_only_tp"), _agg("ss_only_fp"), _agg("ss_only_fn"))
-    i_p,  i_r,  i_f1      = compute_prf(_agg("int_tp"),     _agg("int_fp"),     _agg("int_fn"))
-    t_p,  t_r,  t_f1      = compute_prf(_agg("tgt_tp"),     _agg("tgt_fp"),     _agg("tgt_fn"))
+    def _full(tp_key, fp_key, fn_key, tn_key):
+        return compute_full_metrics(_agg(tp_key), _agg(fp_key), _agg(fn_key), _agg(tn_key))
 
-    print(f"\n{'='*60}")
+    def _prf_row(prefix, pos_p, pos_r, pos_f1, none_p, none_r, none_f1,
+                 macro_p, macro_r, macro_f1, tp=None, fp=None, fn=None, tn=None):
+        counts = ""
+        if tp is not None: counts = f"  TP={tp} FP={fp} FN={fn} TN={tn}"
+        return (f"  {prefix:<20}│ Pos P={pos_p:.3f} R={pos_r:.3f} F1={pos_f1:.3f}"
+                f"  None P={none_p:.3f} R={none_r:.3f} F1={none_f1:.3f}"
+                f"  ★Macro F1={macro_f1:.3f}{counts}")
+
+    (ss_pp, ss_pr, ss_pf, ss_np, ss_nr, ss_nf, ss_mp, ss_mr, ss_mf) = \
+        _full("ss_tp",      "ss_fp",      "ss_fn",      "ss_tn")
+    (so_pp, so_pr, so_pf, so_np, so_nr, so_nf, so_mp, so_mr, so_mf) = \
+        _full("ss_only_tp", "ss_only_fp", "ss_only_fn", "ss_only_tn")
+    (pb_pp, pb_pr, pb_pf, pb_np, pb_nr, pb_nf, pb_mp, pb_mr, pb_mf) = \
+        _full("prob_tp",    "prob_fp",    "prob_fn",    "prob_tn")
+    (i_pp,  i_pr,  i_pf,  i_np,  i_nr,  i_nf,  i_mp,  i_mr,  i_mf)  = \
+        _full("int_tp",     "int_fp",     "int_fn",     "int_tn")
+    (ca_pp, ca_pr, ca_pf, ca_np, ca_nr, ca_nf, ca_mp, ca_mr, ca_mf) = \
+        _full("cat_tp",     "cat_fp",     "cat_fn",     "cat_tn")
+    (t_pp,  t_pr,  t_pf,  t_np,  t_nr,  t_nf,  t_mp,  t_mr,  t_mf)  = \
+        _full("tgt_tp",     "tgt_fp",     "tgt_fn",     "tgt_tn")
+
+    w = 100
+    print(f"\n{'='*w}")
     print(f"AGGREGATE  (threshold={om.FUZZY_THRESHOLD})")
-    print(f"{'='*60}")
-    print(f"SS combined   P={ss_p:.4f}  R={ss_r:.4f}  F1={ss_f1:.4f}")
-    print(f"SS only       P={so_p:.4f}  R={so_r:.4f}  F1={so_f1:.4f}")
-    print(f"Int combined  P={i_p:.4f}   R={i_r:.4f}   F1={i_f1:.4f}")
-    print(f"Int target    P={t_p:.4f}   R={t_r:.4f}   F1={t_f1:.4f}")
-    print(f"{'='*60}")
-    print(f"TP/FP/FN/TN (SS):  {_agg('ss_tp')}/{_agg('ss_fp')}/{_agg('ss_fn')}/{_agg('ss_tn')}")
-    print(f"TP/FP/FN/TN (Int): {_agg('int_tp')}/{_agg('int_fp')}/{_agg('int_fn')}/{_agg('int_tn')}")
+    print(f"{'='*w}")
+
+    print(f"\n  SIGNS / SYMPTOMS")
+    print(_prf_row("Combined labels",
+                   ss_pp, ss_pr, ss_pf, ss_np, ss_nr, ss_nf, ss_mp, ss_mr, ss_mf,
+                   tp=_agg("ss_tp"), fp=_agg("ss_fp"), fn=_agg("ss_fn"), tn=_agg("ss_tn")))
+    print(_prf_row("Problem only",
+                   pb_pp, pb_pr, pb_pf, pb_np, pb_nr, pb_nf, pb_mp, pb_mr, pb_mf,
+                   tp=_agg("prob_tp"), fp=_agg("prob_fp"), fn=_agg("prob_fn"), tn=_agg("prob_tn")))
+    print(_prf_row("Sign/Symptom only",
+                   so_pp, so_pr, so_pf, so_np, so_nr, so_nf, so_mp, so_mr, so_mf,
+                   tp=_agg("ss_only_tp"), fp=_agg("ss_only_fp"), fn=_agg("ss_only_fn"), tn=_agg("ss_only_tn")))
+
+    print(f"\n  INTERVENTIONS")
+    print(_prf_row("Combined labels",
+                   i_pp,  i_pr,  i_pf,  i_np,  i_nr,  i_nf,  i_mp,  i_mr,  i_mf,
+                   tp=_agg("int_tp"), fp=_agg("int_fp"), fn=_agg("int_fn"), tn=_agg("int_tn")))
+    print(_prf_row("Category only",
+                   ca_pp, ca_pr, ca_pf, ca_np, ca_nr, ca_nf, ca_mp, ca_mr, ca_mf,
+                   tp=_agg("cat_tp"), fp=_agg("cat_fp"), fn=_agg("cat_fn"), tn=_agg("cat_tn")))
+    print(_prf_row("Target only",
+                   t_pp,  t_pr,  t_pf,  t_np,  t_nr,  t_nf,  t_mp,  t_mr,  t_mf,
+                   tp=_agg("tgt_tp"), fp=_agg("tgt_fp"), fn=_agg("tgt_fn"), tn=_agg("tgt_tn")))
+    print(f"\n{'='*w}")
 
 if __name__ == "__main__":
     main()
