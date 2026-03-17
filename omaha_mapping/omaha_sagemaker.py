@@ -1000,6 +1000,239 @@ def process_sheet(
 
     return out
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 7b — VERIFICATION AGENT
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# A second LLM pass that reviews each classification and either confirms it
+# or corrects it.  Optional — add ~1× extra cost but can close the last few
+# F1 points when the primary classifier is ambiguous.
+#
+# Usage (in eval_local.py or Streamlit):
+#     df_out = process_sheet(...)
+#     df_out = verify_sheet(df_out, ss_docs, ss_emb, int_docs, int_emb,
+#                           embed_model, llm_name)
+# ──────────────────────────────────────────────────────────────────────────────
+
+VERIFY_SS_PROMPT = """You are a quality reviewer for Omaha System clinical coding.
+
+A classifier proposed a Signs/Symptoms label for this home healthcare turn.
+Your job: confirm it is correct, or correct it.
+
+━━━ TURN ━━━
+{query}
+
+━━━ PROPOSED CLASSIFICATION ━━━
+{prediction}
+
+━━━ AVAILABLE OPTIONS (top retrieved) ━━━
+{options}
+
+━━━ DECISION RULES ━━━
+• CONFIRMED  — the proposed classification is correct.
+• NONE       — the turn has no patient health problem (nurse action announcement,
+               normal finding, greeting, filler, or question with no confirmed finding).
+• Better match — if a different option from the list fits better, provide it.
+
+━━━ RESPONSE FORMAT ━━━
+CONFIRMED
+
+or
+
+NONE
+
+or
+
+Domain: [Exact]
+Problem: [Exact]
+Signs/Symptoms: [Exact]
+"""
+
+VERIFY_INT_PROMPT = """You are a quality reviewer for Omaha System clinical coding.
+
+A classifier proposed intervention label(s) for this home healthcare turn.
+Your job: confirm they are correct, or correct them.
+
+━━━ CONTEXT ━━━
+{context}
+
+━━━ TURN ━━━
+{query}
+
+━━━ PROPOSED INTERVENTIONS ━━━
+{prediction}
+
+━━━ AVAILABLE OPTIONS (top retrieved) ━━━
+{options}
+
+━━━ DECISION RULES ━━━
+• CONFIRMED  — the proposed interventions are correct.
+• NONE       — the turn has no clinical intervention (greeting, filler, purely social).
+• Better match — list corrected interventions (up to 3) in the same format as below.
+
+━━━ RESPONSE FORMAT ━━━
+CONFIRMED
+
+or
+
+NONE
+
+or
+
+1. Category: [exact] | Target: [exact]
+2. Category: [exact] | Target: [exact]
+"""
+
+
+def _verify_ss(query: str, ss_preds: list[dict],
+               ss_docs: list[dict], ss_embeddings: np.ndarray,
+               embed_model: SentenceTransformer, llm_name: str) -> list[dict]:
+    """Run the SS verification agent on one row. Returns (possibly corrected) predictions."""
+    if not ss_preds:
+        return ss_preds  # Nothing to verify
+
+    prediction_text = "\n".join(
+        f"Domain: {p['domain']} | Problem: {p['problem']} | Signs/Symptoms: {p['ss']}"
+        for p in ss_preds
+    )
+    retrieved = retrieve(query, ss_docs, ss_embeddings, embed_model)
+    options_text = "\n".join(
+        f"{i+1}. Domain: {d['domain']} | Problem: {d['problem']} | Signs/Symptoms: {d['ss']}"
+        for i, d in enumerate(retrieved)
+    )
+    prompt = VERIFY_SS_PROMPT.format(
+        query=query,
+        prediction=prediction_text,
+        options=options_text,
+    )
+    if LLM_CONFIGS[llm_name]["provider"] != "local":
+        prompt = re.sub(r"<\|[^|>]+\|>", "", prompt).strip()
+
+    raw = call_llm(prompt, llm_name)
+    raw_stripped = raw.strip()
+
+    if re.search(r"^\s*CONFIRMED\b", raw_stripped, re.IGNORECASE):
+        return ss_preds
+    if re.search(r"^\s*NONE\b", raw_stripped, re.IGNORECASE):
+        return []
+    # Otherwise parse as a new classification
+    corrected = parse_ss_output(raw_stripped)
+    return corrected if corrected else ss_preds  # fall back if parse fails
+
+
+def _verify_int(query: str, context: str, int_preds: list[dict],
+                int_docs: list[dict], int_embeddings: np.ndarray,
+                embed_model: SentenceTransformer, llm_name: str) -> list[dict]:
+    """Run the INT verification agent on one row. Returns (possibly corrected) predictions."""
+    if not int_preds:
+        return int_preds
+
+    prediction_text = "\n".join(
+        f"{i+1}. Category: {p['category']} | Target: {p['target']}"
+        for i, p in enumerate(int_preds)
+    )
+    retrieved = retrieve(query, int_docs, int_embeddings, embed_model)
+    options_text = "\n".join(
+        f"{i+1}. Category: {d['category']} | Target: {d['target']}"
+        for i, d in enumerate(retrieved)
+    )
+    prompt = VERIFY_INT_PROMPT.format(
+        context=context,
+        query=query,
+        prediction=prediction_text,
+        options=options_text,
+    )
+    if LLM_CONFIGS[llm_name]["provider"] != "local":
+        prompt = re.sub(r"<\|[^|>]+\|>", "", prompt).strip()
+
+    raw = call_llm(prompt, llm_name)
+    raw_stripped = raw.strip()
+
+    if re.search(r"^\s*CONFIRMED\b", raw_stripped, re.IGNORECASE):
+        return int_preds
+    if re.search(r"^\s*NONE\b", raw_stripped, re.IGNORECASE):
+        return []
+    corrected = parse_intervention_output(raw_stripped)
+    return corrected if corrected else int_preds
+
+
+def verify_sheet(
+    df_out: pd.DataFrame,
+    ss_docs: list[dict],   ss_embeddings: np.ndarray,
+    int_docs: list[dict],  int_embeddings: np.ndarray,
+    embed_model: SentenceTransformer,
+    llm_name: str,
+    top_k: int = TOP_K_RETRIEVAL,
+) -> pd.DataFrame:
+    """
+    Run a verification pass over every row that has at least one SS or INT
+    prediction.  Returns an updated DataFrame with corrected Pred_* columns.
+    """
+    orig_k = TOP_K_RETRIEVAL
+    # We access top_k via the retrieve() default arg, so temporarily patch it
+    import omaha_sagemaker as _self
+    _self.TOP_K_RETRIEVAL = top_k
+
+    out = df_out.copy()
+
+    for idx in range(len(out)):
+        row   = out.iloc[idx]
+        query = str(row.get("Conversation", "")).strip()
+        if not query or query == "nan":
+            continue
+
+        context = get_context_text(df_out, idx)
+
+        # Reconstruct current SS predictions
+        ss_preds = []
+        for j in range(1, 4):
+            lbl  = str(row.get(f"Pred_SS_{j}", "")).strip()
+            dom  = str(row.get(f"Pred_SS_{j}_domain",  "")).strip()
+            prob = str(row.get(f"Pred_SS_{j}_problem", "")).strip()
+            ss   = str(row.get(f"Pred_SS_{j}_ss",      "")).strip()
+            if lbl and lbl != "nan":
+                ss_preds.append({"label": lbl, "domain": dom,
+                                 "problem": prob, "ss": ss})
+
+        # Reconstruct current INT predictions
+        int_preds = []
+        for j in range(1, 4):
+            lbl = str(row.get(f"Pred_I_{j}", "")).strip()
+            cat = str(row.get(f"Pred_I_{j}_category", "")).strip()
+            tgt = str(row.get(f"Pred_I_{j}_target",   "")).strip()
+            if lbl and lbl != "nan":
+                int_preds.append({"label": lbl, "category": cat, "target": tgt})
+
+        # Verify SS
+        if ss_preds:
+            ss_preds = _verify_ss(query, ss_preds, ss_docs, ss_embeddings,
+                                  embed_model, llm_name)
+
+        # Verify INT
+        if int_preds:
+            int_preds = _verify_int(query, context, int_preds, int_docs,
+                                    int_embeddings, embed_model, llm_name)
+
+        # Write back SS
+        for j in range(1, 4):
+            p = ss_preds[j-1] if len(ss_preds) >= j else {}
+            out.at[idx, f"Pred_SS_{j}"]         = p.get("label",   "")
+            out.at[idx, f"Pred_SS_{j}_domain"]  = p.get("domain",  "")
+            out.at[idx, f"Pred_SS_{j}_problem"] = p.get("problem", "")
+            out.at[idx, f"Pred_SS_{j}_ss"]      = p.get("ss",      "")
+
+        # Write back INT
+        for j in range(1, 4):
+            p = int_preds[j-1] if len(int_preds) >= j else {}
+            out.at[idx, f"Pred_I_{j}"]          = p.get("label",    "")
+            out.at[idx, f"Pred_I_{j}_category"] = p.get("category", "")
+            out.at[idx, f"Pred_I_{j}_target"]   = p.get("target",   "")
+
+    _self.TOP_K_RETRIEVAL = orig_k
+    return out
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 8 — EVALUATION
 # ══════════════════════════════════════════════════════════════════════════════
