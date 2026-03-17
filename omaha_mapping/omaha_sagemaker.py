@@ -551,6 +551,9 @@ PATIENT PROBLEM: [description, or "none"]
 NURSE ACTION: [description, or "none"]
 KEY PHRASES: [phrase1, phrase2, ... or "none"]
 """
+
+
+SS_PROMPT_TEMPLATE = """
 Analyze the healthcare query provided below and identify the MOST RELEVANT Omaha System classification.
 
 Instructions:
