@@ -1558,6 +1558,162 @@ def evaluate_sheet(df_out: pd.DataFrame) -> dict:
         "tgt_macro_p": tgt_mp, "tgt_macro_r": tgt_mr, "tgt_macro_f1": tgt_mf1,
     }
 
+
+# ══════════════════════════════════════════════════════════════════════════════
+# SECTION 8b — TIME DISTRIBUTION ANALYSIS
+#
+# Each row in a conversation sheet = 1 time step.
+#
+# Speaker detection uses Agent 1's LLM_understand_raw:
+#   SPEAKER: clinician → "nurse"
+#   SPEAKER: patient   → "patient"
+#   anything else      → "unclear"  (treated as nurse time — nurse is always
+#                                    present; close/admin turns still use
+#                                    the nurse's time)
+#
+# Four window strategies for attributing unlabeled rows to a labeled
+# intervention turn (to reflect the full interaction cost of that intervention):
+#
+#   label_only    — only the labeled nurse turn itself (strictest lower bound)
+#
+#   next_nurse    — labeled turn + every following patient/unclear turn until
+#                   the next nurse turn starts.  Captures direct patient
+#                   responses to that specific instruction/action.
+#
+#   fixed_2       — labeled turn ± 2 rows (matches CONTEXT_WINDOW=2).
+#                   Symmetric, conversation-position-independent.
+#
+#   full_exchange — labeled turn + ALL contiguous non-nurse rows in BOTH
+#                   directions until a nurse-turn boundary on each side.
+#                   Widest definition: the whole back-and-forth block around
+#                   the labeled turn.
+#
+# Overlap rule: if a row falls inside windows of two separate labeled turns,
+# the earlier labeled turn takes precedence (first-labeled-wins). This avoids
+# double-counting shared patient turns.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def compute_time_distribution(df_out: pd.DataFrame) -> dict:
+    """
+    Compute row-level time distribution for one conversation sheet.
+
+    Returns a dict with:
+        total_rows, nurse_rows, patient_rows, unclear_rows, nurse_pct
+        label_only / next_nurse / fixed_2 / full_exchange  →  each contains:
+            total_int_rows   : rows attributed to any intervention
+            int_pct_of_nurse : those rows as % of nurse_rows
+            by_category      : {category_str: row_count}
+    """
+    n = len(df_out)
+    if n == 0:
+        return {}
+
+    # ── Parse speaker for every row ───────────────────────────────────────────
+    speakers = []
+    for _, row in df_out.iterrows():
+        raw = str(row.get("LLM_understand_raw", "")).lower()
+        if "speaker: clinician" in raw or "speaker: nurse" in raw:
+            speakers.append("nurse")
+        elif "speaker: patient" in raw:
+            speakers.append("patient")
+        else:
+            speakers.append("unclear")   # close/admin turns → nurse time
+
+    # ── Baseline counts ───────────────────────────────────────────────────────
+    total_rows   = n
+    nurse_rows   = sum(1 for s in speakers if s in ("nurse", "unclear"))
+    patient_rows = sum(1 for s in speakers if s == "patient")
+    unclear_rows = sum(1 for s in speakers if s == "unclear")
+    nurse_pct    = round(nurse_rows / total_rows * 100, 1) if total_rows else 0.0
+
+    # ── Find labeled rows and their predicted intervention category ───────────
+    # Use Pred_I_1_category (first predicted intervention) as the category key.
+    labeled = {}   # {row_index: category_str}
+    rows_list = list(df_out.iterrows())
+    for i, (_, row) in enumerate(rows_list):
+        cat = str(row.get("Pred_I_1_category", "")).strip()
+        if cat and cat.lower() not in ("", "none", "nan"):
+            labeled[i] = cat
+
+    def _build_windows(strategy: str) -> dict:
+        """
+        Returns {row_index: category} for all rows attributed to a labeled
+        turn under the chosen strategy.  First-labeled-wins for overlaps.
+        """
+        covered: dict[int, str] = {}
+
+        for nurse_idx in sorted(labeled.keys()):
+            cat = labeled[nurse_idx]
+
+            if strategy == "label_only":
+                # Only the labeled turn itself.
+                indices = [nurse_idx]
+
+            elif strategy == "next_nurse":
+                # Labeled turn + following patient/unclear rows until the next
+                # nurse turn — the direct patient-response window.
+                indices = [nurse_idx]
+                for fwd in range(nurse_idx + 1, n):
+                    if speakers[fwd] == "nurse":
+                        break
+                    indices.append(fwd)
+
+            elif strategy == "fixed_2":
+                # Symmetric ±2 rows (matches CONTEXT_WINDOW default).
+                indices = list(range(max(0, nurse_idx - 2),
+                                     min(n, nurse_idx + 3)))
+
+            elif strategy == "full_exchange":
+                # All contiguous non-nurse rows before AND after the labeled
+                # turn, stopping at the nearest nurse-turn boundary on each
+                # side.
+                back = []
+                for bwd in range(nurse_idx - 1, -1, -1):
+                    if speakers[bwd] == "nurse":
+                        break
+                    back.append(bwd)
+                fwd_list = []
+                for fwd in range(nurse_idx + 1, n):
+                    if speakers[fwd] == "nurse":
+                        break
+                    fwd_list.append(fwd)
+                indices = back[::-1] + [nurse_idx] + fwd_list
+
+            else:
+                indices = [nurse_idx]
+
+            for idx in indices:
+                if idx not in covered:   # first-labeled-wins
+                    covered[idx] = cat
+
+        return covered
+
+    def _summarise(covered: dict) -> dict:
+        by_cat: dict[str, int] = {}
+        for cat in covered.values():
+            by_cat[cat] = by_cat.get(cat, 0) + 1
+        total_int_rows   = len(covered)
+        int_pct_of_nurse = (round(total_int_rows / nurse_rows * 100, 1)
+                            if nurse_rows else 0.0)
+        return {
+            "total_int_rows":   total_int_rows,
+            "int_pct_of_nurse": int_pct_of_nurse,
+            "by_category":      dict(sorted(by_cat.items())),
+        }
+
+    return {
+        "total_rows":    total_rows,
+        "nurse_rows":    nurse_rows,
+        "patient_rows":  patient_rows,
+        "unclear_rows":  unclear_rows,
+        "nurse_pct":     nurse_pct,
+        "label_only":    _summarise(_build_windows("label_only")),
+        "next_nurse":    _summarise(_build_windows("next_nurse")),
+        "fixed_2":       _summarise(_build_windows("fixed_2")),
+        "full_exchange": _summarise(_build_windows("full_exchange")),
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # SECTION 9 — SHARED INDEX BUILDER
 # Builds the RAG index and loads annotation data ONCE, shared across all models.
@@ -1670,13 +1826,16 @@ def run_inference(llm_name: str, resources: dict) -> dict:
                                     int_docs, int_embeddings,
                                     embed_model, llm_name,
                                     use_understand=True)
-            metrics = evaluate_sheet(df_out)
+            metrics   = evaluate_sheet(df_out)
+            time_dist = compute_time_distribution(df_out)
         except Exception as e:
             log.error(f"Sheet '{sheet_name}' failed: {e}")
-            df_out  = conv_df.copy()
-            metrics = dict(_ZERO_METRICS)
+            df_out    = conv_df.copy()
+            metrics   = dict(_ZERO_METRICS)
+            time_dist = {}
 
-        metrics["sheet"] = sheet_name
+        metrics["sheet"]     = sheet_name
+        metrics["time_dist"] = time_dist
         sheet_metrics.append(metrics)
 
         global_ss_tp += metrics["ss_tp"];  global_ss_fp += metrics["ss_fp"];  global_ss_fn += metrics["ss_fn"];  global_ss_tn += metrics["ss_tn"]
@@ -1800,6 +1959,41 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     })
     output_sheets["SUMMARY"] = pd.DataFrame(rows)
 
+    # ── TIME_OVERVIEW sheet (one row per visit, all 4 strategies) ─────────────
+    STRATEGIES = ("label_only", "next_nurse", "fixed_2", "full_exchange")
+    overview_rows = []
+    cat_rows      = []   # long-format for TIME_BY_CATEGORY
+
+    for m in sheet_metrics:
+        td = m.get("time_dist", {})
+        if not td:
+            continue
+        ov = {
+            "Sheet":        m["sheet"],
+            "Total_Rows":   td["total_rows"],
+            "Nurse_Rows":   td["nurse_rows"],
+            "Patient_Rows": td["patient_rows"],
+            "Unclear_Rows": td["unclear_rows"],
+            "Nurse_Pct":    td["nurse_pct"],
+        }
+        for strat in STRATEGIES:
+            s = td.get(strat, {})
+            ov[f"{strat}_IntRows"]      = s.get("total_int_rows",   0)
+            ov[f"{strat}_IntPctNurse"]  = s.get("int_pct_of_nurse", 0.0)
+            # long-format category rows
+            for cat, cnt in s.get("by_category", {}).items():
+                cat_rows.append({
+                    "Sheet":    m["sheet"],
+                    "Strategy": strat,
+                    "Category": cat,
+                    "Rows":     cnt,
+                })
+        overview_rows.append(ov)
+
+    if overview_rows:
+        output_sheets["TIME_OVERVIEW"]     = pd.DataFrame(overview_rows)
+        output_sheets["TIME_BY_CATEGORY"]  = pd.DataFrame(cat_rows) if cat_rows else pd.DataFrame()
+
     # ── Save per-model results ─────────────────────────────────────────────────
     safe_name   = re.sub(r"[^a-zA-Z0-9_-]", "_", llm_name)
     results_key = f"{OUTPUT_PREFIX}{safe_name}_{timestamp}_results.xlsx"
@@ -1864,6 +2058,46 @@ def run_inference(llm_name: str, resources: dict) -> dict:
     print(f"TP/FP/FN/TN (SS):   {global_ss_tp}/{global_ss_fp}/{global_ss_fn}/{global_ss_tn}  Accuracy={gss_accuracy:.4f}")
     print(f"TP/FP/FN/TN (Int):  {global_i_tp}/{global_i_fp}/{global_i_fn}/{global_i_tn}  Accuracy={gint_accuracy:.4f}")
     print(f"{'='*TW}")
+
+    # ── Time distribution summary (aggregated across all visits) ──────────────
+    all_td = [m["time_dist"] for m in sheet_metrics if m.get("time_dist")]
+    if all_td:
+        tot   = sum(t["total_rows"]   for t in all_td)
+        nur   = sum(t["nurse_rows"]   for t in all_td)
+        pat   = sum(t["patient_rows"] for t in all_td)
+        unc   = sum(t["unclear_rows"] for t in all_td)
+
+        print(f"\nTIME DISTRIBUTION  |  {llm_name}  ({len(all_td)} visits)")
+        print(f"{'─'*60}")
+        print(f"  Total rows   : {tot}")
+        print(f"  Nurse rows   : {nur}  ({nur/tot*100:.1f}%  includes unclear/close turns)")
+        print(f"  Patient rows : {pat}  ({pat/tot*100:.1f}%)")
+        print(f"  Unclear rows : {unc}  ({unc/tot*100:.1f}%  counted as nurse time)")
+
+        print(f"\n  {'Strategy':<16}  {'Int Rows':>9}  {'% of Nurse':>10}  {'Rationale'}")
+        print(f"  {'─'*70}")
+        descs = {
+            "label_only":    "labeled turn only (lower bound)",
+            "next_nurse":    "labeled + patient replies until next nurse turn",
+            "fixed_2":       "labeled ± 2 rows (matches CONTEXT_WINDOW)",
+            "full_exchange": "labeled + all contiguous non-nurse rows both ways",
+        }
+        for strat in STRATEGIES:
+            int_rows = sum(t.get(strat, {}).get("total_int_rows",   0) for t in all_td)
+            pct      = round(int_rows / nur * 100, 1) if nur else 0.0
+            print(f"  {strat:<16}  {int_rows:>9}  {pct:>9.1f}%  {descs[strat]}")
+
+        # Aggregate by_category across visits for the widest strategy
+        print(f"\n  Category breakdown  (full_exchange strategy, all visits):")
+        cat_agg: dict[str, int] = {}
+        for t in all_td:
+            for cat, cnt in t.get("full_exchange", {}).get("by_category", {}).items():
+                cat_agg[cat] = cat_agg.get(cat, 0) + cnt
+        for cat, cnt in sorted(cat_agg.items(), key=lambda x: -x[1]):
+            pct = round(cnt / nur * 100, 1) if nur else 0.0
+            print(f"    {cat:<30}  {cnt:>6} rows  ({pct:.1f}% of nurse time)")
+        print(f"{'─'*60}")
+
     print(f"Saved: s3://{S3_BUCKET}/{results_key}")
 
     return summary
