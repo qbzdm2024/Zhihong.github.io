@@ -13,8 +13,8 @@ Usage (SageMaker terminal):
         --turn "My legs feel really heavy today." \\
         --context-window 3
 
-    # 3-agent pipeline (understand → classify → verify):
-    python test_single_turn.py --turn "..." --understand --verify
+    # 2-agent pipeline (understand → classify):
+    python test_single_turn.py --turn "..." --understand
 
     # Custom prompts from files:
     python test_single_turn.py --turn "..." --ss-prompt-file my_ss_prompt.txt
@@ -31,7 +31,6 @@ Notebook usage (inline):
         model_name="gpt-4o-mini",
         top_k=15,
         use_understand=True,
-        use_verify=True,
     )
 
     # Shorthand: pass a list as `turn` (last = current, rest = preceding context)
@@ -56,7 +55,6 @@ Options:
     --ss-prompt-file TEXT    Path to .txt file with custom SS prompt template
     --int-prompt-file TEXT   Path to .txt file with custom intervention prompt
     --understand             Enable Agent 1 (clinical pre-analysis before classification)
-    --verify                 Enable Agent 3 (verification after classification)
     --verbose                Show retrieved options, full prompt, and raw LLM response
 """
 
@@ -212,7 +210,6 @@ def test_turn(
     ss_prompt_template: str = None,     # None → om.SS_PROMPT_TEMPLATE
     int_prompt_template: str = None,    # None → om.INTERVENTION_PROMPT_TEMPLATE
     use_understand: bool = False,       # Agent 1: clinical pre-analysis
-    use_verify: bool = False,           # Agent 3: post-classification verification
     verbose: bool = False,
 ):
     """Run the Omaha mapping pipeline on a single conversation turn.
@@ -236,7 +233,6 @@ def test_turn(
         ss_prompt_template:  Custom SS prompt (overrides om.SS_PROMPT_TEMPLATE).
         int_prompt_template: Custom INT prompt (overrides om.INTERVENTION_PROMPT_TEMPLATE).
         use_understand:  Run Agent 1 (clinical pre-analysis) before classification.
-        use_verify:      Run Agent 3 (verification) after classification.
         verbose:         Print retrieved options, full prompt, and raw LLM output.
 
     Returns:
@@ -286,7 +282,6 @@ def test_turn(
     # ── Header ────────────────────────────────────────────────────────────────
     agents = ["Agent2:classify"]
     if use_understand: agents.insert(0, "Agent1:understand")
-    if use_verify:     agents.append("Agent3:verify")
 
     print()
     divider("SINGLE-TURN TEST", "═")
@@ -390,37 +385,6 @@ def test_turn(
         else:
             print(YELLOW("    → NONE"))
 
-    # ── Agent 3: Verify ───────────────────────────────────────────────────────
-    if use_verify:
-        print()
-        divider("AGENT 3 — Verification")
-
-        if task in ("ss", "both") and ss_parsed:
-            ss_v = om._verify_ss(turn, ss_parsed, ss_docs, ss_emb, embed_model,
-                                 model_name, understanding)
-            if ss_v != ss_parsed:
-                print(YELLOW("  SS corrected →"))
-                for r in ss_v:
-                    print(GREEN(f"    {r['domain']} | {r['problem']} | {r['ss']}"))
-            else:
-                print(DIM("  SS: CONFIRMED (no change)"))
-            ss_parsed = ss_v
-        elif task in ("ss", "both"):
-            print(DIM("  SS: skipped (no predictions to verify)"))
-
-        if task in ("intervention", "both") and int_parsed:
-            int_v = om._verify_int(turn, ctx, int_parsed, int_docs, int_emb,
-                                   embed_model, model_name, understanding)
-            if int_v != int_parsed:
-                print(YELLOW("  INT corrected →"))
-                for r in int_v:
-                    print(GREEN(f"    {r['category']} | {r['target']}"))
-            else:
-                print(DIM("  INT: CONFIRMED (no change)"))
-            int_parsed = int_v
-        elif task in ("intervention", "both"):
-            print(DIM("  INT: skipped (no predictions to verify)"))
-
     # ── Final result ──────────────────────────────────────────────────────────
     print()
     divider("FINAL RESULT", "═")
@@ -491,8 +455,6 @@ def main():
     parser.add_argument("--int-prompt-file",  default=None)
     parser.add_argument("--understand",       action="store_true",
                         help="Enable Agent 1 (clinical pre-analysis)")
-    parser.add_argument("--verify",           action="store_true",
-                        help="Enable Agent 3 (post-classification verification)")
     parser.add_argument("--verbose",          action="store_true")
     args = parser.parse_args()
 
@@ -544,7 +506,6 @@ def main():
         ss_prompt_template=ss_prompt_template,
         int_prompt_template=int_prompt_template,
         use_understand=args.understand,
-        use_verify=args.verify,
         verbose=args.verbose,
     )
 

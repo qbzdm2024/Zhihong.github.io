@@ -87,6 +87,13 @@ EMBEDDING_MODEL  = "sentence-transformers/all-MiniLM-L6-v2"
 #   provider = "openai"      → only if your org has an OpenAI Enterprise BAA   ✓
 #   provider = "huggingface" → DO NOT use with real patient data               ✗
 #
+# ── Temperature policy ────────────────────────────────────────────────────────
+# All models use temperature=0.05 for near-deterministic, reproducible output.
+# DO NOT raise this value — higher temperatures cause label inconsistency across
+# repeated runs and make evaluation results non-reproducible.
+# ──────────────────────────────────────────────────────────────────────────────
+_LLM_TEMPERATURE = 0.05   # fixed; do not change
+
 LLM_CONFIGS = {
     # ── Local models (data stays on SageMaker) ────────────────────────────────
     # Requires GPU instance. Model is downloaded from HuggingFace on first run
@@ -97,14 +104,14 @@ LLM_CONFIGS = {
         # Recommended instance: ml.g5.xlarge (1× A10G 24 GB)
         # 4-bit quantisation fits comfortably; fast inference (~2 s/call)
         "load_in_4bit": True,
-        "kwargs":      {"max_new_tokens": 500, "temperature": 0.05, "do_sample": True},
+        "kwargs":      {"max_new_tokens": 500, "temperature": _LLM_TEMPERATURE, "do_sample": True},
     },
     "mistral-7b-local": {
         "provider":    "local",
         "model":       "mistralai/Mistral-7B-Instruct-v0.3",
         # Recommended instance: ml.g5.xlarge  (same as above)
         "load_in_4bit": True,
-        "kwargs":      {"max_new_tokens": 500, "temperature": 0.05, "do_sample": True},
+        "kwargs":      {"max_new_tokens": 500, "temperature": _LLM_TEMPERATURE, "do_sample": True},
     },
     "llama3-70b-local": {
         "provider":    "local",
@@ -112,7 +119,7 @@ LLM_CONFIGS = {
         # Recommended instance: ml.g5.12xlarge (4× A10G 96 GB)
         # 4-bit quantisation needs ~35 GB VRAM; slower (~15 s/call)
         "load_in_4bit": True,
-        "kwargs":      {"max_new_tokens": 500, "temperature": 0.05, "do_sample": True},
+        "kwargs":      {"max_new_tokens": 500, "temperature": _LLM_TEMPERATURE, "do_sample": True},
     },
     # ── Azure OpenAI (HIPAA BAA required) ────────────────────────────────────
     # Set AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY env vars.
@@ -120,13 +127,13 @@ LLM_CONFIGS = {
     "azure-gpt4o-mini": {
         "provider":    "azure_openai",
         "model":       "gpt-4o-mini",          # Azure deployment name
-        "kwargs":      {"temperature": 0.05, "max_tokens": 500},
+        "kwargs":      {"temperature": _LLM_TEMPERATURE, "max_tokens": 500},
     },
     # ── Standard OpenAI (only if you have an Enterprise HIPAA BAA) ────────────
     "gpt-4o-mini": {
         "provider": "openai",
         "model":    "gpt-4o-mini",
-        "kwargs":   {"temperature": 0.05, "max_tokens": 500},
+        "kwargs":   {"temperature": _LLM_TEMPERATURE, "max_tokens": 500},
     },
 }
 
@@ -565,6 +572,18 @@ Key rules:
   "teach", "explain", "instruct", "educate"                    → Health Teaching, Guidance, and Counseling
   "perform", "apply", "administer", "change dressing"          → Treatments and Procedures
   "refer", "coordinate", "schedule"                            → Case Management
+
+Target guidance (use EXACT Omaha System wording):
+  nurse checking/assessing heart, lungs, breathing, pulse, blood pressure,
+  oxygen, temperature, or any physical vital signs
+  → Target: signs/symptoms-physical       ← NOT "cardiac care", NOT "heart and lungs"
+
+  nurse checking/assessing wound or skin
+  → Target: dressing change/wound care
+
+  nurse reviewing medications
+  → Target: medication administration
+
 List up to 3 in order of relevance.
 • Format: Category | Target
 • If none — write "none".
@@ -704,6 +723,12 @@ Common mappings
 measuring blood pressure / pulse / oxygen / temperature
 → Surveillance | signs/symptoms-physical
 
+checking / assessing heart or lungs (auscultating, listening to heart/lungs)
+→ Surveillance | signs/symptoms-physical
+NOTE: "cardiac care" is NEVER the correct target for assessment of heart/lung sounds.
+      "signs/symptoms-physical" is the correct target whenever the nurse is monitoring
+      or assessing a patient's physical signs, including heart and lung sounds.
+
 checking wound
 → Surveillance | dressing change/wound care
 
@@ -776,6 +801,16 @@ EXAMPLES
 
 Query:
 "I will check your blood pressure and pulse."
+
+1. Category: Surveillance | Target: signs/symptoms-physical
+
+Query:
+"I'm going to check your heart and lungs."
+
+1. Category: Surveillance | Target: signs/symptoms-physical
+
+Query:
+"Let me listen to your lungs and check your heart rate."
 
 1. Category: Surveillance | Target: signs/symptoms-physical
 
