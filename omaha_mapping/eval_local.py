@@ -75,15 +75,22 @@ def build_resources(omaha_path, top_k, embed_model_name):
 # ── evaluation ─────────────────────────────────────────────────────────────
 
 def run_and_eval(df, ss_docs, ss_embeddings, int_docs, int_embeddings,
-                 embed_model, llm_name, top_k, verbose):
-    """Run process_sheet + evaluate_sheet and return (metrics, df_out)."""
-    # Temporarily override top-K retrieval
+                 embed_model, llm_name, top_k, verbose,
+                 use_understand=False):
+    """Run process_sheet + evaluate_sheet and return (metrics, df_out).
+
+    Pipeline:
+      Agent 1 (understand)  — enabled by use_understand=True
+      Agent 2 (classify)    — always runs (RAG + LLM)
+      Agent 3 (verify)      — called separately via verify_sheet() if needed
+    """
     orig_k = om.TOP_K_RETRIEVAL
     om.TOP_K_RETRIEVAL = top_k
 
-    df_out  = om.process_sheet(df, ss_docs, ss_embeddings,
-                               int_docs, int_embeddings,
-                               embed_model, llm_name)
+    df_out = om.process_sheet(df, ss_docs, ss_embeddings,
+                              int_docs, int_embeddings,
+                              embed_model, llm_name,
+                              use_understand=use_understand)
     om.TOP_K_RETRIEVAL = orig_k
 
     metrics = om.evaluate_sheet(df_out)
@@ -227,8 +234,10 @@ def main():
     parser.add_argument("--omaha",    default=None)
     parser.add_argument("--model",    default="gpt-4o-mini")
     parser.add_argument("--top-k",    type=int, default=15)
-    parser.add_argument("--prompts",  default="baseline", choices=["baseline","refined"])
-    parser.add_argument("--verbose",  action="store_true")
+    parser.add_argument("--prompts",    default="baseline", choices=["baseline","refined"])
+    parser.add_argument("--understand", action="store_true",
+                        help="Enable Agent 1 (clinical pre-analysis) before classification")
+    parser.add_argument("--verbose",    action="store_true")
     args = parser.parse_args()
 
     if args.model not in om.LLM_CONFIGS:
@@ -263,10 +272,14 @@ def main():
     df = load_example(args.example)
     print(f"  {len(df)} rows loaded")
 
-    print(f"Running inference with {args.model} (top-k={args.top_k}) …", flush=True)
+    agents = ['Agent2:classify']
+    if args.understand: agents.insert(0, 'Agent1:understand')
+    print(f"Running inference with {args.model} (top-k={args.top_k})  "
+          f"pipeline=[{' → '.join(agents)}] …", flush=True)
     metrics, df_out = run_and_eval(
         df, ss_docs, ss_emb, int_docs, int_emb,
-        embed_model, args.model, args.top_k, args.verbose
+        embed_model, args.model, args.top_k, args.verbose,
+        use_understand=args.understand,
     )
 
     ss_f1, int_f1 = print_metrics(metrics, f"prompts={args.prompts}  model={args.model}")

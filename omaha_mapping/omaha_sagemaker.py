@@ -503,7 +503,54 @@ def call_llm(prompt: str, llm_name: str = ACTIVE_LLM,
 # SECTION 5 — PROMPT TEMPLATES
 # ══════════════════════════════════════════════════════════════════════════════
 
-SS_PROMPT_TEMPLATE = """
+# ── Agent 1: Clinical understanding prompt ────────────────────────────────────
+#
+# Run BEFORE the RAG classifiers.  Produces a structured clinical summary of the
+# turn that is injected into both the SS and INT prompts so Agent 2 works with
+# a richer description of what is actually being said.
+#
+UNDERSTAND_PROMPT = """\
+You are a clinical content analyst for home healthcare conversations.
+
+Analyze the turn below and extract structured clinical facts to guide
+Omaha System coding.
+
+━━━ CONTEXT (surrounding turns) ━━━
+{context}
+
+━━━ CURRENT TURN ━━━
+{query}
+
+━━━ TASK ━━━
+Answer each item concisely based ONLY on what is stated in the current turn.
+
+SPEAKER ROLE
+Is the primary speaker a patient/caregiver (reporting symptoms, feelings,
+measurements) or a nurse/clinician (assessing, instructing, treating,
+coordinating)?
+
+PATIENT HEALTH PROBLEM
+Is there a patient-reported symptom, complaint, abnormal measurement, or
+finding?
+• If yes — describe it in plain clinical terms; note if any value is abnormal.
+• If no  — write "none".
+
+NURSE ACTION
+Is the nurse/clinician performing or describing an action (assessing, teaching,
+treating, or coordinating care)?
+• If yes — describe the action type and its clinical target briefly.
+• If no  — write "none".
+
+KEY CLINICAL PHRASES
+List the exact clinical phrases from the turn verbatim (comma-separated).
+Write "none" if there are none.
+
+Respond ONLY in this exact format with no extra text:
+SPEAKER: [patient | clinician | unclear]
+PATIENT PROBLEM: [description, or "none"]
+NURSE ACTION: [description, or "none"]
+KEY PHRASES: [phrase1, phrase2, ... or "none"]
+"""
 Analyze the healthcare query provided below and identify the MOST RELEVANT Omaha System classification.
 
 Instructions:
@@ -729,7 +776,49 @@ NONE
 """
 
 
-def build_ss_prompt(query: str, context: str, retrieved_docs: list[dict]) -> str:
+def understand_turn(query: str, context: str, llm_name: str) -> str:
+    """
+    Agent 1 — Clinical pre-understanding.
+
+    Calls the LLM to produce a structured analysis of the turn (speaker role,
+    patient problem, nurse action, key phrases) BEFORE classification.
+    The returned string is injected into both the SS and INT prompts so that
+    Agent 2 (the RAG classifier) has a richer description of what is actually
+    being said clinically.
+
+    Args:
+        query:    The current conversation turn text.
+        context:  Surrounding turns from get_context_text().
+        llm_name: LLM config key (same model used for classification).
+
+    Returns:
+        A multi-line structured string, e.g.
+            SPEAKER: patient
+            PATIENT PROBLEM: elevated blood pressure reading (145/92, abnormal)
+            NURSE ACTION: none
+            KEY PHRASES: blood pressure, 145/92
+    """
+    prompt = UNDERSTAND_PROMPT.format(
+        context=context or "(no context)",
+        query=query,
+    )
+    if LLM_CONFIGS[llm_name]["provider"] != "local":
+        prompt = re.sub(r"<\|[^|>]+\|>", "", prompt).strip()
+    raw = call_llm(prompt, llm_name)
+    return raw.strip()
+
+
+def build_ss_prompt(query: str, context: str, retrieved_docs: list[dict],
+                    understanding: str = "") -> str:
+    """Build the SS classification prompt.
+
+    If *understanding* (from understand_turn) is provided it is appended to the
+    query section so that Agent 2 sees the pre-analysed clinical summary.
+    """
+    effective_query = (
+        f"{query}\n\n[Clinical Pre-Analysis]\n{understanding}"
+        if understanding else query
+    )
     options_text = ""
     for i, doc in enumerate(retrieved_docs, 1):
         options_text += (
@@ -753,8 +842,8 @@ def build_ss_prompt(query: str, context: str, retrieved_docs: list[dict]) -> str
         flags=re.DOTALL | re.IGNORECASE,
     )
     # Replace {{query}} (Jinja2) and {query} (Python format) with actual query
-    prompt = re.sub(r"\{\{\s*query\s*\}\}", query, prompt)
-    prompt = prompt.replace("{query}", query)
+    prompt = re.sub(r"\{\{\s*query\s*\}\}", effective_query, prompt)
+    prompt = prompt.replace("{query}", effective_query)
     # Replace {options} (Python format) with options list if template uses it
     prompt = prompt.replace("{options}", options_text.strip())
     # Replace {context} (Python format) with surrounding context
@@ -763,14 +852,24 @@ def build_ss_prompt(query: str, context: str, retrieved_docs: list[dict]) -> str
 
 
 def build_intervention_prompt(query: str, context: str,
-                              retrieved_docs: list[dict]) -> str:
+                              retrieved_docs: list[dict],
+                              understanding: str = "") -> str:
+    """Build the Intervention classification prompt.
+
+    If *understanding* (from understand_turn) is provided it is appended to the
+    query section so that Agent 2 sees the pre-analysed clinical summary.
+    """
+    effective_query = (
+        f"{query}\n\n[Clinical Pre-Analysis]\n{understanding}"
+        if understanding else query
+    )
     options_text = ""
     for i, doc in enumerate(retrieved_docs, 1):
         options_text += (
             f"{i}. Category: {doc['category']} | Target: {doc['target']}\n"
         )
     return INTERVENTION_PROMPT_TEMPLATE.format(
-        context=context, query=query, options=options_text.strip()
+        context=context, query=effective_query, options=options_text.strip()
     )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -928,15 +1027,26 @@ def process_sheet(
     int_docs: list[dict], int_embeddings: np.ndarray,
     embed_model: SentenceTransformer,
     llm_name: str,
+    use_understand: bool = False,
 ) -> pd.DataFrame:
     """
     Process all rows in one conversation sheet.
     Returns a DataFrame with original columns + LLM predictions.
+
+    3-agent pipeline when use_understand=True:
+      Agent 1 — understand_turn()   : Extracts speaker role, patient problem,
+                                       nurse action, and key clinical phrases.
+      Agent 2 — build_ss/int_prompt : RAG classifier enriched with Agent 1 output.
+      Agent 3 — verify_sheet()      : (optional, called separately) verifies labels.
+
+    When use_understand=False (default) Agent 1 is skipped (original behaviour).
+    The Agent 1 output is stored in LLM_understand_raw for inspection.
     """
     ss_preds_all  = []
     int_preds_all = []
     ss_raw_all    = []
     int_raw_all   = []
+    understand_raw_all = []
 
     # Determine meaningful column (skip rows flagged as Negative if desired)
     meaningful_col = next(
@@ -953,13 +1063,22 @@ def process_sheet(
             int_preds_all.append([])
             ss_raw_all.append("")
             int_raw_all.append("")
+            understand_raw_all.append("")
             continue
 
         context = get_context_text(df, idx)
 
-        # ── Signs/Symptoms prediction ───────────────────────────────────────
+        # ── Agent 1: Clinical pre-understanding (optional) ───────────────────
+        understanding = ""
+        if use_understand:
+            log.debug(f"[Agent1] row {idx}: running understand_turn …")
+            understanding = understand_turn(query, context, llm_name)
+            log.debug(f"[Agent1] row {idx}:\n{understanding}")
+        understand_raw_all.append(understanding)
+
+        # ── Agent 2: Signs/Symptoms classification ───────────────────────────
         ss_retrieved  = retrieve(query, ss_docs, ss_embeddings, embed_model)
-        ss_prompt     = build_ss_prompt(query, context, ss_retrieved)
+        ss_prompt     = build_ss_prompt(query, context, ss_retrieved, understanding)
         # Strip Llama3 special tokens for API models (GPT, Azure) — they are
         # literal characters to these models and hurt output format compliance.
         if LLM_CONFIGS[llm_name]["provider"] != "local":
@@ -967,9 +1086,10 @@ def process_sheet(
         ss_raw        = call_llm(ss_prompt, llm_name)
         ss_preds      = parse_ss_output(ss_raw)
 
-        # ── Intervention prediction ─────────────────────────────────────────
+        # ── Agent 2: Intervention classification ─────────────────────────────
         int_retrieved = retrieve(query, int_docs, int_embeddings, embed_model)
-        int_prompt    = build_intervention_prompt(query, context, int_retrieved)
+        int_prompt    = build_intervention_prompt(query, context, int_retrieved,
+                                                  understanding)
         int_raw       = call_llm(int_prompt, llm_name)
         int_preds     = parse_intervention_output(int_raw)
 
@@ -995,6 +1115,7 @@ def process_sheet(
         out[f"Pred_I_{col_i}_target"]   = [p[col_i-1]["target"]   if len(p) >= col_i else "" for p in int_preds_all]
 
     # Keep raw LLM output for debugging
+    out["LLM_understand_raw"] = understand_raw_all
     out["LLM_SS_raw"]  = ss_raw_all
     out["LLM_I_raw"]   = int_raw_all
 
