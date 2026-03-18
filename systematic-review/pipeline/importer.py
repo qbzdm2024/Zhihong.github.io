@@ -1,6 +1,6 @@
 """
 Import module: loads search results from multiple formats into RawRecord objects.
-Supported formats: RIS, CSV, BibTeX, PubMed XML, JSON.
+Supported formats: RIS, NBIB (PubMed), CSV, BibTeX, PubMed XML, JSON.
 """
 import json
 import csv
@@ -231,6 +231,117 @@ def import_json(filepath: str, source_db: str = "Unknown") -> List[RawRecord]:
     return records
 
 
+def import_nbib(filepath: str) -> List[RawRecord]:
+    """
+    Import PubMed NBIB format (exported via 'Send to > Citation manager' on PubMed).
+    Each record is separated by a blank line.
+    Field tags are 4-char codes followed by '- '.
+    """
+    records = []
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    # Split into individual records on blank lines between PMID blocks
+    # NBIB records start with PMID and end before the next PMID or EOF
+    raw_blocks = re.split(r'\n\n+(?=PMID-)', content.strip())
+
+    for block in raw_blocks:
+        if not block.strip():
+            continue
+
+        fields: Dict[str, Any] = {}
+        current_tag = None
+        current_val: List[str] = []
+
+        for line in block.splitlines():
+            # Tag line: starts with 4-char tag + '- '
+            tag_match = re.match(r'^([A-Z]{2,4})\s*-\s(.*)', line)
+            if tag_match:
+                # Save previous tag
+                if current_tag:
+                    val = " ".join(current_val).strip()
+                    if current_tag in fields:
+                        if isinstance(fields[current_tag], list):
+                            fields[current_tag].append(val)
+                        else:
+                            fields[current_tag] = [fields[current_tag], val]
+                    else:
+                        fields[current_tag] = val
+                current_tag = tag_match.group(1).strip()
+                current_val = [tag_match.group(2).strip()]
+            elif line.startswith("      ") and current_tag:
+                # Continuation line
+                current_val.append(line.strip())
+
+        # Save last tag
+        if current_tag:
+            val = " ".join(current_val).strip()
+            if current_tag in fields:
+                if isinstance(fields[current_tag], list):
+                    fields[current_tag].append(val)
+                else:
+                    fields[current_tag] = [fields[current_tag], val]
+            else:
+                fields[current_tag] = val
+
+        title = fields.get("TI") or fields.get("T1") or ""
+        if not title:
+            continue
+
+        # Authors: FAU (full) or AU (abbreviated)
+        au_raw = fields.get("FAU") or fields.get("AU") or []
+        if isinstance(au_raw, str):
+            au_raw = [au_raw]
+        authors = "; ".join(au_raw)
+
+        # Year from DP (Date of Publication) e.g. "2023 Jan"
+        dp = fields.get("DP") or ""
+        year_match = re.search(r'\b(20\d{2})\b', dp)
+        year = int(year_match.group(1)) if year_match else None
+
+        # Journal
+        journal = fields.get("JT") or fields.get("TA") or ""
+
+        # Abstract: may be list of sections
+        ab_raw = fields.get("AB") or ""
+        abstract = ab_raw if isinstance(ab_raw, str) else " ".join(ab_raw)
+
+        # DOI from AID field: "10.1234/xxx [doi]"
+        doi = ""
+        aid_raw = fields.get("AID") or []
+        if isinstance(aid_raw, str):
+            aid_raw = [aid_raw]
+        for aid in aid_raw:
+            if "[doi]" in aid.lower():
+                doi = aid.replace("[doi]", "").strip()
+                break
+
+        pmid = fields.get("PMID") or ""
+        url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else ""
+
+        # Keywords: MH (MeSH) or OT (author keywords)
+        kw_raw = fields.get("OT") or fields.get("MH") or []
+        if isinstance(kw_raw, str):
+            kw_raw = [kw_raw]
+        keywords = "; ".join(kw_raw)
+
+        records.append(RawRecord(
+            record_id=str(uuid.uuid4()),
+            source_db="PubMed",
+            title=title.strip(),
+            authors=authors,
+            year=year,
+            journal_venue=journal,
+            doi=doi,
+            abstract=abstract,
+            keywords=keywords,
+            url=url,
+            raw_data={"pmid": pmid},
+        ))
+
+    return records
+
+
 def import_pubmed_xml(filepath: str) -> List[RawRecord]:
     """Import from PubMed XML export format."""
     tree = ET.parse(filepath)
@@ -315,11 +426,13 @@ def load_all_from_directory(directory: str) -> List[RawRecord]:
     stats = {}
 
     handlers = {
-        ".ris": lambda p: import_ris(str(p), source_db=p.stem),
-        ".csv": lambda p: import_csv(str(p), source_db=p.stem),
-        ".bib": lambda p: import_bibtex(str(p), source_db=p.stem),
+        ".nbib": lambda p: import_nbib(str(p)),
+        ".ris":  lambda p: import_ris(str(p), source_db=p.stem),
+        ".csv":  lambda p: import_csv(str(p), source_db=p.stem),
+        ".bib":  lambda p: import_bibtex(str(p), source_db=p.stem),
         ".json": lambda p: import_json(str(p), source_db=p.stem),
-        ".xml": lambda p: import_pubmed_xml(str(p)),
+        ".xml":  lambda p: import_pubmed_xml(str(p)),
+        ".txt":  lambda p: import_nbib(str(p)),  # PubMed sometimes exports as .txt
     }
 
     for file in sorted(path.iterdir()):
