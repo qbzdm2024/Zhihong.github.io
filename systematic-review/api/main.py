@@ -88,10 +88,21 @@ async def get_pipeline_status():
     """Get current pipeline status and PRISMA counts."""
     counts = runner.get_prisma_counts()
     groups = runner.get_records_by_decision()
+
+    # Determine which stage is currently "active" (furthest along)
+    stage_order = ["import", "dedup", "title_screening", "fulltext_screening", "extraction"]
+    active_stage = None
+    for s in reversed(stage_order):
+        if s in runner.stage_log:
+            active_stage = s
+            break
+
     return {
         "prisma_counts": counts,
         "bucket_counts": {k: len(v) for k, v in groups.items()},
         "total_records": len(runner.records),
+        "stage_log": runner.stage_log,          # per-stage results incl. per-file import stats
+        "active_stage": active_stage,
         "last_updated": datetime.utcnow().isoformat(),
     }
 

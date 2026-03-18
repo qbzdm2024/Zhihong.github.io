@@ -52,13 +52,26 @@ RIS_FIELD_MAP = {
 
 
 def import_ris(filepath: str, source_db: str = "Unknown") -> List[RawRecord]:
-    """Import from RIS format."""
+    """Import from RIS format.
+    Tries utf-8-sig (handles BOM from Scopus), then utf-8, then latin-1 (WoS fallback).
+    """
     if not HAS_RISPY:
         raise ImportError("rispy not installed. Run: pip install rispy")
 
+    entries = None
+    last_err = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252"):
+        try:
+            with open(filepath, "r", encoding=enc) as f:
+                entries = rispy.load(f)
+            break
+        except (UnicodeDecodeError, Exception) as e:
+            last_err = e
+            continue
+    if entries is None:
+        raise RuntimeError(f"Could not decode {filepath}: {last_err}")
+
     records = []
-    with open(filepath, "r", encoding="utf-8") as f:
-        entries = rispy.load(f)
 
     for entry in entries:
         title = entry.get("title") or entry.get("primary_title") or ""
@@ -416,14 +429,15 @@ def import_pubmed_xml(filepath: str) -> List[RawRecord]:
     return records
 
 
-def load_all_from_directory(directory: str) -> List[RawRecord]:
+def load_all_from_directory(directory: str) -> tuple:
     """
     Auto-detect and import all supported files from a directory.
-    Returns combined list of RawRecord objects.
+    Returns (records: List[RawRecord], stats: Dict[filename, int|str]).
+    stats maps filename → record count (or "ERROR: ..." string on failure).
     """
     path = Path(directory)
     all_records: List[RawRecord] = []
-    stats = {}
+    stats: Dict[str, Any] = {}
 
     handlers = {
         ".nbib": lambda p: import_nbib(str(p)),
@@ -442,13 +456,13 @@ def load_all_from_directory(directory: str) -> List[RawRecord]:
                 records = handlers[ext](file)
                 all_records.extend(records)
                 stats[file.name] = len(records)
-                print(f"  Imported {len(records)} records from {file.name}")
+                print(f"  Imported {len(records):>5} records from {file.name}")
             except Exception as e:
                 print(f"  ERROR importing {file.name}: {e}")
                 stats[file.name] = f"ERROR: {e}"
 
     print(f"\nTotal imported: {len(all_records)} records from {len(stats)} files")
-    return all_records
+    return all_records, stats
 
 
 def save_records(records: List[RawRecord], output_path: str):

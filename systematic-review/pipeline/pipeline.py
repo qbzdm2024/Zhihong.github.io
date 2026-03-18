@@ -34,6 +34,8 @@ class PipelineRunner:
 
     def __init__(self):
         self.records: Dict[str, PipelineRecord] = {}
+        # Stores results of the last run of each stage for UI display
+        self.stage_log: Dict[str, Any] = {}
         self._ensure_dirs()
 
     def _ensure_dirs(self):
@@ -48,7 +50,7 @@ class PipelineRunner:
     def run_import(self) -> Dict:
         """Import all files from raw data directory."""
         logger.info("=== STAGE: IMPORT ===")
-        raw_records = load_all_from_directory(settings.raw_dir)
+        raw_records, file_stats = load_all_from_directory(settings.raw_dir)
 
         for r in raw_records:
             pr = PipelineRecord(record_id=r.record_id, raw=r)
@@ -57,7 +59,12 @@ class PipelineRunner:
             self.records[r.record_id] = pr
 
         self._save_state()
-        stats = {"imported": len(raw_records)}
+        stats = {
+            "imported": len(raw_records),
+            "per_file": file_stats,
+            "completed_at": datetime.utcnow().isoformat(),
+        }
+        self.stage_log["import"] = stats
         logger.info(f"Import complete: {stats}")
         return stats
 
@@ -83,6 +90,7 @@ class PipelineRunner:
         # Save deduped records
         save_deduped(deduped_list, os.path.join(settings.deduped_dir, "deduped.jsonl"))
         self._save_state()
+        self.stage_log["dedup"] = {**stats, "completed_at": datetime.utcnow().isoformat()}
         logger.info(f"Dedup complete: {stats}")
         return stats
 
@@ -128,6 +136,9 @@ class PipelineRunner:
 
         self._save_state()
         self._export_screening_lists()
+        log = {str(k): v for k, v in counts.items()}
+        log["completed_at"] = datetime.utcnow().isoformat()
+        self.stage_log["title_screening"] = log
         logger.info(f"Title screening complete: {counts}")
         return counts
 
@@ -183,6 +194,9 @@ class PipelineRunner:
 
         self._save_state()
         self._export_fulltext_needed_list()
+        log = {str(k): v for k, v in counts.items()}
+        log["completed_at"] = datetime.utcnow().isoformat()
+        self.stage_log["fulltext_screening"] = log
         logger.info(f"Full-text screening complete: {counts}")
         return counts
 
@@ -238,6 +252,7 @@ class PipelineRunner:
                 counts["errors"] += 1
 
         self._save_state()
+        self.stage_log["extraction"] = {**counts, "completed_at": datetime.utcnow().isoformat()}
         logger.info(f"Extraction complete: {counts}")
         return counts
 
