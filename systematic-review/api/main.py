@@ -1,0 +1,489 @@
+"""
+FastAPI backend for the Systematic Review Automation System.
+Provides REST endpoints for the UI and pipeline management.
+"""
+import os
+import json
+import shutil
+import logging
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse
+from pydantic import BaseModel
+
+# Add parent to path for imports
+import sys
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from config.settings import settings, ModelConfig
+from pipeline.models import DecisionLabel, PipelineStage, PipelineRecord
+from pipeline.pipeline import PipelineRunner
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="Systematic Review Automation API",
+    description="Human-in-the-loop systematic review pipeline",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount static files for UI
+ui_path = Path(__file__).parent.parent / "ui"
+if ui_path.exists():
+    app.mount("/app", StaticFiles(directory=str(ui_path), html=True), name="ui")
+
+# Global pipeline runner (loaded on startup)
+runner = PipelineRunner()
+
+
+@app.on_event("startup")
+async def startup():
+    runner.load_state()
+    logger.info(f"Pipeline loaded: {len(runner.records)} records")
+
+
+# ─────────────────────────────────────────────────────
+# PIPELINE CONTROL
+# ─────────────────────────────────────────────────────
+
+class PipelineRunRequest(BaseModel):
+    stage: str  # "import", "dedup", "title_screening", "fulltext_screening", "extraction"
+    limit: Optional[int] = None
+
+
+@app.post("/api/pipeline/run")
+async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: BackgroundTasks):
+    """Trigger a pipeline stage asynchronously."""
+    stage_map = {
+        "import": runner.run_import,
+        "dedup": runner.run_deduplication,
+        "title_screening": lambda: runner.run_title_screening(request.limit),
+        "fulltext_screening": lambda: runner.run_fulltext_screening(request.limit),
+        "extraction": lambda: runner.run_extraction(request.limit),
+    }
+
+    if request.stage not in stage_map:
+        raise HTTPException(400, f"Unknown stage: {request.stage}")
+
+    background_tasks.add_task(stage_map[request.stage])
+    return {"status": "started", "stage": request.stage}
+
+
+@app.get("/api/pipeline/status")
+async def get_pipeline_status():
+    """Get current pipeline status and PRISMA counts."""
+    counts = runner.get_prisma_counts()
+    groups = runner.get_records_by_decision()
+    return {
+        "prisma_counts": counts,
+        "bucket_counts": {k: len(v) for k, v in groups.items()},
+        "total_records": len(runner.records),
+        "last_updated": datetime.utcnow().isoformat(),
+    }
+
+
+# ─────────────────────────────────────────────────────
+# RECORD QUERIES
+# ─────────────────────────────────────────────────────
+
+@app.get("/api/records")
+async def list_records(
+    decision: Optional[str] = None,
+    stage: Optional[str] = None,
+    human_needed: Optional[bool] = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    """List records with optional filtering."""
+    records = list(runner.records.values())
+
+    if decision:
+        records = [r for r in records if r.final_decision == decision]
+    if stage:
+        records = [r for r in records if r.pipeline_stage == stage]
+    if human_needed is True:
+        records = [r for r in records if r.final_decision == DecisionLabel.UNCERTAIN]
+
+    # Sort by updated_at descending
+    records.sort(key=lambda r: r.updated_at, reverse=True)
+
+    # Paginate
+    start = (page - 1) * page_size
+    end = start + page_size
+    page_records = records[start:end]
+
+    return {
+        "total": len(records),
+        "page": page,
+        "page_size": page_size,
+        "records": [_serialize_record_summary(r) for r in page_records],
+    }
+
+
+@app.get("/api/records/{record_id}")
+async def get_record(record_id: str):
+    """Get full details of a single record."""
+    pr = runner.records.get(record_id)
+    if not pr:
+        raise HTTPException(404, f"Record {record_id} not found")
+    return json.loads(pr.model_dump_json())
+
+
+@app.get("/api/records/uncertain/list")
+async def list_uncertain_records():
+    """Get all records needing human verification."""
+    uncertain = [
+        _serialize_record_summary(pr)
+        for pr in runner.records.values()
+        if pr.final_decision == DecisionLabel.UNCERTAIN
+    ]
+    return {"count": len(uncertain), "records": uncertain}
+
+
+@app.get("/api/records/fulltext-needed/list")
+async def list_fulltext_needed():
+    """Get list of papers where full text is needed."""
+    needed = [
+        pr for pr in runner.records.values()
+        if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED
+    ]
+    return {
+        "count": len(needed),
+        "records": [
+            {
+                "record_id": pr.record_id,
+                "title": pr.dedup.title if pr.dedup else "",
+                "authors": pr.dedup.authors if pr.dedup else "",
+                "year": pr.dedup.year if pr.dedup else None,
+                "doi": pr.dedup.doi if pr.dedup else "",
+                "journal_venue": pr.dedup.journal_venue if pr.dedup else "",
+                "url": pr.dedup.url if pr.dedup else "",
+                "source_db": pr.dedup.source_db if pr.dedup else "",
+            }
+            for pr in needed
+        ]
+    }
+
+
+# ─────────────────────────────────────────────────────
+# HUMAN VERIFICATION
+# ─────────────────────────────────────────────────────
+
+class HumanDecisionRequest(BaseModel):
+    decision: str  # "Included" | "Excluded" | "Needs Human Verification"
+    rationale: str
+    reviewer: str = "human"
+    corrections: Optional[Dict[str, Any]] = None
+
+
+@app.post("/api/records/{record_id}/verify")
+async def apply_human_decision(record_id: str, request: HumanDecisionRequest):
+    """Apply human reviewer's decision to a record."""
+    try:
+        decision = DecisionLabel(request.decision)
+    except ValueError:
+        raise HTTPException(400, f"Invalid decision: {request.decision}")
+
+    success = runner.apply_human_decision(
+        record_id=record_id,
+        decision=decision,
+        rationale=request.rationale,
+        reviewer=request.reviewer,
+        corrections=request.corrections,
+    )
+
+    if not success:
+        raise HTTPException(404, f"Record {record_id} not found")
+
+    return {"status": "updated", "record_id": record_id, "decision": request.decision}
+
+
+@app.patch("/api/records/{record_id}/extraction")
+async def update_extraction(record_id: str, updates: Dict[str, Any]):
+    """Update specific extraction fields for a record."""
+    pr = runner.records.get(record_id)
+    if not pr:
+        raise HTTPException(404, f"Record {record_id} not found")
+
+    if not pr.extracted or not pr.extracted.extraction_final:
+        raise HTTPException(400, "No extraction data to update")
+
+    for field, value in updates.items():
+        if hasattr(pr.extracted.extraction_final, field):
+            setattr(pr.extracted.extraction_final, field, value)
+        else:
+            raise HTTPException(400, f"Unknown extraction field: {field}")
+
+    pr.extracted.human_verified = True
+    pr.extracted.human_corrections.update(updates)
+    pr.updated_at = datetime.utcnow()
+    runner._save_state()
+
+    return {"status": "updated", "record_id": record_id, "updated_fields": list(updates.keys())}
+
+
+# ─────────────────────────────────────────────────────
+# PDF UPLOAD
+# ─────────────────────────────────────────────────────
+
+@app.post("/api/pdfs/upload")
+async def upload_pdf(
+    file: UploadFile = File(...),
+    record_id: str = Form(...),
+):
+    """Upload a PDF for a record that needs full text."""
+    pr = runner.records.get(record_id)
+    if not pr:
+        raise HTTPException(404, f"Record {record_id} not found")
+
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(400, "Only PDF files are accepted")
+
+    pdf_dir = Path(settings.pdf_dir)
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    save_path = pdf_dir / f"{record_id}.pdf"
+
+    with open(save_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # Update record state
+    if pr.screened:
+        pr.screened.pdf_path = str(save_path)
+        pr.screened.fulltext_available = True
+
+    # Move from Full Text Needed back to title-screened included (for fulltext screening)
+    if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED:
+        pr.final_decision = DecisionLabel.INCLUDE  # ready for fulltext screening
+
+    pr.updated_at = datetime.utcnow()
+    runner._save_state()
+
+    return {
+        "status": "uploaded",
+        "record_id": record_id,
+        "pdf_path": str(save_path),
+        "message": "PDF uploaded. Run full-text screening to process this record.",
+    }
+
+
+@app.post("/api/pdfs/upload-batch")
+async def upload_pdfs_batch(files: List[UploadFile] = File(...)):
+    """Upload multiple PDFs. Filename should be record_id.pdf or doi_safe.pdf."""
+    pdf_dir = Path(settings.pdf_dir)
+    pdf_dir.mkdir(parents=True, exist_ok=True)
+    results = []
+
+    for file in files:
+        if not file.filename.endswith(".pdf"):
+            results.append({"filename": file.filename, "status": "skipped (not PDF)"})
+            continue
+
+        save_path = pdf_dir / file.filename
+        with open(save_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+        results.append({"filename": file.filename, "status": "uploaded", "path": str(save_path)})
+
+    return {"uploaded": len([r for r in results if r["status"] == "uploaded"]), "results": results}
+
+
+# ─────────────────────────────────────────────────────
+# CONFIGURATION
+# ─────────────────────────────────────────────────────
+
+@app.get("/api/config/models")
+async def get_model_config():
+    """Get current model configuration."""
+    return {
+        "model_title_screening": settings.model_title_screening,
+        "model_fulltext_screening": settings.model_fulltext_screening,
+        "model_extraction": settings.model_extraction,
+        "model_qa_assessment": settings.model_qa_assessment,
+        "model_synthesis": settings.model_synthesis,
+        "model_agent2_screening": settings.model_agent2_screening,
+        "model_agent2_extraction": settings.model_agent2_extraction,
+        "confidence_threshold": settings.confidence_threshold,
+        "agreement_required": settings.agreement_required,
+    }
+
+
+class ModelConfigUpdate(BaseModel):
+    model_title_screening: Optional[str] = None
+    model_fulltext_screening: Optional[str] = None
+    model_extraction: Optional[str] = None
+    model_qa_assessment: Optional[str] = None
+    model_synthesis: Optional[str] = None
+    model_agent2_screening: Optional[str] = None
+    model_agent2_extraction: Optional[str] = None
+    confidence_threshold: Optional[float] = None
+
+
+@app.patch("/api/config/models")
+async def update_model_config(updates: ModelConfigUpdate):
+    """Update model configuration (runtime, not persisted to env)."""
+    changed = {}
+    for field, value in updates.model_dump(exclude_none=True).items():
+        setattr(settings, field, value)
+        changed[field] = value
+
+    # Persist to .env file
+    _update_env_file(changed)
+
+    return {"status": "updated", "changed": changed}
+
+
+# ─────────────────────────────────────────────────────
+# EXPORTS
+# ─────────────────────────────────────────────────────
+
+@app.get("/api/export/evidence-table")
+async def export_evidence_table():
+    """Export evidence table as JSON."""
+    table = runner.export_evidence_table()
+    return {"count": len(table), "rows": table}
+
+
+@app.get("/api/export/evidence-table/csv")
+async def export_evidence_table_csv():
+    """Export evidence table as CSV file."""
+    import csv
+    import io
+
+    table = runner.export_evidence_table()
+    if not table:
+        raise HTTPException(404, "No included studies to export")
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=table[0].keys())
+    writer.writeheader()
+    writer.writerows(table)
+
+    from fastapi.responses import Response
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=evidence_table.csv"},
+    )
+
+
+@app.get("/api/export/prisma")
+async def export_prisma_counts():
+    """Export PRISMA 2020 flow diagram counts."""
+    return runner.get_prisma_counts()
+
+
+@app.get("/api/export/all-records")
+async def export_all_records():
+    """Export complete pipeline state as JSON."""
+    out_path = Path(settings.output_dir) / "full_export.json"
+    all_data = {
+        "exported_at": datetime.utcnow().isoformat(),
+        "prisma_counts": runner.get_prisma_counts(),
+        "records": [json.loads(pr.model_dump_json()) for pr in runner.records.values()],
+    }
+    with open(out_path, "w") as f:
+        json.dump(all_data, f, indent=2, default=str)
+    return FileResponse(str(out_path), filename="systematic_review_export.json")
+
+
+# ─────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────
+
+def _serialize_record_summary(pr: PipelineRecord) -> Dict:
+    """Lightweight record summary for list views."""
+    title = ""
+    if pr.dedup:
+        title = pr.dedup.title
+    elif pr.raw:
+        title = pr.raw.title
+
+    agents_agree = None
+    if pr.screened:
+        active = pr.screened.fulltext_screening or pr.screened.title_screening
+        if active:
+            agents_agree = active.agents_agree
+
+    uncertain_extraction_fields = []
+    if pr.extracted and pr.extracted.extraction_final:
+        uncertain_extraction_fields = pr.extracted.extraction_final.uncertain_fields or []
+
+    return {
+        "record_id": pr.record_id,
+        "study_id": pr.study_id,
+        "title": title,
+        "authors": pr.dedup.authors if pr.dedup else "",
+        "year": pr.dedup.year if pr.dedup else None,
+        "source_db": pr.dedup.source_db if pr.dedup else (pr.raw.source_db if pr.raw else ""),
+        "final_decision": pr.final_decision,
+        "pipeline_stage": pr.pipeline_stage,
+        "agents_agree": agents_agree,
+        "human_verified": (pr.extracted.human_verified if pr.extracted else False),
+        "uncertain_extraction_fields": uncertain_extraction_fields,
+        "updated_at": pr.updated_at.isoformat(),
+    }
+
+
+def _update_env_file(changes: Dict[str, Any]):
+    """Update .env file with new values."""
+    env_path = Path(".env")
+    lines = []
+
+    if env_path.exists():
+        with open(env_path) as f:
+            lines = f.readlines()
+
+    # Update existing keys or append
+    updated_keys = set()
+    new_lines = []
+    for line in lines:
+        key = line.split("=")[0].strip().upper()
+        env_key = {
+            "model_title_screening": "MODEL_TITLE_SCREENING",
+            "model_fulltext_screening": "MODEL_FULLTEXT_SCREENING",
+            "model_extraction": "MODEL_EXTRACTION",
+            "model_qa_assessment": "MODEL_QA_ASSESSMENT",
+            "model_synthesis": "MODEL_SYNTHESIS",
+            "model_agent2_screening": "MODEL_AGENT2_SCREENING",
+            "model_agent2_extraction": "MODEL_AGENT2_EXTRACTION",
+            "confidence_threshold": "CONFIDENCE_THRESHOLD",
+        }
+        matched = next((k for k, v in env_key.items() if v == key), None)
+        if matched and matched in changes:
+            new_lines.append(f"{key}={changes[matched]}\n")
+            updated_keys.add(matched)
+        else:
+            new_lines.append(line)
+
+    # Append new keys
+    env_key_map = {
+        "model_title_screening": "MODEL_TITLE_SCREENING",
+        "model_fulltext_screening": "MODEL_FULLTEXT_SCREENING",
+        "model_extraction": "MODEL_EXTRACTION",
+        "confidence_threshold": "CONFIDENCE_THRESHOLD",
+    }
+    for k, v in changes.items():
+        if k not in updated_keys:
+            env_key = k.upper()
+            new_lines.append(f"{env_key}={v}\n")
+
+    with open(env_path, "w") as f:
+        f.writelines(new_lines)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

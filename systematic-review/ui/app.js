@@ -1,0 +1,738 @@
+/**
+ * Systematic Review UI — app.js
+ * Communicates with FastAPI backend at /api/*
+ */
+
+const API = '/api';
+let currentRecordId = null;
+let pipelineLogInterval = null;
+
+// ─────────────────────────────────────────────
+// NAVIGATION
+// ─────────────────────────────────────────────
+
+document.querySelectorAll('.nav-item').forEach(link => {
+  link.addEventListener('click', e => {
+    e.preventDefault();
+    const panel = link.dataset.panel;
+    switchPanel(panel);
+    link.closest('ul').querySelectorAll('.nav-item').forEach(l => l.classList.remove('active'));
+    link.classList.add('active');
+  });
+});
+
+function switchPanel(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const target = document.getElementById(`panel-${name}`);
+  if (target) target.classList.add('active');
+  // Load data for panel
+  if (name === 'dashboard') loadDashboard();
+  if (name === 'verify') loadVerifyQueue();
+  if (name === 'fulltext') loadFulltextNeeded();
+  if (name === 'included') loadIncluded();
+  if (name === 'excluded') loadExcluded();
+  if (name === 'config') loadConfig();
+  if (name === 'export') loadExportPreview();
+}
+
+// ─────────────────────────────────────────────
+// API HELPERS
+// ─────────────────────────────────────────────
+
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || res.statusText);
+  }
+  return res.json();
+}
+
+async function apiPost(path, body) {
+  return apiFetch(path, { method: 'POST', body: JSON.stringify(body) });
+}
+
+async function apiPatch(path, body) {
+  return apiFetch(path, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+// ─────────────────────────────────────────────
+// DASHBOARD
+// ─────────────────────────────────────────────
+
+async function loadDashboard() {
+  try {
+    const status = await apiFetch('/pipeline/status');
+    const p = status.prisma_counts;
+
+    setText('stat-identified', p.identified ?? '—');
+    setText('stat-after-dedup', p.after_dedup ?? '—');
+    setText('stat-title-included', p.title_abstract_included ?? '—');
+    setText('stat-fulltext-needed', p.full_text_needed ?? '—');
+    setText('stat-final-included', p.final_included ?? '—');
+    setText('stat-needs-human', p.needs_human_verification ?? '—');
+
+    setBadge('badge-uncertain', p.needs_human_verification);
+    setBadge('badge-fulltext', p.full_text_needed);
+
+    renderPrismaFlow(p);
+    await loadRecentRecords();
+  } catch (e) {
+    console.error('Dashboard load error:', e);
+  }
+}
+
+function renderPrismaFlow(p) {
+  const el = document.getElementById('prisma-flow');
+  el.innerHTML = `
+    <div style="font-size:13px; line-height:2.2;">
+      <div class="prisma-row">
+        <div class="prisma-box">
+          <div class="pbox-count">${p.identified ?? '—'}</div>
+          <div class="pbox-label">Records Identified</div>
+        </div>
+      </div>
+      <div class="prisma-arrow">↓</div>
+      <div class="prisma-row">
+        <div class="prisma-box">
+          <div class="pbox-count">${p.after_dedup ?? '—'}</div>
+          <div class="pbox-label">After Deduplication</div>
+        </div>
+        <div class="prisma-side">← ${p.duplicates_removed ?? 0} duplicates removed</div>
+      </div>
+      <div class="prisma-arrow">↓</div>
+      <div class="prisma-row">
+        <div class="prisma-box">
+          <div class="pbox-count">${p.title_abstract_included ?? '—'}</div>
+          <div class="pbox-label">Title/Abstract Included</div>
+        </div>
+        <div class="prisma-side">← ${p.title_abstract_excluded ?? 0} excluded at T/A</div>
+      </div>
+      <div class="prisma-arrow">↓</div>
+      <div class="prisma-row">
+        <div class="prisma-box" style="border-color: var(--orange);">
+          <div class="pbox-count" style="color:var(--orange);">${p.full_text_needed ?? '—'}</div>
+          <div class="pbox-label">Full Text Needed</div>
+        </div>
+      </div>
+      <div class="prisma-arrow">↓</div>
+      <div class="prisma-row">
+        <div class="prisma-box" style="border-color: var(--green);">
+          <div class="pbox-count" style="color:var(--green);">${p.final_included ?? '—'}</div>
+          <div class="pbox-label">Final Included</div>
+        </div>
+        <div class="prisma-side">← ${p.full_text_excluded ?? 0} excluded at full-text</div>
+      </div>
+      ${p.needs_human_verification > 0 ? `
+      <div class="mt-3" style="color:var(--orange); font-size:12px;">
+        ⚠ ${p.needs_human_verification} records need human verification
+      </div>` : ''}
+    </div>
+  `;
+}
+
+async function loadRecentRecords() {
+  const data = await apiFetch('/records?page=1&page_size=10');
+  const el = document.getElementById('recent-records');
+  if (!data.records.length) {
+    el.innerHTML = '<div class="empty-state">No records yet. Run import to begin.</div>';
+    return;
+  }
+  el.innerHTML = data.records.map(r => recordRow(r)).join('');
+}
+
+function recordRow(r) {
+  const pill = decisionPill(r.final_decision);
+  return `
+    <div class="record-row" onclick="openVerifyModal('${r.record_id}')">
+      <div>
+        <div class="record-title">${esc(r.title)}</div>
+        <div class="record-meta">${r.authors || ''} · ${r.year || ''} · ${r.source_db || ''}</div>
+      </div>
+      <div>${pill}</div>
+      <div style="font-size:11px; color:var(--text-muted);">${r.pipeline_stage || ''}</div>
+      <div style="font-size:11px; color:var(--text-muted);">${r.agents_agree === false ? '⚡ Disagree' : ''}</div>
+    </div>
+  `;
+}
+
+function decisionPill(d) {
+  const map = {
+    'Included': 'pill-green',
+    'Excluded': 'pill-red',
+    'Needs Human Verification': 'pill-orange',
+    'Full Text Needed': 'pill-blue',
+  };
+  return `<span class="pill ${map[d] || 'pill-gray'}">${d || 'Unknown'}</span>`;
+}
+
+// ─────────────────────────────────────────────
+// HUMAN VERIFICATION
+// ─────────────────────────────────────────────
+
+async function loadVerifyQueue() {
+  try {
+    const data = await apiFetch('/records/uncertain/list');
+    const el = document.getElementById('verify-list');
+
+    if (!data.records.length) {
+      el.innerHTML = '<div class="empty-state">🎉 No records need verification right now.</div>';
+      return;
+    }
+
+    el.innerHTML = data.records.map(r => `
+      <div class="verify-card" onclick="openVerifyModal('${r.record_id}')">
+        <div>
+          <div class="verify-card-title">${esc(r.title)}</div>
+          <div class="verify-card-meta">${r.authors || ''} · ${r.year || ''} · ${r.source_db || ''}</div>
+          ${r.uncertain_extraction_fields && r.uncertain_extraction_fields.length ?
+            `<div class="verify-card-reason">⚠ Uncertain extraction fields: ${r.uncertain_extraction_fields.join(', ')}</div>` :
+            `<div class="verify-card-reason">⚡ Agents disagree or low confidence</div>`
+          }
+        </div>
+        <div>
+          <button class="btn btn-sm btn-primary">Review →</button>
+        </div>
+      </div>
+    `).join('');
+
+    setBadge('badge-uncertain', data.count);
+  } catch (e) {
+    toast('error', 'Failed to load verification queue: ' + e.message);
+  }
+}
+
+async function openVerifyModal(recordId) {
+  currentRecordId = recordId;
+  try {
+    const rec = await apiFetch(`/records/${recordId}`);
+    const modal = document.getElementById('verify-modal');
+
+    // Title
+    document.getElementById('modal-title').textContent =
+      rec.dedup?.title || rec.raw?.title || 'Record';
+
+    // Metadata
+    const d = rec.dedup || rec.raw || {};
+    document.getElementById('modal-metadata').innerHTML = `
+      <span class="meta-key">Authors</span><span class="meta-val">${d.authors || '—'}</span>
+      <span class="meta-key">Year</span><span class="meta-val">${d.year || '—'}</span>
+      <span class="meta-key">Journal</span><span class="meta-val">${d.journal_venue || '—'}</span>
+      <span class="meta-key">DOI</span><span class="meta-val">${d.doi || '—'}</span>
+      <span class="meta-key">Source DB</span><span class="meta-val">${d.source_db || '—'}</span>
+      <span class="meta-key">Stage</span><span class="meta-val">${rec.pipeline_stage || '—'}</span>
+      <span class="meta-key">Decision</span><span class="meta-val">${rec.final_decision || '—'}</span>
+    `;
+
+    // Abstract
+    document.getElementById('modal-abstract').textContent = d.abstract || '[No abstract]';
+
+    // Agent decisions
+    renderAgentDecisions(rec);
+
+    // Extraction section
+    renderExtractionSection(rec);
+
+    modal.classList.remove('hidden');
+  } catch (e) {
+    toast('error', 'Failed to load record: ' + e.message);
+  }
+}
+
+function renderAgentDecisions(rec) {
+  const el = document.getElementById('modal-agent-decisions');
+  const s = rec.screened;
+  if (!s) { el.innerHTML = '<div class="agent-box">No screening data yet.</div>'; return; }
+
+  const active = s.fulltext_screening || s.title_screening;
+  if (!active) { el.innerHTML = '<div class="agent-box">No screening data yet.</div>'; return; }
+
+  function agentBox(agent, label) {
+    if (!agent) return '';
+    const color = agent.decision === 'Included' ? 'var(--green)' :
+                  agent.decision === 'Excluded' ? 'var(--red)' : 'var(--orange)';
+    const pct = Math.round((agent.confidence || 0) * 100);
+    return `
+      <div class="agent-box">
+        <div class="agent-box-header">${label} · <code>${agent.model_used}</code></div>
+        <div class="agent-decision-label" style="color:${color}">${agent.decision}</div>
+        <div class="confidence-bar">
+          <div class="confidence-fill" style="width:${pct}%; background:${color}"></div>
+        </div>
+        <div style="font-size:11px; color:var(--text-dim); margin-bottom:6px;">Confidence: ${pct}%</div>
+        <div class="agent-rationale">${esc(agent.rationale || '')}</div>
+        ${agent.exclusion_code ? `<div class="pill pill-red mt-2">${agent.exclusion_code}</div>` : ''}
+      </div>
+    `;
+  }
+
+  el.innerHTML = agentBox(active.agent1, 'Agent 1') + agentBox(active.agent2, 'Agent 2');
+}
+
+function renderExtractionSection(rec) {
+  const section = document.getElementById('modal-extraction-section');
+  const grid = document.getElementById('modal-extraction-fields');
+
+  if (!rec.extracted || !rec.extracted.extraction_final) {
+    section.classList.add('hidden');
+    return;
+  }
+
+  section.classList.remove('hidden');
+  const ef = rec.extracted.extraction_final;
+  const uncertain = ef.uncertain_fields || [];
+
+  // Key fields to show
+  const fields = [
+    ['model_name', 'Model Name', 'text'],
+    ['model_type', 'Model Type', 'text'],
+    ['workflow_structure', 'Workflow Structure', 'text'],
+    ['analytic_task', 'Analytic Task', 'text'],
+    ['qualitative_approach', 'Qualitative Approach', 'text'],
+    ['human_comparison', 'Human Comparison', 'boolean'],
+    ['domain', 'Domain', 'text'],
+    ['data_type', 'Data Type', 'text'],
+    ['key_findings', 'Key Findings', 'textarea'],
+    ['limitations_reported', 'Limitations', 'textarea'],
+  ];
+
+  grid.innerHTML = fields.map(([field, label, type]) => {
+    const val = ef[field];
+    const isUncertain = uncertain.includes(field);
+    const displayVal = Array.isArray(val) ? val.join(', ') : (val ?? '');
+    const inputEl = type === 'textarea'
+      ? `<textarea id="ef-${field}" class="form-control" rows="2">${esc(String(displayVal))}</textarea>`
+      : `<input type="text" id="ef-${field}" class="form-control" value="${esc(String(displayVal))}" />`;
+
+    return `
+      <div class="extraction-field ${isUncertain ? 'uncertain' : ''}">
+        <label>${label} ${isUncertain ? '⚠' : ''}</label>
+        ${inputEl}
+      </div>
+    `;
+  }).join('');
+}
+
+function closeVerifyModal() {
+  document.getElementById('verify-modal').classList.add('hidden');
+  currentRecordId = null;
+}
+
+async function submitHumanDecision(decision) {
+  const rationale = document.getElementById('human-rationale').value.trim();
+  if (!rationale) {
+    toast('error', 'Please provide a rationale before submitting.');
+    return;
+  }
+
+  const reviewer = document.getElementById('human-reviewer').value.trim() || 'Reviewer';
+
+  // Collect extraction corrections if visible
+  let corrections = null;
+  const section = document.getElementById('modal-extraction-section');
+  if (!section.classList.contains('hidden')) {
+    corrections = {};
+    const fields = ['model_name', 'model_type', 'workflow_structure', 'analytic_task',
+                    'qualitative_approach', 'domain', 'data_type', 'key_findings', 'limitations_reported'];
+    fields.forEach(f => {
+      const el = document.getElementById(`ef-${f}`);
+      if (el) corrections[f] = el.value;
+    });
+  }
+
+  try {
+    await apiPost(`/records/${currentRecordId}/verify`, {
+      decision,
+      rationale,
+      reviewer,
+      corrections,
+    });
+    toast('success', `Decision saved: ${decision}`);
+    closeVerifyModal();
+    loadVerifyQueue();
+    loadDashboard();
+  } catch (e) {
+    toast('error', 'Failed to save decision: ' + e.message);
+  }
+}
+
+// ─────────────────────────────────────────────
+// FULL TEXT NEEDED
+// ─────────────────────────────────────────────
+
+async function loadFulltextNeeded() {
+  try {
+    const data = await apiFetch('/records/fulltext-needed/list');
+    const el = document.getElementById('fulltext-table');
+    const select = document.getElementById('fulltext-record-select');
+
+    setBadge('badge-fulltext', data.count);
+
+    // Populate select
+    select.innerHTML = '<option value="">— Select record —</option>' +
+      data.records.map(r =>
+        `<option value="${r.record_id}">${esc(r.title.substring(0, 60))} (${r.year})</option>`
+      ).join('');
+
+    if (!data.records.length) {
+      el.innerHTML = '<div class="empty-state">No papers need full text right now.</div>';
+      return;
+    }
+
+    el.innerHTML = `
+      <div class="evidence-table-wrap">
+        <table class="evidence-table">
+          <thead>
+            <tr>
+              <th>Title</th><th>Authors</th><th>Year</th><th>DOI</th><th>Source</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${data.records.map(r => `
+              <tr>
+                <td title="${esc(r.title)}">${esc(r.title.substring(0, 60))}${r.title.length > 60 ? '…' : ''}</td>
+                <td>${esc(r.authors || '')}</td>
+                <td>${r.year || ''}</td>
+                <td><code>${r.doi || '—'}</code></td>
+                <td>${r.source_db || ''}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (e) {
+    toast('error', 'Failed to load full-text list: ' + e.message);
+  }
+}
+
+async function uploadSinglePDF() {
+  const recordId = document.getElementById('fulltext-record-select').value;
+  const fileInput = document.getElementById('single-pdf-input');
+
+  if (!recordId) { toast('error', 'Select a record first.'); return; }
+  if (!fileInput.files.length) { toast('error', 'Select a PDF file first.'); return; }
+
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  formData.append('record_id', recordId);
+
+  try {
+    const res = await fetch(`${API}/pdfs/upload`, { method: 'POST', body: formData });
+    if (!res.ok) throw new Error((await res.json()).detail);
+    toast('success', 'PDF uploaded successfully!');
+    fileInput.value = '';
+    loadFulltextNeeded();
+  } catch (e) {
+    toast('error', 'Upload failed: ' + e.message);
+  }
+}
+
+async function handlePDFUpload(event) {
+  const files = Array.from(event.target.files);
+  if (!files.length) return;
+
+  const formData = new FormData();
+  files.forEach(f => formData.append('files', f));
+
+  try {
+    const res = await fetch(`${API}/pdfs/upload-batch`, { method: 'POST', body: formData });
+    const data = await res.json();
+    toast('success', `Uploaded ${data.uploaded} PDFs`);
+    loadFulltextNeeded();
+  } catch (e) {
+    toast('error', 'Batch upload failed: ' + e.message);
+  }
+}
+
+// Drag and drop
+const dropZone = document.getElementById('upload-zone');
+if (dropZone) {
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.style.borderColor = 'var(--accent)'; });
+  dropZone.addEventListener('dragleave', () => { dropZone.style.borderColor = ''; });
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.style.borderColor = '';
+    const input = document.getElementById('pdf-file-input');
+    input.files = e.dataTransfer.files;
+    handlePDFUpload({ target: input });
+  });
+}
+
+// ─────────────────────────────────────────────
+// INCLUDED / EXCLUDED PANELS
+// ─────────────────────────────────────────────
+
+async function loadIncluded() {
+  try {
+    const data = await apiFetch('/export/evidence-table');
+    const el = document.getElementById('included-table');
+
+    if (!data.rows.length) {
+      el.innerHTML = '<div class="empty-state">No included studies yet.</div>';
+      return;
+    }
+
+    const cols = ['study_id', 'title', 'authors', 'year', 'domain',
+                  'model_name', 'analytic_task', 'workflow_structure', 'qa_score'];
+
+    el.innerHTML = `
+      <div class="evidence-table-wrap">
+        <table class="evidence-table">
+          <thead>
+            <tr>${cols.map(c => `<th>${c.replace(/_/g, ' ')}</th>`).join('')}</tr>
+          </thead>
+          <tbody>
+            ${data.rows.map(r => `
+              <tr>
+                ${cols.map(c => `<td title="${esc(String(r[c] ?? ''))}">${esc(String(r[c] ?? ''))}</td>`).join('')}
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (e) {
+    toast('error', 'Failed to load included studies: ' + e.message);
+  }
+}
+
+async function loadExcluded() {
+  try {
+    const data = await apiFetch('/records?decision=Excluded&page_size=100');
+    const el = document.getElementById('excluded-table');
+
+    if (!data.records.length) {
+      el.innerHTML = '<div class="empty-state">No excluded records yet.</div>';
+      return;
+    }
+
+    el.innerHTML = data.records.map(r => recordRow(r)).join('');
+  } catch (e) {
+    toast('error', 'Failed to load excluded records: ' + e.message);
+  }
+}
+
+// ─────────────────────────────────────────────
+// PIPELINE
+// ─────────────────────────────────────────────
+
+function logLine(msg) {
+  const el = document.getElementById('pipeline-log');
+  const ts = new Date().toLocaleTimeString();
+  el.textContent += `[${ts}] ${msg}\n`;
+  el.scrollTop = el.scrollHeight;
+}
+
+function clearLog() {
+  document.getElementById('pipeline-log').textContent = '';
+}
+
+async function runStage(stage, limitInputId = null) {
+  const limit = limitInputId
+    ? (parseInt(document.getElementById(limitInputId)?.value) || null)
+    : null;
+
+  logLine(`Starting stage: ${stage}${limit ? ` (limit: ${limit})` : ''} ...`);
+
+  try {
+    const res = await apiPost('/pipeline/run', { stage, limit });
+    logLine(`Stage ${stage} started in background. Status: ${res.status}`);
+    toast('info', `Pipeline stage "${stage}" running...`);
+
+    // Poll status every 3s
+    const interval = setInterval(async () => {
+      try {
+        const status = await apiFetch('/pipeline/status');
+        const p = status.prisma_counts;
+        logLine(`Status: identified=${p.identified}, included=${p.final_included}, uncertain=${p.needs_human_verification}`);
+        loadDashboard();
+      } catch {}
+    }, 3000);
+    setTimeout(() => clearInterval(interval), 120000); // stop polling after 2min
+  } catch (e) {
+    logLine(`ERROR: ${e.message}`);
+    toast('error', `Pipeline error: ${e.message}`);
+  }
+}
+
+// ─────────────────────────────────────────────
+// MODEL CONFIG
+// ─────────────────────────────────────────────
+
+async function loadConfig() {
+  try {
+    const cfg = await apiFetch('/config/models');
+    setSelectValue('cfg-title-screening', cfg.model_title_screening);
+    setSelectValue('cfg-fulltext-screening', cfg.model_fulltext_screening);
+    setSelectValue('cfg-extraction', cfg.model_extraction);
+    setSelectValue('cfg-qa-assessment', cfg.model_qa_assessment);
+    setSelectValue('cfg-agent2-screening', cfg.model_agent2_screening);
+    setSelectValue('cfg-agent2-extraction', cfg.model_agent2_extraction);
+    const ci = document.getElementById('cfg-confidence');
+    if (ci) ci.value = cfg.confidence_threshold;
+  } catch (e) {
+    console.warn('Config load error:', e);
+  }
+}
+
+function configChanged() {
+  // Visual indicator that config has unsaved changes
+  const status = document.getElementById('config-status');
+  if (status) {
+    status.textContent = 'Unsaved changes';
+    status.className = 'status-msg';
+    status.classList.remove('hidden');
+  }
+}
+
+async function saveConfig() {
+  const updates = {
+    model_title_screening: getVal('cfg-title-screening'),
+    model_fulltext_screening: getVal('cfg-fulltext-screening'),
+    model_extraction: getVal('cfg-extraction'),
+    model_qa_assessment: getVal('cfg-qa-assessment'),
+    model_agent2_screening: getVal('cfg-agent2-screening'),
+    model_agent2_extraction: getVal('cfg-agent2-extraction'),
+    confidence_threshold: parseFloat(getVal('cfg-confidence')) || 0.8,
+  };
+
+  try {
+    await apiPatch('/config/models', updates);
+    const status = document.getElementById('config-status');
+    status.textContent = '✓ Configuration saved';
+    status.className = 'status-msg success';
+    status.classList.remove('hidden');
+    toast('success', 'Model configuration saved');
+    setTimeout(() => status.classList.add('hidden'), 3000);
+  } catch (e) {
+    toast('error', 'Failed to save config: ' + e.message);
+  }
+}
+
+async function saveApiKey() {
+  const key = document.getElementById('api-key-input').value.trim();
+  if (!key) { toast('error', 'Enter an API key first.'); return; }
+  // Write to backend (which writes to .env)
+  try {
+    await apiPatch('/config/models', { openai_api_key: key });
+    document.getElementById('api-key-input').value = '';
+    toast('success', 'API key saved to .env');
+  } catch (e) {
+    toast('error', 'Failed to save API key: ' + e.message);
+  }
+}
+
+// ─────────────────────────────────────────────
+// EXPORT
+// ─────────────────────────────────────────────
+
+async function loadExportPreview() {
+  try {
+    const p = await apiFetch('/export/prisma');
+    const el = document.getElementById('prisma-preview');
+    el.innerHTML = `
+      <table>
+        <thead><tr><th>PRISMA Stage</th><th>Count</th></tr></thead>
+        <tbody>
+          ${Object.entries(p).map(([k, v]) =>
+            `<tr><td>${k.replace(/_/g, ' ')}</td><td><strong>${v}</strong></td></tr>`
+          ).join('')}
+        </tbody>
+      </table>
+    `;
+  } catch (e) {
+    console.warn('Export preview error:', e);
+  }
+}
+
+async function exportCSV() {
+  window.open(`${API}/export/evidence-table/csv`, '_blank');
+}
+
+async function downloadExport(type) {
+  const urlMap = {
+    csv: `${API}/export/evidence-table/csv`,
+    json: `${API}/export/evidence-table`,
+    prisma: `${API}/export/prisma`,
+    full: `${API}/export/all-records`,
+  };
+  window.open(urlMap[type], '_blank');
+}
+
+// ─────────────────────────────────────────────
+// UTILITIES
+// ─────────────────────────────────────────────
+
+function refreshAll() {
+  loadDashboard();
+  loadVerifyQueue();
+  toast('info', 'Refreshed');
+}
+
+function setText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = val;
+}
+
+function setBadge(id, count) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (count > 0) {
+    el.textContent = count;
+    el.style.display = '';
+  } else {
+    el.style.display = 'none';
+  }
+}
+
+function setSelectValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el || !value) return;
+  // Add as option if not present
+  let found = false;
+  for (const opt of el.options) {
+    if (opt.value === value) { found = true; break; }
+  }
+  if (!found) {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = value;
+    el.appendChild(opt);
+  }
+  el.value = value;
+}
+
+function getVal(id) {
+  const el = document.getElementById(id);
+  return el ? el.value : '';
+}
+
+function esc(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function toast(type, message) {
+  const container = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  const icons = { success: '✓', error: '✕', info: 'ℹ' };
+  el.innerHTML = `<span>${icons[type] || ''}</span> ${esc(message)}`;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 4000);
+}
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadDashboard();
+});

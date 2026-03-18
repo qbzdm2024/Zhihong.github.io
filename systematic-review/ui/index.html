@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Systematic Review — LLMs in QDA</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="app">
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1>SysRev</h1>
+      <p class="sidebar-subtitle">LLMs in QDA · 2023–2026</p>
+    </div>
+    <ul class="nav-links">
+      <li><a href="#" class="nav-item active" data-panel="dashboard">
+        <span class="nav-icon">📊</span> Dashboard
+      </a></li>
+      <li><a href="#" class="nav-item" data-panel="verify">
+        <span class="nav-icon">🔍</span> Human Verification
+        <span class="badge" id="badge-uncertain">0</span>
+      </a></li>
+      <li><a href="#" class="nav-item" data-panel="fulltext">
+        <span class="nav-icon">📄</span> Full Text Needed
+        <span class="badge badge-orange" id="badge-fulltext">0</span>
+      </a></li>
+      <li><a href="#" class="nav-item" data-panel="included">
+        <span class="nav-icon">✅</span> Included
+      </a></li>
+      <li><a href="#" class="nav-item" data-panel="excluded">
+        <span class="nav-icon">❌</span> Excluded
+      </a></li>
+      <li><a href="#" class="nav-item" data-panel="pipeline">
+        <span class="nav-icon">⚙️</span> Run Pipeline
+      </a></li>
+      <li><a href="#" class="nav-item" data-panel="config">
+        <span class="nav-icon">🛠</span> Model Config
+      </a></li>
+      <li><a href="#" class="nav-item" data-panel="export">
+        <span class="nav-icon">📥</span> Export
+      </a></li>
+    </ul>
+  </nav>
+
+  <!-- MAIN CONTENT -->
+  <main class="main-content">
+
+    <!-- DASHBOARD PANEL -->
+    <div id="panel-dashboard" class="panel active">
+      <div class="panel-header">
+        <h2>Dashboard</h2>
+        <button class="btn btn-sm btn-ghost" onclick="refreshAll()">↻ Refresh</button>
+      </div>
+
+      <!-- PRISMA Flow Cards -->
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Identified</div>
+          <div class="stat-value" id="stat-identified">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">After Dedup</div>
+          <div class="stat-value" id="stat-after-dedup">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Title/Abs Included</div>
+          <div class="stat-value" id="stat-title-included">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Full Text Needed</div>
+          <div class="stat-value stat-orange" id="stat-fulltext-needed">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Final Included</div>
+          <div class="stat-value stat-green" id="stat-final-included">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Needs Human</div>
+          <div class="stat-value stat-red" id="stat-needs-human">—</div>
+        </div>
+      </div>
+
+      <!-- PRISMA Flow Diagram -->
+      <div class="card mt-4">
+        <div class="card-header">PRISMA 2020 Flow</div>
+        <div id="prisma-flow" class="prisma-flow"></div>
+      </div>
+
+      <!-- Recent Activity -->
+      <div class="card mt-4">
+        <div class="card-header">Recent Records</div>
+        <div id="recent-records" class="record-list"></div>
+      </div>
+    </div>
+
+    <!-- HUMAN VERIFICATION PANEL -->
+    <div id="panel-verify" class="panel">
+      <div class="panel-header">
+        <h2>Human Verification Queue</h2>
+        <span class="panel-subtitle">Records where agents disagree or are uncertain</span>
+      </div>
+
+      <div id="verify-list" class="verify-queue"></div>
+
+      <!-- Verification Modal -->
+      <div id="verify-modal" class="modal hidden">
+        <div class="modal-overlay" onclick="closeVerifyModal()"></div>
+        <div class="modal-box modal-wide">
+          <div class="modal-header">
+            <h3 id="modal-title">Review Record</h3>
+            <button class="modal-close" onclick="closeVerifyModal()">✕</button>
+          </div>
+          <div class="modal-body">
+            <!-- Record metadata -->
+            <div id="modal-metadata" class="metadata-grid"></div>
+
+            <!-- Abstract -->
+            <div class="section-label">Abstract</div>
+            <div id="modal-abstract" class="abstract-box"></div>
+
+            <!-- Agent Decisions -->
+            <div class="section-label">Agent Decisions</div>
+            <div id="modal-agent-decisions" class="agent-decisions-grid"></div>
+
+            <!-- Extraction fields (if at extraction stage) -->
+            <div id="modal-extraction-section" class="hidden">
+              <div class="section-label">Extraction Fields — Review & Edit</div>
+              <div id="modal-extraction-fields" class="extraction-grid"></div>
+            </div>
+
+            <!-- Human decision form -->
+            <div class="section-label">Your Decision</div>
+            <div class="decision-form">
+              <div class="decision-buttons">
+                <button class="btn btn-success" onclick="submitHumanDecision('Included')">✅ Include</button>
+                <button class="btn btn-danger" onclick="submitHumanDecision('Excluded')">❌ Exclude</button>
+                <button class="btn btn-secondary" onclick="submitHumanDecision('Needs Human Verification')">🔄 Keep Uncertain</button>
+              </div>
+              <div class="form-group mt-3">
+                <label class="form-label">Rationale <span class="required">*</span></label>
+                <textarea id="human-rationale" class="form-control" rows="3"
+                  placeholder="Explain your decision (required)..."></textarea>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Your name / initials</label>
+                <input type="text" id="human-reviewer" class="form-control form-control-sm"
+                  placeholder="e.g., ZH" value="Reviewer" />
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-ghost" onclick="closeVerifyModal()">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FULL TEXT NEEDED PANEL -->
+    <div id="panel-fulltext" class="panel">
+      <div class="panel-header">
+        <h2>Full Text Needed</h2>
+        <span class="panel-subtitle">Upload PDFs to enable full-text screening</span>
+      </div>
+
+      <div class="upload-zone" id="upload-zone">
+        <div class="upload-icon">📎</div>
+        <p>Drag & drop PDFs here, or click to select files</p>
+        <p class="upload-hint">Filename: <code>&lt;record_id&gt;.pdf</code></p>
+        <input type="file" id="pdf-file-input" multiple accept=".pdf" class="hidden"
+          onchange="handlePDFUpload(event)" />
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('pdf-file-input').click()">
+          Select PDFs
+        </button>
+      </div>
+
+      <!-- Upload with record_id association -->
+      <div class="card mt-4">
+        <div class="card-header">Upload PDF for Specific Record</div>
+        <div class="form-row">
+          <select id="fulltext-record-select" class="form-control">
+            <option value="">— Select record —</option>
+          </select>
+          <input type="file" id="single-pdf-input" accept=".pdf" class="form-control" />
+          <button class="btn btn-primary" onclick="uploadSinglePDF()">Upload</button>
+        </div>
+      </div>
+
+      <div id="fulltext-table" class="mt-4"></div>
+    </div>
+
+    <!-- INCLUDED PANEL -->
+    <div id="panel-included" class="panel">
+      <div class="panel-header">
+        <h2>Included Studies</h2>
+        <button class="btn btn-sm btn-primary" onclick="exportCSV()">Export CSV</button>
+      </div>
+      <div id="included-table"></div>
+    </div>
+
+    <!-- EXCLUDED PANEL -->
+    <div id="panel-excluded" class="panel">
+      <div class="panel-header">
+        <h2>Excluded Records</h2>
+      </div>
+      <div id="excluded-table"></div>
+    </div>
+
+    <!-- PIPELINE PANEL -->
+    <div id="panel-pipeline" class="panel">
+      <div class="panel-header">
+        <h2>Run Pipeline</h2>
+      </div>
+
+      <div class="pipeline-stages">
+        <div class="stage-card">
+          <div class="stage-number">1</div>
+          <div class="stage-info">
+            <div class="stage-title">Import</div>
+            <div class="stage-desc">Import RIS/CSV/BibTeX/JSON/XML from <code>data/raw/</code></div>
+          </div>
+          <button class="btn btn-primary" onclick="runStage('import')">Run</button>
+        </div>
+        <div class="stage-card">
+          <div class="stage-number">2</div>
+          <div class="stage-info">
+            <div class="stage-title">Deduplication</div>
+            <div class="stage-desc">Remove duplicates by DOI, title, and fuzzy matching</div>
+          </div>
+          <button class="btn btn-primary" onclick="runStage('dedup')">Run</button>
+        </div>
+        <div class="stage-card">
+          <div class="stage-number">3</div>
+          <div class="stage-info">
+            <div class="stage-title">Title/Abstract Screening</div>
+            <div class="stage-desc">Two-agent screening with disagreement detection</div>
+            <div class="stage-extra">
+              <label>Limit: <input type="number" id="title-limit" class="input-sm" placeholder="All" /></label>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="runStage('title_screening', 'title-limit')">Run</button>
+        </div>
+        <div class="stage-card">
+          <div class="stage-number">4</div>
+          <div class="stage-info">
+            <div class="stage-title">Full-Text Screening</div>
+            <div class="stage-desc">Screen full texts of title-included records (PDFs required)</div>
+            <div class="stage-extra">
+              <label>Limit: <input type="number" id="fulltext-limit" class="input-sm" placeholder="All" /></label>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="runStage('fulltext_screening', 'fulltext-limit')">Run</button>
+        </div>
+        <div class="stage-card">
+          <div class="stage-number">5</div>
+          <div class="stage-info">
+            <div class="stage-title">Data Extraction</div>
+            <div class="stage-desc">Two-agent extraction + QA assessment on included studies</div>
+            <div class="stage-extra">
+              <label>Limit: <input type="number" id="extract-limit" class="input-sm" placeholder="All" /></label>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="runStage('extraction', 'extract-limit')">Run</button>
+        </div>
+      </div>
+
+      <!-- Pipeline Log -->
+      <div class="card mt-4">
+        <div class="card-header">Pipeline Log <button class="btn btn-sm btn-ghost" onclick="clearLog()">Clear</button></div>
+        <div id="pipeline-log" class="pipeline-log"></div>
+      </div>
+    </div>
+
+    <!-- MODEL CONFIG PANEL -->
+    <div id="panel-config" class="panel">
+      <div class="panel-header">
+        <h2>Model Configuration</h2>
+        <span class="panel-subtitle">Assign different OpenAI models to each pipeline stage</span>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="config-grid">
+            <div class="config-row">
+              <label class="config-label">Title/Abstract Screening (Agent 1)</label>
+              <select class="form-control" id="cfg-title-screening" onchange="configChanged()">
+                <option>gpt-4o-mini</option>
+                <option>gpt-4o</option>
+                <option>gpt-4-turbo</option>
+                <option>gpt-3.5-turbo</option>
+              </select>
+              <p class="config-hint">Fast, cost-efficient model for initial screening</p>
+            </div>
+            <div class="config-row">
+              <label class="config-label">Full-Text Screening (Agent 1)</label>
+              <select class="form-control" id="cfg-fulltext-screening" onchange="configChanged()">
+                <option>gpt-4o</option>
+                <option>gpt-4o-mini</option>
+                <option>gpt-4-turbo</option>
+              </select>
+              <p class="config-hint">Higher-capability model for full-text decisions</p>
+            </div>
+            <div class="config-row">
+              <label class="config-label">Data Extraction (Agent 1)</label>
+              <select class="form-control" id="cfg-extraction" onchange="configChanged()">
+                <option>gpt-4o</option>
+                <option>gpt-4o-mini</option>
+                <option>gpt-4-turbo</option>
+              </select>
+              <p class="config-hint">Best-capability model for structured extraction</p>
+            </div>
+            <div class="config-row">
+              <label class="config-label">QA Assessment (Agent 1)</label>
+              <select class="form-control" id="cfg-qa-assessment" onchange="configChanged()">
+                <option>gpt-4o</option>
+                <option>gpt-4o-mini</option>
+                <option>gpt-4-turbo</option>
+              </select>
+            </div>
+            <div class="config-row">
+              <label class="config-label">Screening (Agent 2 — Independent)</label>
+              <select class="form-control" id="cfg-agent2-screening" onchange="configChanged()">
+                <option>gpt-4o</option>
+                <option>gpt-4o-mini</option>
+                <option>gpt-4-turbo</option>
+                <option>gpt-3.5-turbo</option>
+              </select>
+              <p class="config-hint">Different from Agent 1 for true independence</p>
+            </div>
+            <div class="config-row">
+              <label class="config-label">Extraction (Agent 2 — Independent)</label>
+              <select class="form-control" id="cfg-agent2-extraction" onchange="configChanged()">
+                <option>gpt-4o-mini</option>
+                <option>gpt-4o</option>
+                <option>gpt-4-turbo</option>
+              </select>
+            </div>
+            <div class="config-row">
+              <label class="config-label">Confidence Threshold</label>
+              <input type="number" class="form-control" id="cfg-confidence"
+                min="0.5" max="1.0" step="0.05" value="0.80" onchange="configChanged()" />
+              <p class="config-hint">Minimum confidence for auto-approval (0.5–1.0)</p>
+            </div>
+          </div>
+          <div class="mt-4">
+            <button class="btn btn-primary" onclick="saveConfig()">Save Configuration</button>
+            <button class="btn btn-ghost ml-2" onclick="loadConfig()">↻ Reload</button>
+          </div>
+          <div id="config-status" class="status-msg hidden"></div>
+        </div>
+      </div>
+
+      <!-- API Key -->
+      <div class="card mt-4">
+        <div class="card-header">OpenAI API Key</div>
+        <div class="card-body">
+          <div class="form-row">
+            <input type="password" id="api-key-input" class="form-control"
+              placeholder="sk-..." />
+            <button class="btn btn-primary" onclick="saveApiKey()">Save to .env</button>
+          </div>
+          <p class="config-hint mt-1">Stored in .env file, never displayed again after saving</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- EXPORT PANEL -->
+    <div id="panel-export" class="panel">
+      <div class="panel-header">
+        <h2>Export</h2>
+      </div>
+
+      <div class="export-cards">
+        <div class="export-card">
+          <h3>Evidence Table (CSV)</h3>
+          <p>All included studies with extracted fields</p>
+          <button class="btn btn-primary" onclick="downloadExport('csv')">Download CSV</button>
+        </div>
+        <div class="export-card">
+          <h3>Evidence Table (JSON)</h3>
+          <p>Full extracted data as JSON</p>
+          <button class="btn btn-primary" onclick="downloadExport('json')">Download JSON</button>
+        </div>
+        <div class="export-card">
+          <h3>PRISMA Counts</h3>
+          <p>Flow diagram counts for PRISMA 2020</p>
+          <button class="btn btn-primary" onclick="downloadExport('prisma')">Download PRISMA</button>
+        </div>
+        <div class="export-card">
+          <h3>Full Pipeline Export</h3>
+          <p>All records and decisions for audit trail</p>
+          <button class="btn btn-primary" onclick="downloadExport('full')">Download Full Export</button>
+        </div>
+      </div>
+
+      <!-- Preview -->
+      <div class="card mt-4">
+        <div class="card-header">PRISMA Counts Preview</div>
+        <div id="prisma-preview" class="prisma-preview"></div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- Toast notifications -->
+<div id="toast-container"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
