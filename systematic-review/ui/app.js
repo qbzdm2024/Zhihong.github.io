@@ -730,9 +730,104 @@ function toast(type, message) {
 }
 
 // ─────────────────────────────────────────────
+// SETUP WIZARD
+// ─────────────────────────────────────────────
+
+let _currentStep = 1;
+
+function goStep(n) {
+  document.querySelectorAll('.setup-step').forEach(s => s.classList.remove('active'));
+  const target = document.getElementById(`step-${n}`);
+  if (target) target.classList.add('active');
+
+  document.querySelectorAll('.dot').forEach((d, i) => {
+    d.classList.toggle('active', i + 1 <= n);
+  });
+  _currentStep = n;
+}
+
+function toggleSetupKeyVisibility() {
+  const inp = document.getElementById('setup-api-key');
+  inp.type = inp.type === 'password' ? 'text' : 'password';
+}
+
+async function saveSetupKey() {
+  const key = document.getElementById('setup-api-key').value.trim();
+  const baseUrl = document.getElementById('setup-base-url').value.trim();
+  const statusEl = document.getElementById('setup-key-status');
+
+  if (!key) { showSetupStatus('setup-key-status', 'error', 'Please enter your API key.'); return; }
+  if (!key.startsWith('sk-')) { showSetupStatus('setup-key-status', 'error', 'API key must start with sk-'); return; }
+
+  showSetupStatus('setup-key-status', '', 'Saving and testing key...');
+
+  try {
+    // Save key
+    await apiPost('/config/api-key', { api_key: key, base_url: baseUrl || null });
+
+    // Test key
+    showSetupStatus('setup-key-status', '', 'Testing API connection...');
+    const test = await apiFetch('/config/test-api-key');
+    showSetupStatus('setup-key-status', 'success', `✓ API key valid. Connected to OpenAI.`);
+
+    setTimeout(() => goStep(2), 1000);
+  } catch (e) {
+    showSetupStatus('setup-key-status', 'error', `Error: ${e.message}`);
+  }
+}
+
+async function saveSetupModels() {
+  const updates = {
+    model_title_screening: getVal('s-title-a1'),
+    model_agent2_screening: getVal('s-title-a2'),
+    model_fulltext_screening: getVal('s-fulltext-a1'),
+    model_extraction: getVal('s-extract-a1'),
+    model_agent2_extraction: getVal('s-extract-a2'),
+    confidence_threshold: parseFloat(getVal('s-confidence')) || 0.80,
+  };
+
+  try {
+    await apiPatch('/config/models', updates);
+    showSetupStatus('setup-model-status', 'success', '✓ Models saved.');
+    setTimeout(() => goStep(3), 800);
+  } catch (e) {
+    showSetupStatus('setup-model-status', 'error', `Error: ${e.message}`);
+  }
+}
+
+function finishSetup() {
+  document.getElementById('setup-wizard').classList.add('hidden');
+  loadDashboard();
+}
+
+function showSetupStatus(elId, type, msg) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `status-msg ${type}`;
+  el.classList.remove('hidden');
+}
+
+async function checkSetupRequired() {
+  try {
+    const status = await apiFetch('/config/setup-status');
+    if (!status.ready) {
+      document.getElementById('setup-wizard').classList.remove('hidden');
+      goStep(1);
+    } else {
+      document.getElementById('setup-wizard').classList.add('hidden');
+      loadDashboard();
+    }
+  } catch {
+    // If API is not up yet, just show dashboard
+    loadDashboard();
+  }
+}
+
+// ─────────────────────────────────────────────
 // INIT
 // ─────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  loadDashboard();
+  checkSetupRequired();
 });

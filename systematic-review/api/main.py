@@ -304,6 +304,87 @@ async def upload_pdfs_batch(files: List[UploadFile] = File(...)):
 # CONFIGURATION
 # ─────────────────────────────────────────────────────
 
+@app.get("/api/config/setup-status")
+async def get_setup_status():
+    """Check whether the system is configured and ready to run."""
+    has_key = bool(settings.openai_api_key and settings.openai_api_key != "sk-your-key-here")
+    env_exists = Path(".env").exists()
+    return {
+        "ready": has_key,
+        "has_api_key": has_key,
+        "env_file_exists": env_exists,
+        "total_records": len(runner.records),
+        "data_dir_exists": Path(settings.data_dir).exists(),
+        "raw_dir_exists": Path(settings.raw_dir).exists(),
+    }
+
+
+class ApiKeyRequest(BaseModel):
+    api_key: str
+    base_url: Optional[str] = None
+
+
+@app.post("/api/config/api-key")
+async def save_api_key(request: ApiKeyRequest):
+    """Save OpenAI API key to .env file and update runtime settings."""
+    key = request.api_key.strip()
+    if not key.startswith("sk-"):
+        raise HTTPException(400, "API key must start with 'sk-'")
+
+    settings.openai_api_key = key
+    if request.base_url:
+        settings.openai_base_url = request.base_url
+
+    # Write to .env
+    env_path = Path(".env")
+    lines = []
+    if env_path.exists():
+        with open(env_path) as f:
+            lines = f.readlines()
+
+    # Replace or append OPENAI_API_KEY
+    found = False
+    new_lines = []
+    for line in lines:
+        if line.startswith("OPENAI_API_KEY="):
+            new_lines.append(f"OPENAI_API_KEY={key}\n")
+            found = True
+        elif line.startswith("OPENAI_BASE_URL=") and request.base_url:
+            new_lines.append(f"OPENAI_BASE_URL={request.base_url}\n")
+        else:
+            new_lines.append(line)
+    if not found:
+        new_lines.append(f"OPENAI_API_KEY={key}\n")
+        if request.base_url:
+            new_lines.append(f"OPENAI_BASE_URL={request.base_url}\n")
+
+    with open(env_path, "w") as f:
+        f.writelines(new_lines)
+
+    # Reinitialize the OpenAI client with new key
+    from agents import openai_client as _oc
+    _oc._client = None  # force re-creation next call
+
+    return {"status": "saved", "message": "API key saved to .env and applied to runtime."}
+
+
+@app.post("/api/config/test-api-key")
+async def test_api_key():
+    """Test that the configured API key works by making a minimal API call."""
+    if not settings.openai_api_key or settings.openai_api_key == "sk-your-key-here":
+        raise HTTPException(400, "No API key configured")
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=settings.openai_api_key,
+                        base_url=settings.openai_base_url)
+        # Minimal call: list models
+        models = client.models.list()
+        model_ids = [m.id for m in list(models)[:5]]
+        return {"status": "ok", "message": "API key is valid.", "sample_models": model_ids}
+    except Exception as e:
+        raise HTTPException(400, f"API key test failed: {str(e)}")
+
+
 @app.get("/api/config/models")
 async def get_model_config():
     """Get current model configuration."""
@@ -317,6 +398,7 @@ async def get_model_config():
         "model_agent2_extraction": settings.model_agent2_extraction,
         "confidence_threshold": settings.confidence_threshold,
         "agreement_required": settings.agreement_required,
+        "has_api_key": bool(settings.openai_api_key and settings.openai_api_key != "sk-your-key-here"),
     }
 
 

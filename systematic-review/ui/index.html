@@ -405,6 +405,178 @@
   </main>
 </div>
 
+<!-- ─── SETUP WIZARD (shown on first run / no API key) ─── -->
+<div id="setup-wizard" class="setup-wizard hidden">
+  <div class="setup-box">
+    <div class="setup-logo">🔬</div>
+    <h1 class="setup-title">Systematic Review Automation</h1>
+    <p class="setup-subtitle">LLMs in Qualitative Data Analysis · 2023–2026</p>
+
+    <div class="setup-steps">
+
+      <!-- Step 1: API Key -->
+      <div class="setup-step active" id="step-1">
+        <div class="step-header">
+          <div class="step-num">1</div>
+          <div>
+            <div class="step-title">OpenAI API Key</div>
+            <div class="step-desc">Required to run AI screening and extraction</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="form-group">
+            <label class="form-label">API Key</label>
+            <div class="api-key-row">
+              <input type="password" id="setup-api-key" class="form-control"
+                placeholder="sk-..." autocomplete="off" />
+              <button class="btn btn-ghost btn-sm" onclick="toggleSetupKeyVisibility()">👁</button>
+            </div>
+            <p class="config-hint">Get yours at <strong>platform.openai.com/api-keys</strong></p>
+          </div>
+          <div class="form-group mt-2">
+            <label class="form-label">Custom Base URL <span style="color:var(--text-dim)">(optional — for Azure or proxy)</span></label>
+            <input type="text" id="setup-base-url" class="form-control"
+              placeholder="https://api.openai.com/v1" />
+          </div>
+          <div class="setup-actions mt-3">
+            <button class="btn btn-primary" onclick="saveSetupKey()">Save &amp; Test Key →</button>
+          </div>
+          <div id="setup-key-status" class="status-msg hidden mt-2"></div>
+        </div>
+      </div>
+
+      <!-- Step 2: Model Assignments -->
+      <div class="setup-step" id="step-2">
+        <div class="step-header">
+          <div class="step-num">2</div>
+          <div>
+            <div class="step-title">Model Assignments</div>
+            <div class="step-desc">Choose which OpenAI model handles each task</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="setup-model-grid">
+            <div class="setup-model-row">
+              <div class="setup-model-label">Title/Abstract Screening</div>
+              <div class="setup-model-agents">
+                <div>
+                  <div class="setup-model-tag">Agent 1</div>
+                  <select class="form-control" id="s-title-a1">
+                    <option value="gpt-4o-mini" selected>gpt-4o-mini (fast, cheap)</option>
+                    <option value="gpt-4o">gpt-4o</option>
+                    <option value="gpt-4-turbo">gpt-4-turbo</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="setup-model-tag">Agent 2</div>
+                  <select class="form-control" id="s-title-a2">
+                    <option value="gpt-4o" selected>gpt-4o</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                    <option value="gpt-4-turbo">gpt-4-turbo</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="setup-model-row">
+              <div class="setup-model-label">Full-Text Screening</div>
+              <div class="setup-model-agents">
+                <div>
+                  <div class="setup-model-tag">Agent 1</div>
+                  <select class="form-control" id="s-fulltext-a1">
+                    <option value="gpt-4o" selected>gpt-4o</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="setup-model-tag">Agent 2</div>
+                  <select class="form-control" id="s-fulltext-a2">
+                    <option value="gpt-4o" selected>gpt-4o</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="setup-model-row">
+              <div class="setup-model-label">Data Extraction</div>
+              <div class="setup-model-agents">
+                <div>
+                  <div class="setup-model-tag">Agent 1</div>
+                  <select class="form-control" id="s-extract-a1">
+                    <option value="gpt-4o" selected>gpt-4o (best accuracy)</option>
+                    <option value="gpt-4o-mini">gpt-4o-mini</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="setup-model-tag">Agent 2</div>
+                  <select class="form-control" id="s-extract-a2">
+                    <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+                    <option value="gpt-4o">gpt-4o</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div class="setup-model-row">
+              <div class="setup-model-label">Confidence Threshold</div>
+              <div class="setup-model-agents">
+                <div style="grid-column:span 2">
+                  <input type="range" id="s-confidence" min="0.5" max="1.0" step="0.05" value="0.80"
+                    oninput="document.getElementById('s-conf-val').textContent = this.value" />
+                  <span id="s-conf-val" style="color:var(--accent); font-weight:700; margin-left:8px;">0.80</span>
+                  <p class="config-hint">Auto-approve decisions above this confidence (0.8 recommended)</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="setup-actions mt-3">
+            <button class="btn btn-ghost" onclick="goStep(1)">← Back</button>
+            <button class="btn btn-primary" onclick="saveSetupModels()">Save &amp; Continue →</button>
+          </div>
+          <div id="setup-model-status" class="status-msg hidden mt-2"></div>
+        </div>
+      </div>
+
+      <!-- Step 3: Add Search Results -->
+      <div class="setup-step" id="step-3">
+        <div class="step-header">
+          <div class="step-num">3</div>
+          <div>
+            <div class="step-title">Add Search Results</div>
+            <div class="step-desc">Upload your search export files to begin</div>
+          </div>
+        </div>
+        <div class="step-body">
+          <div class="setup-formats">
+            <div class="format-badge">.ris</div>
+            <div class="format-badge">.csv</div>
+            <div class="format-badge">.bib</div>
+            <div class="format-badge">.json</div>
+            <div class="format-badge">.xml</div>
+          </div>
+          <div class="setup-path-info">
+            <p>Place your exported search files in:</p>
+            <code class="path-code">systematic-review/data/raw/</code>
+            <p class="mt-2" style="font-size:12px; color:var(--text-muted);">
+              Supported databases: PubMed, Scopus, Web of Science, PsycINFO, ACM DL, IEEE Xplore, ERIC
+            </p>
+          </div>
+          <div class="setup-actions mt-3">
+            <button class="btn btn-ghost" onclick="goStep(2)">← Back</button>
+            <button class="btn btn-primary" onclick="finishSetup()">Open Dashboard →</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Progress dots -->
+    <div class="setup-dots">
+      <div class="dot active" id="dot-1"></div>
+      <div class="dot" id="dot-2"></div>
+      <div class="dot" id="dot-3"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast notifications -->
 <div id="toast-container"></div>
 
