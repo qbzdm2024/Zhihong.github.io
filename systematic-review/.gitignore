@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Environment
+.env
+*.env.local
+
+# Data (runtime — not committed)
+data/raw/
+data/deduped/
+data/screened/
+data/extracted/
+data/output/
+data/pdfs/
+data/pipeline_state.jsonl
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# pytest
+.pytest_cache/
