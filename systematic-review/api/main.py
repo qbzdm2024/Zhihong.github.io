@@ -87,6 +87,10 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
         "extraction": lambda: runner.run_extraction(request.limit),
     }
 
+    if request.stage == "reset_screening":
+        stats = runner.reset_screening()
+        return {"status": "completed", "stage": "reset_screening", "stats": stats}
+
     if request.stage not in stage_map:
         raise HTTPException(400, f"Unknown stage: {request.stage}")
 

@@ -122,7 +122,21 @@ class PipelineRunner:
         candidates = [
             pr for pr in self.records.values()
             if pr.dedup is not None and not pr.dedup.is_duplicate
-            and pr.pipeline_stage in (PipelineStage.IMPORT, PipelineStage.DEDUP)
+            and (
+                # Normal path: records not yet screened
+                pr.pipeline_stage in (PipelineStage.IMPORT, PipelineStage.DEDUP)
+                # Re-screen path: UNCERTAIN records the agents haven't resolved
+                # but no human has yet verified (e.g. from a previous failed run).
+                or (
+                    pr.pipeline_stage == PipelineStage.TITLE_SCREENING
+                    and pr.final_decision == DecisionLabel.UNCERTAIN
+                    and not (
+                        pr.screened
+                        and pr.screened.title_screening
+                        and pr.screened.title_screening.human_verified
+                    )
+                )
+            )
         ]
 
         if limit:
@@ -431,6 +445,37 @@ class PipelineRunner:
                     "limitations_reported": ef.limitations_reported,
                 })
         return rows
+
+    def reset_screening(self) -> Dict:
+        """Roll back all non-human-verified title screening results to DEDUP stage.
+        Use this to re-run title screening from scratch with updated settings.
+        Human-verified decisions are preserved.
+        """
+        rolled_back = 0
+        kept = 0
+        for pr in self.records.values():
+            if pr.pipeline_stage != PipelineStage.TITLE_SCREENING:
+                continue
+            human_verified = (
+                pr.screened
+                and pr.screened.title_screening
+                and pr.screened.title_screening.human_verified
+            )
+            if human_verified:
+                kept += 1
+                continue
+            # Roll back to DEDUP stage, clear screening result
+            pr.pipeline_stage = PipelineStage.DEDUP
+            pr.final_decision = DecisionLabel.UNCERTAIN
+            if pr.screened:
+                pr.screened.title_screening = None
+                pr.screened.current_decision = None
+            rolled_back += 1
+        self._save_state()
+        stats = {"rolled_back": rolled_back, "human_verified_kept": kept}
+        self.stage_log["reset_screening"] = {**stats, "completed_at": datetime.utcnow().isoformat()}
+        logger.info(f"Reset screening: {stats}")
+        return stats
 
     # ──────────────────────────────────────────────────
     # HELPERS
