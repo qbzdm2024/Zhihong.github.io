@@ -6,7 +6,7 @@ import json
 import os
 import logging
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import Any, List, Dict, Tuple, Optional
 from datetime import datetime
 
 from .models import (
@@ -48,9 +48,19 @@ class PipelineRunner:
     # ──────────────────────────────────────────────────
 
     def run_import(self) -> Dict:
-        """Import all files from raw data directory."""
+        """Import all files from raw data directory.
+        Replaces any previously imported records — safe to re-run.
+        """
         logger.info("=== STAGE: IMPORT ===")
         raw_records, file_stats = load_all_from_directory(settings.raw_dir)
+
+        # Clear old import-stage records so re-running import is idempotent.
+        # Records that have already progressed beyond IMPORT (screened / extracted)
+        # are preserved so work isn't lost if someone accidentally re-runs import.
+        self.records = {
+            rid: pr for rid, pr in self.records.items()
+            if pr.pipeline_stage not in (PipelineStage.IMPORT, PipelineStage.DEDUP)
+        }
 
         for r in raw_records:
             pr = PipelineRecord(record_id=r.record_id, raw=r)
@@ -328,6 +338,13 @@ class PipelineRunner:
                    if pr.dedup and pr.dedup.is_duplicate)
         after_dedup = total - dups
 
+        # Records waiting for title screening (dedup done, not yet screened)
+        awaiting_screening = sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage in (PipelineStage.IMPORT, PipelineStage.DEDUP)
+            and not (pr.dedup and pr.dedup.is_duplicate)
+        )
+
         title_screen_excluded = sum(
             1 for pr in self.records.values()
             if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
@@ -352,15 +369,24 @@ class PipelineRunner:
             if pr.final_decision == DecisionLabel.INCLUDE
             and pr.pipeline_stage in (PipelineStage.FULLTEXT_SCREENING, PipelineStage.EXTRACTION)
         )
+        # "Needs human verification" = records that have BEEN processed by agents
+        # but agents disagreed; does NOT include pre-screening records (those are
+        # "awaiting_title_screening").
         needs_human = sum(
             1 for pr in self.records.values()
             if pr.final_decision == DecisionLabel.UNCERTAIN
+            and pr.pipeline_stage in (
+                PipelineStage.TITLE_SCREENING,
+                PipelineStage.FULLTEXT_SCREENING,
+                PipelineStage.EXTRACTION,
+            )
         )
 
         return {
             "identified": total,
             "duplicates_removed": dups,
             "after_dedup": after_dedup,
+            "awaiting_title_screening": awaiting_screening,
             "title_abstract_excluded": title_screen_excluded,
             "title_abstract_included": title_screen_included,
             "full_text_needed": fulltext_needed,
