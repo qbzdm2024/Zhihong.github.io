@@ -146,7 +146,7 @@ class PipelineRunner:
             DecisionLabel.UNCERTAIN: 0,
         }
 
-        for pr in candidates:
+        for i, pr in enumerate(candidates):
             logger.info(f"Screening [{pr.record_id[:8]}]: {pr.dedup.title[:60]}...")
             try:
                 result = screen_title_abstract(pr.dedup)
@@ -162,6 +162,10 @@ class PipelineRunner:
                 logger.error(f"Screening error for {pr.record_id}: {e}")
                 pr.update_stage(PipelineStage.TITLE_SCREENING, DecisionLabel.UNCERTAIN)
                 counts[DecisionLabel.UNCERTAIN] += 1
+
+            if (i + 1) % 50 == 0:
+                self._save_state()
+                logger.info(f"Checkpoint saved at {i + 1}/{len(candidates)} records")
 
         self._save_state()
         self._export_screening_lists()
@@ -198,7 +202,7 @@ class PipelineRunner:
             DecisionLabel.FULL_TEXT_NEEDED: 0,
         }
 
-        for pr in candidates:
+        for i, pr in enumerate(candidates):
             # Check PDF availability
             pdf_path = self._find_pdf(pr)
             if not pdf_path:
@@ -222,6 +226,10 @@ class PipelineRunner:
                 logger.error(f"Full-text screening error for {pr.record_id}: {e}")
                 pr.update_stage(PipelineStage.FULLTEXT_SCREENING, DecisionLabel.UNCERTAIN)
                 counts[DecisionLabel.UNCERTAIN] += 1
+
+            if (i + 1) % 50 == 0:
+                self._save_state()
+                logger.info(f"Checkpoint saved at {i + 1}/{len(candidates)} records")
 
         self._save_state()
         self._export_fulltext_needed_list()
