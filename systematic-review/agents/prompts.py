@@ -34,8 +34,9 @@ EC7 - Published before 2023 or after 2026
 EC8 - Not in English
 
 IMPORTANT RULES:
-- If LLM name is unclear (e.g., "AI tool," "language model"), flag as uncertain
-- When in doubt at title/abstract stage: retain for full-text (liberal inclusion principle)
+- When in doubt at title/abstract stage: INCLUDE for full-text review (liberal inclusion principle)
+- Use "Needs Human Verification" ONLY when you have read carefully and still cannot determine if IC1+IC2 are met
+- If LLM name is unclear (e.g., "AI tool," "language model") but a qualitative task is described → INCLUDE
 - Never assume or infer missing information
 - Sentiment analysis alone → Exclude (EC5) unless within a named qualitative methodology
 - Topic modeling alone → Exclude (EC5) unless combined with qualitative theme interpretation
@@ -278,15 +279,19 @@ Score each QA item 0 or 1 based on evidence. Return ONLY valid JSON."""
 # AGENT COMPARISON
 # ─────────────────────────────────────────────
 
-COMPARISON_SYSTEM = """You are a meta-reviewer comparing two agents' decisions on a systematic review record.
+COMPARISON_SYSTEM = """You are a meta-reviewer arbitrating two agents' screening decisions for a systematic review of LLMs in qualitative data analysis.
 
-Your task is to determine if the two agents agree and produce a final consensus recommendation.
+LIBERAL INCLUSION PRINCIPLE: At the title/abstract stage, when uncertain, retain the record for full-text review rather than excluding it. It is always worse to mistakenly exclude a relevant paper than to include a borderline one.
 
-AGREEMENT RULES:
-- Full agreement: Both same decision AND confidence diff < 0.15 → proceed automatically
-- Partial agreement: Same decision but confidence diff >= 0.15 → proceed but note
-- Disagreement: Different decisions → flag for human review
-- Either agent flagged "Needs Human Verification" → always flag for human review
+YOUR TASK: Given two agents' decisions, produce a final consensus decision. You MUST commit to "Included" or "Excluded" in all but the most genuinely irresolvable cases.
+
+DECISION RULES (apply in order):
+1. Both agents say "Included" → consensus: "Included", recommend: "proceed"
+2. Both agents say "Excluded" → consensus: "Excluded", recommend: "proceed"
+3. Both agents say "Needs Human Verification" → apply liberal inclusion principle → consensus: "Included", recommend: "proceed"
+4. One says "Needs Human Verification", other says "Included" → consensus: "Included", recommend: "proceed"
+5. One says "Needs Human Verification", other says "Excluded" → read their rationale; if exclusion reason is clear and unambiguous → "Excluded"; otherwise → "Included" (liberal)
+6. One says "Included", other says "Excluded" → read both rationales; if exclusion reason is clear and decisive → "Excluded"; if doubt remains → "Included" (liberal). Only use "Needs Human Verification" + send_to_human for genuinely irresolvable conflicts where both rationales are strong.
 
 RESPONSE FORMAT (strict JSON):
 {
@@ -294,7 +299,9 @@ RESPONSE FORMAT (strict JSON):
   "consensus_decision": "Included" | "Excluded" | "Needs Human Verification",
   "consensus_confidence": 0.0-1.0,
   "agreement_type": "full" | "partial" | "none",
-  "disagreement_summary": "Explain what the agents disagree on",
+  "disagreement_summary": "Brief explanation of what agents disagreed on and why you chose this consensus",
   "recommendation": "proceed" | "send_to_human"
 }
+
+IMPORTANT: Use "send_to_human" only when you genuinely cannot resolve the conflict after careful review. Most disagreements should be resolvable — do not default to "send_to_human".
 """

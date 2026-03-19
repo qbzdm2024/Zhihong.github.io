@@ -531,6 +531,49 @@ async def export_all_records():
 # DEBUG ENDPOINTS
 # ─────────────────────────────────────────────────────
 
+@app.get("/api/debug/sample-screenings")
+async def debug_sample_screenings(n: int = 10):
+    """Return n records that have screening results, showing what agent1/agent2 decided.
+    Use this to diagnose why records are all UNCERTAIN.
+    """
+    from pipeline.models import PipelineStage, DecisionLabel
+    samples = []
+    for pr in list(runner.records.values()):
+        if pr.screened and pr.screened.title_screening:
+            ts = pr.screened.title_screening
+            a1 = ts.agent1
+            a2 = ts.agent2
+            samples.append({
+                "record_id": pr.record_id[:8],
+                "title": (pr.dedup.title if pr.dedup else "")[:80],
+                "final_decision": str(pr.final_decision),
+                "agent1_decision": str(a1.decision) if a1 else None,
+                "agent1_confidence": a1.confidence if a1 else None,
+                "agent1_flags": a1.flagged_criteria if a1 else [],
+                "agent2_decision": str(a2.decision) if a2 else None,
+                "agent2_confidence": a2.confidence if a2 else None,
+                "agent2_flags": a2.flagged_criteria if a2 else [],
+                "agents_agree": ts.agents_agree,
+                "consensus_confidence": ts.consensus_confidence,
+            })
+        if len(samples) >= n:
+            break
+
+    # Tally what agents decided
+    from collections import Counter
+    a1_decisions = Counter(s["agent1_decision"] for s in samples if s["agent1_decision"])
+    a2_decisions = Counter(s["agent2_decision"] for s in samples if s["agent2_decision"])
+    agreements = sum(1 for s in samples if s["agents_agree"])
+
+    return {
+        "sampled": len(samples),
+        "agent1_decision_counts": dict(a1_decisions),
+        "agent2_decision_counts": dict(a2_decisions),
+        "agents_agreed_count": agreements,
+        "records": samples,
+    }
+
+
 @app.get("/api/debug/agent-errors")
 async def debug_agent_errors():
     """Return recent agent screening errors (API failures, parse errors, etc.)."""
