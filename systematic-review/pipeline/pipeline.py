@@ -475,6 +475,29 @@ class PipelineRunner:
         logger.info(f"Reset screening: {stats}")
         return stats
 
+    def reset_failed_screenings(self) -> Dict:
+        """Roll back ONLY error-path records (stage=TITLE_SCREENING, UNCERTAIN, no result stored).
+        Safe to call while valid INCLUDE/EXCLUDE results are preserved.
+        """
+        rolled_back = 0
+        for pr in self.records.values():
+            if pr.pipeline_stage != PipelineStage.TITLE_SCREENING:
+                continue
+            if pr.final_decision != DecisionLabel.UNCERTAIN:
+                continue
+            # Only reset records where no screening result was stored (i.e. crashed before saving)
+            if pr.screened and pr.screened.title_screening:
+                continue
+            pr.pipeline_stage = PipelineStage.DEDUP
+            if pr.screened:
+                pr.screened.current_decision = None
+            rolled_back += 1
+        self._save_state()
+        stats = {"rolled_back": rolled_back}
+        self.stage_log["reset_failed_screenings"] = {**stats, "completed_at": datetime.utcnow().isoformat()}
+        logger.info(f"Reset failed screenings: {stats}")
+        return stats
+
     # ──────────────────────────────────────────────────
     # HELPERS
     # ──────────────────────────────────────────────────

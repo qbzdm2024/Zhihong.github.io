@@ -91,6 +91,10 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
         stats = runner.reset_screening()
         return {"status": "completed", "stage": "reset_screening", "stats": stats}
 
+    if request.stage == "reset_failed_screenings":
+        stats = runner.reset_failed_screenings()
+        return {"status": "completed", "stage": "reset_failed_screenings", "stats": stats}
+
     if request.stage not in stage_map:
         raise HTTPException(400, f"Unknown stage: {request.stage}")
 
@@ -101,6 +105,7 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
 @app.get("/api/pipeline/status")
 async def get_pipeline_status():
     """Get current pipeline status and PRISMA counts."""
+    from agents.screener import get_agent_errors
     counts = runner.get_prisma_counts()
     groups = runner.get_records_by_decision()
 
@@ -112,13 +117,27 @@ async def get_pipeline_status():
             active_stage = s
             break
 
+    # Detect probable API key / auth failure: many UNCERTAIN + 0 included/excluded
+    warnings = []
+    if (counts.get("needs_human_verification", 0) > 10
+            and counts.get("title_abstract_included", 0) == 0
+            and counts.get("title_abstract_excluded", 0) == 0):
+        recent_errors = get_agent_errors(n=3)
+        if recent_errors:
+            warnings.append(
+                "⚠ All records show 'Needs Human Verification' with 0 included/excluded — "
+                "likely an API key error. Check /api/debug/agent-errors. "
+                "Fix the key, restart the server, then call reset_failed_screenings."
+            )
+
     return {
         "prisma_counts": counts,
         "bucket_counts": {k: len(v) for k, v in groups.items()},
         "total_records": len(runner.records),
         "stage_log": runner.stage_log,
         "active_stage": active_stage,
-        "running_stage": runner.running_stage,   # non-empty while background task is in progress
+        "running_stage": runner.running_stage,
+        "warnings": warnings,
         "last_updated": datetime.utcnow().isoformat(),
     }
 
