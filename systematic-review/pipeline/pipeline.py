@@ -125,16 +125,14 @@ class PipelineRunner:
             and (
                 # Normal path: records not yet screened
                 pr.pipeline_stage in (PipelineStage.IMPORT, PipelineStage.DEDUP)
-                # Re-screen path: UNCERTAIN records the agents haven't resolved
-                # but no human has yet verified (e.g. from a previous failed run).
+                # Re-screen path: records that errored mid-run (stage advanced to
+                # TITLE_SCREENING but no result was stored).  Records where agents
+                # ran successfully but disagreed (UNCERTAIN + result exists) are
+                # left alone for human review.
                 or (
                     pr.pipeline_stage == PipelineStage.TITLE_SCREENING
                     and pr.final_decision == DecisionLabel.UNCERTAIN
-                    and not (
-                        pr.screened
-                        and pr.screened.title_screening
-                        and pr.screened.title_screening.human_verified
-                    )
+                    and not (pr.screened and pr.screened.title_screening)
                 )
             )
         ]
