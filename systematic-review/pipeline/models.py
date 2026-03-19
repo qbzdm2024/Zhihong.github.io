@@ -84,7 +84,7 @@ class ScreenedRecord(DedupRecord):
     pdf_path: Optional[str] = None
     fulltext_available: bool = False
     current_stage: PipelineStage = PipelineStage.TITLE_SCREENING
-    current_decision: DecisionLabel = DecisionLabel.UNCERTAIN
+    current_decision: Optional[DecisionLabel] = None
 
 
 class QAScore(BaseModel):
