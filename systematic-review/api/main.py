@@ -101,8 +101,9 @@ async def get_pipeline_status():
         "prisma_counts": counts,
         "bucket_counts": {k: len(v) for k, v in groups.items()},
         "total_records": len(runner.records),
-        "stage_log": runner.stage_log,          # per-stage results incl. per-file import stats
+        "stage_log": runner.stage_log,
         "active_stage": active_stage,
+        "running_stage": runner.running_stage,   # non-empty while background task is in progress
         "last_updated": datetime.utcnow().isoformat(),
     }
 

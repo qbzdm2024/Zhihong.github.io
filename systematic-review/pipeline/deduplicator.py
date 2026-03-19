@@ -13,6 +13,16 @@ from difflib import SequenceMatcher
 from .models import RawRecord, DedupRecord
 
 
+def normalize_doi(doi: str) -> str:
+    """Normalize DOI to bare form: strip URL prefixes, lowercase, strip whitespace."""
+    doi = (doi or "").strip().lower()
+    # Strip common prefixes
+    for prefix in ("https://doi.org/", "http://doi.org/", "doi:", "doi.org/"):
+        if doi.startswith(prefix):
+            doi = doi[len(prefix):]
+    return doi.strip()
+
+
 def normalize_title(title: str) -> str:
     """Normalize title for comparison: lowercase, strip punctuation, collapse whitespace."""
     title = title.lower()
@@ -55,8 +65,8 @@ def deduplicate(records: List[RawRecord],
         confidence = None
 
         # --- Strategy 1: DOI match ---
-        doi = (record.doi or "").strip().lower()
-        if doi and doi not in ("", "n/a", "none"):
+        doi = normalize_doi(record.doi or "")
+        if doi and doi not in ("n/a", "none"):
             if doi in seen_dois:
                 is_dup = True
                 dup_of = seen_dois[doi]
@@ -96,7 +106,7 @@ def deduplicate(records: List[RawRecord],
             drec.dedup_confidence = confidence
         else:
             # Register as canonical
-            if doi and doi not in ("", "n/a", "none"):
+            if doi and doi not in ("n/a", "none"):
                 seen_dois[doi] = record.record_id
             norm_title = normalize_title(record.title)
             seen_titles[norm_title] = record.record_id
