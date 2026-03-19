@@ -27,6 +27,10 @@
         <span class="nav-icon">📄</span> Full Text Needed
         <span class="badge badge-orange" id="badge-fulltext">0</span>
       </a></li>
+      <li><a href="#" class="nav-item" data-panel="second-pass">
+        <span class="nav-icon">🔎</span> 2nd Pass Review
+        <span class="badge badge-blue" id="badge-second-pass">0</span>
+      </a></li>
       <li><a href="#" class="nav-item" data-panel="included">
         <span class="nav-icon">✅</span> Included
       </a></li>
@@ -189,6 +193,67 @@
       </div>
 
       <div id="fulltext-table" class="mt-4"></div>
+    </div>
+
+    <!-- SECOND-PASS REVIEW PANEL -->
+    <div id="panel-second-pass" class="panel">
+      <div class="panel-header">
+        <h2>Second-Pass Review</h2>
+        <span class="panel-subtitle">Review all 1 038 AI-included records before full-text screening</span>
+      </div>
+
+      <!-- Controls bar -->
+      <div class="sp-controls">
+        <div class="sp-progress-wrap">
+          <span id="sp-progress-label">Loading…</span>
+          <div class="sp-progress-bar"><div id="sp-progress-fill" class="sp-progress-fill" style="width:0%"></div></div>
+        </div>
+        <div class="sp-actions">
+          <select id="sp-filter" class="form-control form-control-sm" onchange="loadSecondPass(1)">
+            <option value="all">Show all</option>
+            <option value="no">Unreviewed only</option>
+          </select>
+          <button class="btn btn-sm btn-ghost" onclick="loadSecondPass(secondPassPage)">↻ Refresh</button>
+          <button class="btn btn-sm btn-warning" onclick="markAllIncludedForReview()"
+            title="Queue all AI-included records into the Human Verification panel">
+            ⚠ Queue all for Human Verification
+          </button>
+        </div>
+      </div>
+
+      <!-- Card list -->
+      <div id="sp-list" class="sp-list"></div>
+
+      <!-- Pagination -->
+      <div id="sp-pagination" class="sp-pagination"></div>
+
+      <!-- Inline exclude form (hidden by default) -->
+      <div id="sp-exclude-form" class="sp-exclude-overlay hidden">
+        <div class="sp-exclude-box">
+          <h4>Exclude Record</h4>
+          <div class="form-group">
+            <label class="form-label">Exclusion Criterion</label>
+            <select id="sp-ec-code" class="form-control">
+              <option value="EC1">EC1 — Not about LLMs/AI in QDA</option>
+              <option value="EC2">EC2 — Not empirical / grey literature</option>
+              <option value="EC3">EC3 — Wrong date range</option>
+              <option value="EC4">EC4 — Not peer-reviewed</option>
+              <option value="EC5">EC5 — Duplicate / superseded</option>
+              <option value="EC6">EC6 — Language not English</option>
+              <option value="EC7">EC7 — Other (specify in rationale)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Rationale <span class="required">*</span></label>
+            <textarea id="sp-exclude-rationale" class="form-control" rows="2"
+              placeholder="Brief reason for exclusion…"></textarea>
+          </div>
+          <div class="sp-exclude-actions">
+            <button class="btn btn-danger" onclick="submitSecondPassExclude()">Confirm Exclude</button>
+            <button class="btn btn-ghost" onclick="cancelSecondPassExclude()">Cancel</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- INCLUDED PANEL -->

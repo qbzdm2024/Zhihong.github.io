@@ -29,6 +29,7 @@ function switchPanel(name) {
   if (name === 'dashboard') loadDashboard();
   if (name === 'verify') loadVerifyQueue();
   if (name === 'fulltext') loadFulltextNeeded();
+  if (name === 'second-pass') loadSecondPass(1);
   if (name === 'included') loadIncluded();
   if (name === 'excluded') loadExcluded();
   if (name === 'config') loadConfig();
@@ -821,6 +822,196 @@ async function checkSetupRequired() {
   } catch {
     // If API is not up yet, just show dashboard
     loadDashboard();
+  }
+}
+
+// ─────────────────────────────────────────────
+// SECOND-PASS REVIEW
+// ─────────────────────────────────────────────
+
+let secondPassPage = 1;
+let secondPassPendingId = null;   // record_id awaiting exclude submission
+let secondPassTotalReviewed = 0;
+let secondPassTotal = 0;
+
+async function loadSecondPass(page = 1) {
+  secondPassPage = page;
+  const filter = document.getElementById('sp-filter')?.value || 'all';
+  const reviewedParam = filter === 'no' ? '&reviewed=no' : '';
+
+  try {
+    const data = await apiFetch(`/records/second-pass/list?page=${page}&page_size=50${reviewedParam}`);
+    secondPassTotal = data.total;
+
+    // Update badge (total unreviewed)
+    const unreviewed = data.records.filter(r => !r.human_verified).length;
+    setBadge('badge-second-pass', data.total);
+
+    // Progress bar
+    const reviewed = await apiFetch('/records/second-pass/list?page=1&page_size=1&reviewed=no');
+    const unreviewedTotal = reviewed.total;
+    const doneCount = secondPassTotal - unreviewedTotal;
+    const pct = secondPassTotal > 0 ? Math.round((doneCount / secondPassTotal) * 100) : 0;
+    const label = document.getElementById('sp-progress-label');
+    const fill = document.getElementById('sp-progress-fill');
+    if (label) label.textContent = `${doneCount} / ${secondPassTotal} reviewed (${pct}%)`;
+    if (fill) fill.style.width = pct + '%';
+
+    // Render cards
+    const el = document.getElementById('sp-list');
+    if (!data.records.length) {
+      el.innerHTML = '<div class="empty-state">No included records found. Run title screening first.</div>';
+      document.getElementById('sp-pagination').innerHTML = '';
+      return;
+    }
+
+    el.innerHTML = data.records.map(r => renderSecondPassCard(r)).join('');
+
+    // Pagination
+    const totalPages = Math.ceil(data.total / 50);
+    renderSecondPassPagination(page, totalPages);
+  } catch (e) {
+    toast('error', 'Failed to load second-pass records: ' + e.message);
+  }
+}
+
+function renderSecondPassCard(r) {
+  const a1pct = Math.round((r.agent1_confidence || 0) * 100);
+  const a2pct = Math.round((r.agent2_confidence || 0) * 100);
+  const a1color = r.agent1_decision === 'Included' ? 'var(--green)' :
+                  r.agent1_decision === 'Excluded' ? 'var(--red)' : 'var(--orange)';
+  const a2color = r.agent2_decision === 'Included' ? 'var(--green)' :
+                  r.agent2_decision === 'Excluded' ? 'var(--red)' : 'var(--orange)';
+  const abstractPreview = r.abstract ? r.abstract.substring(0, 320) + (r.abstract.length > 320 ? '…' : '') : '[No abstract]';
+  const verifiedBadge = r.human_verified
+    ? '<span class="pill pill-green" style="font-size:10px">✓ Reviewed</span>' : '';
+
+  return `
+    <div class="sp-card ${r.human_verified ? 'sp-card-reviewed' : ''}" id="sp-card-${r.record_id}">
+      <div class="sp-card-header">
+        <div class="sp-card-title">${esc(r.title)}</div>
+        <div class="sp-card-meta">${esc(r.authors || '')} · ${r.year || ''} · <em>${esc(r.journal || r.source_db || '')}</em> ${verifiedBadge}</div>
+      </div>
+
+      <div class="sp-card-abstract" id="abstract-${r.record_id}">
+        <span class="sp-abstract-text">${esc(abstractPreview)}</span>
+        ${r.abstract && r.abstract.length > 320
+          ? `<button class="sp-expand-btn" onclick="toggleAbstract('${r.record_id}', ${JSON.stringify(esc(r.abstract))})">Show more</button>` : ''}
+      </div>
+
+      <div class="sp-agents">
+        <div class="sp-agent-box">
+          <div class="sp-agent-label" style="color:${a1color}">Agent 1: ${esc(r.agent1_decision)} (${a1pct}%)</div>
+          <div class="confidence-bar"><div class="confidence-fill" style="width:${a1pct}%; background:${a1color}"></div></div>
+          <div class="sp-agent-rationale">${esc(r.agent1_rationale || '—')}</div>
+        </div>
+        <div class="sp-agent-box">
+          <div class="sp-agent-label" style="color:${a2color}">Agent 2: ${esc(r.agent2_decision)} (${a2pct}%)</div>
+          <div class="confidence-bar"><div class="confidence-fill" style="width:${a2pct}%; background:${a2color}"></div></div>
+          <div class="sp-agent-rationale">${esc(r.agent2_rationale || '—')}</div>
+        </div>
+      </div>
+
+      <div class="sp-card-actions">
+        <button class="btn btn-success btn-sm" onclick="secondPassKeep('${r.record_id}')">✓ Keep</button>
+        <button class="btn btn-danger btn-sm" onclick="secondPassExclude('${r.record_id}')">✗ Exclude</button>
+        <button class="btn btn-ghost btn-sm" onclick="openVerifyModal('${r.record_id}')" title="Open full review modal">Full Review</button>
+        ${r.doi ? `<a class="btn btn-ghost btn-sm" href="https://doi.org/${r.doi}" target="_blank">DOI ↗</a>` : ''}
+      </div>
+    </div>
+  `;
+}
+
+function toggleAbstract(recordId, fullText) {
+  const el = document.querySelector(`#abstract-${recordId} .sp-abstract-text`);
+  const btn = document.querySelector(`#abstract-${recordId} .sp-expand-btn`);
+  if (!el) return;
+  if (btn.textContent === 'Show more') {
+    el.textContent = fullText;
+    btn.textContent = 'Show less';
+  } else {
+    el.textContent = fullText.substring(0, 320) + '…';
+    btn.textContent = 'Show more';
+  }
+}
+
+async function secondPassKeep(recordId) {
+  try {
+    await apiPost(`/records/${recordId}/verify`, {
+      decision: 'Included',
+      rationale: 'Human confirmed after second-pass review.',
+      reviewer: document.getElementById('human-reviewer')?.value?.trim() || 'Reviewer',
+    });
+    // Mark the card as reviewed visually
+    const card = document.getElementById(`sp-card-${recordId}`);
+    if (card) {
+      card.classList.add('sp-card-reviewed');
+      card.querySelector('.sp-card-actions').innerHTML =
+        '<span class="pill pill-green">✓ Kept</span>';
+    }
+    toast('success', 'Kept as included.');
+    loadDashboard();
+  } catch (e) {
+    toast('error', 'Failed to save decision: ' + e.message);
+  }
+}
+
+function secondPassExclude(recordId) {
+  secondPassPendingId = recordId;
+  document.getElementById('sp-exclude-rationale').value = '';
+  document.getElementById('sp-exclude-form').classList.remove('hidden');
+}
+
+function cancelSecondPassExclude() {
+  secondPassPendingId = null;
+  document.getElementById('sp-exclude-form').classList.add('hidden');
+}
+
+async function submitSecondPassExclude() {
+  const rationale = document.getElementById('sp-exclude-rationale').value.trim();
+  if (!rationale) { toast('error', 'Please provide a rationale.'); return; }
+  const ec = document.getElementById('sp-ec-code').value;
+
+  try {
+    await apiPost(`/records/${secondPassPendingId}/verify`, {
+      decision: 'Excluded',
+      rationale: `[${ec}] ${rationale}`,
+      reviewer: document.getElementById('human-reviewer')?.value?.trim() || 'Reviewer',
+    });
+    const card = document.getElementById(`sp-card-${secondPassPendingId}`);
+    if (card) {
+      card.classList.add('sp-card-reviewed', 'sp-card-excluded');
+      card.querySelector('.sp-card-actions').innerHTML =
+        `<span class="pill pill-red">✗ Excluded · ${esc(ec)}</span>`;
+    }
+    cancelSecondPassExclude();
+    toast('success', `Excluded (${ec}).`);
+    loadDashboard();
+  } catch (e) {
+    toast('error', 'Failed to save decision: ' + e.message);
+  }
+}
+
+function renderSecondPassPagination(page, totalPages) {
+  const el = document.getElementById('sp-pagination');
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  const pages = [];
+  if (page > 1) pages.push(`<button class="btn btn-ghost btn-sm" onclick="loadSecondPass(${page - 1})">← Prev</button>`);
+  pages.push(`<span class="sp-page-info">Page ${page} / ${totalPages}</span>`);
+  if (page < totalPages) pages.push(`<button class="btn btn-ghost btn-sm" onclick="loadSecondPass(${page + 1})">Next →</button>`);
+  el.innerHTML = pages.join('');
+}
+
+async function markAllIncludedForReview() {
+  if (!confirm('This will move all 1 038 AI-included records into the Human Verification queue. Continue?')) return;
+  try {
+    const res = await apiPost('/pipeline/run', { stage: 'mark_included_for_review' });
+    toast('success', `${res.stats?.updated ?? '?'} records queued for human verification.`);
+    loadDashboard();
+    loadVerifyQueue();
+    loadSecondPass(1);
+  } catch (e) {
+    toast('error', 'Failed: ' + e.message);
   }
 }
 

@@ -379,6 +379,28 @@ class PipelineRunner:
         self._save_state()
         return True
 
+    def mark_included_for_review(self) -> Dict:
+        """Mark all title-screened INCLUDE records as UNCERTAIN for second-pass human review.
+
+        This sends the 1038 AI-included records back to the Human Verification
+        queue so a human can confirm or override each decision before full-text
+        screening begins.
+        """
+        count = 0
+        for pr in self.records.values():
+            if (pr.pipeline_stage == PipelineStage.TITLE_SCREENING
+                    and pr.final_decision == DecisionLabel.INCLUDE):
+                pr.final_decision = DecisionLabel.UNCERTAIN
+                pr.updated_at = datetime.utcnow()
+                # Tag the screening result so the UI can display context
+                if pr.screened and pr.screened.title_screening:
+                    pr.screened.title_screening.human_verified = False
+                count += 1
+        if count:
+            self._save_state()
+        logger.info(f"mark_included_for_review: {count} records queued for human review")
+        return {"updated": count}
+
     # ──────────────────────────────────────────────────
     # OUTPUT / REPORTING
     # ──────────────────────────────────────────────────

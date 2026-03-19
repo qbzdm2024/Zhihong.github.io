@@ -95,6 +95,10 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
         stats = runner.reset_failed_screenings()
         return {"status": "completed", "stage": "reset_failed_screenings", "stats": stats}
 
+    if request.stage == "mark_included_for_review":
+        stats = runner.mark_included_for_review()
+        return {"status": "completed", "stage": "mark_included_for_review", "stats": stats}
+
     if request.stage not in stage_map:
         raise HTTPException(400, f"Unknown stage: {request.stage}")
 
@@ -198,6 +202,36 @@ async def list_uncertain_records():
         if pr.final_decision == DecisionLabel.UNCERTAIN
     ]
     return {"count": len(uncertain), "records": uncertain}
+
+
+@app.get("/api/records/second-pass/list")
+async def list_second_pass_records(page: int = 1, page_size: int = 50, reviewed: Optional[str] = None):
+    """Return included title-screened records enriched with abstract + agent rationale
+    for second-pass human review. reviewed=no filters to unreviewed only."""
+    records = [
+        pr for pr in runner.records.values()
+        if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
+        and pr.final_decision == DecisionLabel.INCLUDE
+    ]
+
+    if reviewed == "no":
+        records = [
+            pr for pr in records
+            if not (pr.screened and pr.screened.title_screening
+                    and pr.screened.title_screening.human_verified)
+        ]
+
+    records.sort(key=lambda r: r.updated_at, reverse=True)
+    total = len(records)
+    start = (page - 1) * page_size
+    end = start + page_size
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "records": [_serialize_second_pass(pr) for pr in records[start:end]],
+    }
 
 
 @app.get("/api/records/fulltext-needed/list")
@@ -618,6 +652,52 @@ async def debug_test_api_key():
 # ─────────────────────────────────────────────────────
 # HELPERS
 # ─────────────────────────────────────────────────────
+
+def _serialize_second_pass(pr: PipelineRecord) -> Dict:
+    """Enriched record summary for second-pass human review (includes abstract + agent rationale)."""
+    d = pr.dedup or pr.raw
+    abstract = d.abstract if d else ""
+
+    a1_decision = a1_rationale = a1_ec = ""
+    a2_decision = a2_rationale = a2_ec = ""
+    a1_conf = a2_conf = 0.0
+    human_verified = False
+
+    if pr.screened and pr.screened.title_screening:
+        ts = pr.screened.title_screening
+        human_verified = ts.human_verified or False
+        if ts.agent1:
+            a1_decision = ts.agent1.decision or ""
+            a1_rationale = ts.agent1.rationale or ""
+            a1_conf = ts.agent1.confidence or 0.0
+            a1_ec = ts.agent1.exclusion_code or ""
+        if ts.agent2:
+            a2_decision = ts.agent2.decision or ""
+            a2_rationale = ts.agent2.rationale or ""
+            a2_conf = ts.agent2.confidence or 0.0
+            a2_ec = ts.agent2.exclusion_code or ""
+
+    return {
+        "record_id": pr.record_id,
+        "title": d.title if d else "",
+        "authors": d.authors if d else "",
+        "year": d.year if d else None,
+        "journal": d.journal_venue if d else "",
+        "doi": d.doi if d else "",
+        "source_db": d.source_db if d else "",
+        "abstract": abstract,
+        "agent1_decision": a1_decision,
+        "agent1_rationale": a1_rationale,
+        "agent1_confidence": a1_conf,
+        "agent1_ec": a1_ec,
+        "agent2_decision": a2_decision,
+        "agent2_rationale": a2_rationale,
+        "agent2_confidence": a2_conf,
+        "agent2_ec": a2_ec,
+        "human_verified": human_verified,
+        "final_decision": pr.final_decision,
+    }
+
 
 def _serialize_record_summary(pr: PipelineRecord) -> Dict:
     """Lightweight record summary for list views."""
