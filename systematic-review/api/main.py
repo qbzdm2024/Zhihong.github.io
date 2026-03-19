@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from config.settings import settings, ModelConfig
 from pipeline.models import DecisionLabel, PipelineStage, PipelineRecord
 from pipeline.pipeline import PipelineRunner
+from agents.screener import get_agent_errors
+from agents.openai_client import get_client
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -500,6 +502,51 @@ async def export_all_records():
     with open(out_path, "w") as f:
         json.dump(all_data, f, indent=2, default=str)
     return FileResponse(str(out_path), filename="systematic_review_export.json")
+
+
+# ─────────────────────────────────────────────────────
+# DEBUG ENDPOINTS
+# ─────────────────────────────────────────────────────
+
+@app.get("/api/debug/agent-errors")
+async def debug_agent_errors():
+    """Return recent agent screening errors (API failures, parse errors, etc.)."""
+    errors = get_agent_errors(n=50)
+    return {
+        "error_count": len(errors),
+        "errors": errors,
+        "hint": "If you see AuthenticationError or InvalidAPIKey, check OPENAI_API_KEY in settings.",
+    }
+
+
+@app.get("/api/debug/test-api-key")
+async def debug_test_api_key():
+    """Send a minimal test request to verify the OpenAI API key works."""
+    try:
+        client = get_client()
+        raw, usage = client.chat_json(
+            system_prompt="You are a test assistant. Reply with valid JSON only.",
+            user_prompt='Reply with: {"status": "ok", "message": "API key works"}',
+            model=settings.model_title_screening,
+        )
+        return {
+            "status": "ok",
+            "model": settings.model_title_screening,
+            "response": raw,
+            "usage": usage,
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "model": settings.model_title_screening,
+            "hint": (
+                "AuthenticationError → check OPENAI_API_KEY. "
+                "RateLimitError → upgrade plan or wait. "
+                "NotFoundError → model name wrong in settings."
+            ),
+        }
 
 
 # ─────────────────────────────────────────────────────

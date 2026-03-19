@@ -23,6 +23,15 @@ from pipeline.models import (
 
 logger = logging.getLogger(__name__)
 
+# Tracks agent errors so we can surface them to the user
+_agent_error_log: list = []
+
+
+def get_agent_errors(n: int = 20) -> list:
+    """Return the last n agent error messages."""
+    return _agent_error_log[-n:]
+
+
 COMPARISON_USER = """Agent 1 decision:
 {agent1_json}
 
@@ -71,7 +80,11 @@ def _screen_single_agent(
         return agent_dec
 
     except Exception as e:
-        logger.error(f"[{agent_id}] Screening failed: {e}")
+        err_msg = f"[{agent_id}] model={model} error={type(e).__name__}: {e}"
+        logger.error(err_msg)
+        _agent_error_log.append(err_msg)
+        if len(_agent_error_log) > 100:
+            _agent_error_log.pop(0)
         # Return uncertain decision on error — never silently exclude
         return AgentDecision(
             agent_id=agent_id,
@@ -88,24 +101,25 @@ def _compare_agents(agent1: AgentDecision, agent2: AgentDecision) -> ScreeningRe
     """Compare two agents' decisions and produce a ScreeningResult."""
     client = get_client()
 
-    # Quick path: either agent is uncertain → always go to human
-    if (agent1.decision == DecisionLabel.UNCERTAIN or
-            agent2.decision == DecisionLabel.UNCERTAIN):
+    # Quick path: either agent errored out → send to human
+    if (agent1.decision == DecisionLabel.UNCERTAIN and "AGENT_ERROR" in (agent1.flagged_criteria or [])) or \
+       (agent2.decision == DecisionLabel.UNCERTAIN and "AGENT_ERROR" in (agent2.flagged_criteria or [])):
         return ScreeningResult(
             stage=PipelineStage.TITLE_SCREENING,
             final_decision=DecisionLabel.UNCERTAIN,
             agent1=agent1,
             agent2=agent2,
             agents_agree=False,
-            consensus_confidence=min(agent1.confidence, agent2.confidence),
+            consensus_confidence=0.0,
             human_verified=False,
         )
 
-    # Quick path: both agree with high confidence
+    # Quick path: both agree with sufficient confidence — auto-accept
     same_decision = agent1.decision == agent2.decision
     conf_diff = abs(agent1.confidence - agent2.confidence)
+    min_conf = min(agent1.confidence, agent2.confidence)
 
-    if same_decision and conf_diff < 0.15 and min(agent1.confidence, agent2.confidence) >= settings.confidence_threshold:
+    if same_decision and conf_diff < 0.15 and min_conf >= settings.confidence_threshold:
         return ScreeningResult(
             stage=PipelineStage.TITLE_SCREENING,
             final_decision=agent1.decision,
@@ -116,7 +130,21 @@ def _compare_agents(agent1: AgentDecision, agent2: AgentDecision) -> ScreeningRe
             human_verified=False,
         )
 
-    # Use model to compare
+    # Quick path: both say Exclude with reasonable confidence (≥ 0.65) — auto-exclude
+    # Liberal inclusion principle: lower bar for exclusion than inclusion.
+    if (same_decision and agent1.decision == DecisionLabel.EXCLUDE
+            and min_conf >= 0.65 and conf_diff < 0.20):
+        return ScreeningResult(
+            stage=PipelineStage.TITLE_SCREENING,
+            final_decision=DecisionLabel.EXCLUDE,
+            agent1=agent1,
+            agent2=agent2,
+            agents_agree=True,
+            consensus_confidence=(agent1.confidence + agent2.confidence) / 2,
+            human_verified=False,
+        )
+
+    # Use comparison model for borderline cases
     try:
         comparison_prompt = COMPARISON_USER.format(
             agent1_json=json.dumps(agent1.model_dump(), default=str),
@@ -136,10 +164,12 @@ def _compare_agents(agent1: AgentDecision, agent2: AgentDecision) -> ScreeningRe
 
         agents_agree = raw.get("agents_agree", False)
         consensus_conf = float(raw.get("consensus_confidence", 0.5))
-        recommendation = raw.get("recommendation", "send_to_human")
+        # Default "recommendation" to "accept_consensus" — only force human
+        # when the model EXPLICITLY says to send to human.
+        recommendation = raw.get("recommendation", "accept_consensus")
 
-        # If recommendation is send_to_human, force uncertain
-        if recommendation == "send_to_human" or not agents_agree:
+        # Force human review only when explicitly recommended or decision is truly unclear
+        if recommendation == "send_to_human":
             consensus_dec = DecisionLabel.UNCERTAIN
 
         return ScreeningResult(
@@ -154,7 +184,6 @@ def _compare_agents(agent1: AgentDecision, agent2: AgentDecision) -> ScreeningRe
 
     except Exception as e:
         logger.error(f"Comparison agent failed: {e}")
-        # On comparison failure → always go to human
         return ScreeningResult(
             stage=PipelineStage.TITLE_SCREENING,
             final_decision=DecisionLabel.UNCERTAIN,
