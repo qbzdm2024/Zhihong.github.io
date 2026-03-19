@@ -41,6 +41,11 @@ def deduplicate(records: List[RawRecord],
     """
     Deduplicate a list of RawRecords.
 
+    Strategy (in order):
+    1. Exact DOI match (O(n), hash lookup)
+    2. Normalized exact title match (O(n), hash lookup)
+    3. Fuzzy title match with length pre-filter (O(n * candidates), fast skip)
+
     Returns:
         - List of DedupRecord (with is_duplicate and duplicate_of set)
         - Stats dict
@@ -48,6 +53,9 @@ def deduplicate(records: List[RawRecord],
     deduped: List[DedupRecord] = []
     seen_dois: Dict[str, str] = {}       # doi -> record_id
     seen_titles: Dict[str, str] = {}     # normalized_title -> record_id
+    # Inverted index: first word of title → list of (norm_title, record_id)
+    # Used to pre-filter fuzzy candidates without checking all seen titles.
+    title_first_word_idx: Dict[str, List[Tuple[str, str]]] = {}
 
     stats = {
         "total_input": len(records),
@@ -64,7 +72,7 @@ def deduplicate(records: List[RawRecord],
         method = None
         confidence = None
 
-        # --- Strategy 1: DOI match ---
+        # --- Strategy 1: DOI match (O(1) per record) ---
         doi = normalize_doi(record.doi or "")
         if doi and doi not in ("n/a", "none"):
             if doi in seen_dois:
@@ -74,30 +82,42 @@ def deduplicate(records: List[RawRecord],
                 confidence = 1.0
                 stats["duplicates_by_doi"] += 1
 
-        # --- Strategy 2: Normalized exact title + same year ---
+        # --- Strategy 2: Normalized exact title match (O(1) per record) ---
         if not is_dup:
-            norm_title = normalize_title(record.title)
-            if norm_title in seen_titles:
-                canonical_id = seen_titles[norm_title]
-                # Optionally check year agreement too
+            norm_title = normalize_title(record.title or "")
+            if norm_title and norm_title in seen_titles:
                 is_dup = True
-                dup_of = canonical_id
+                dup_of = seen_titles[norm_title]
                 method = "title_exact"
                 confidence = 1.0
                 stats["duplicates_by_exact_title"] += 1
 
-        # --- Strategy 3: Fuzzy title match ---
+        # --- Strategy 3: Fuzzy title match with pre-filtering ---
+        # Only compare against candidates that share the first word AND
+        # are within 15% of the current title's length.
+        # This reduces O(n²) to O(n * k) where k << n.
         if not is_dup and record.title:
             norm_title = normalize_title(record.title)
-            for seen_norm, seen_id in seen_titles.items():
-                sim = title_similarity(norm_title, seen_norm)
-                if sim >= fuzzy_threshold:
-                    is_dup = True
-                    dup_of = seen_id
-                    method = "title_fuzzy"
-                    confidence = sim
-                    stats["duplicates_by_fuzzy_title"] += 1
-                    break
+            words = norm_title.split()
+            if words:
+                first_word = words[0]
+                candidates = title_first_word_idx.get(first_word, [])
+                nl = len(norm_title)
+                for cand_norm, cand_id in candidates:
+                    cl = len(cand_norm)
+                    # Length pre-filter: if lengths differ >15%, similarity < 0.92
+                    if cl == 0 or nl == 0:
+                        continue
+                    if abs(nl - cl) / max(nl, cl) > 0.15:
+                        continue
+                    sim = SequenceMatcher(None, norm_title, cand_norm).ratio()
+                    if sim >= fuzzy_threshold:
+                        is_dup = True
+                        dup_of = cand_id
+                        method = "title_fuzzy"
+                        confidence = sim
+                        stats["duplicates_by_fuzzy_title"] += 1
+                        break
 
         if is_dup:
             drec.is_duplicate = True
@@ -108,8 +128,16 @@ def deduplicate(records: List[RawRecord],
             # Register as canonical
             if doi and doi not in ("n/a", "none"):
                 seen_dois[doi] = record.record_id
-            norm_title = normalize_title(record.title)
-            seen_titles[norm_title] = record.record_id
+            norm_title = normalize_title(record.title or "")
+            if norm_title:
+                seen_titles[norm_title] = record.record_id
+                # Index by first word for fuzzy pre-filtering
+                words = norm_title.split()
+                if words:
+                    fw = words[0]
+                    if fw not in title_first_word_idx:
+                        title_first_word_idx[fw] = []
+                    title_first_word_idx[fw].append((norm_title, record.record_id))
             stats["unique_records"] += 1
 
         deduped.append(drec)

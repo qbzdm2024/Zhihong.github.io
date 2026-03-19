@@ -67,10 +67,19 @@ class PipelineRunRequest(BaseModel):
 
 @app.post("/api/pipeline/run")
 async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: BackgroundTasks):
-    """Trigger a pipeline stage asynchronously."""
+    """Trigger a pipeline stage.
+    import and dedup run synchronously (fast, no AI calls) and return
+    their results directly. Screening and extraction run as background tasks.
+    """
+    if request.stage == "import":
+        stats = runner.run_import()
+        return {"status": "completed", "stage": "import", "stats": stats}
+
+    if request.stage == "dedup":
+        stats = runner.run_deduplication()
+        return {"status": "completed", "stage": "dedup", "stats": stats}
+
     stage_map = {
-        "import": runner.run_import,
-        "dedup": runner.run_deduplication,
         "title_screening": lambda: runner.run_title_screening(request.limit),
         "fulltext_screening": lambda: runner.run_fulltext_screening(request.limit),
         "extraction": lambda: runner.run_extraction(request.limit),
