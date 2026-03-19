@@ -601,10 +601,18 @@ class PipelineRunner:
         logger.info(f"Full text needed: {len(needed)} papers → {out_path}")
 
     def _save_state(self):
-        """Persist all records to state file."""
+        """Persist all records to state file, and sync to Drive if configured."""
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             for pr in self.records.values():
                 f.write(pr.model_dump_json() + "\n")
+        drive_path = os.environ.get("DRIVE_STATE_FILE")
+        if drive_path:
+            try:
+                import shutil
+                os.makedirs(os.path.dirname(drive_path), exist_ok=True)
+                shutil.copy2(STATE_FILE, drive_path)
+            except Exception as e:
+                logger.warning(f"Drive sync failed: {e}")
 
     def load_state(self):
         """Load records from state file."""
