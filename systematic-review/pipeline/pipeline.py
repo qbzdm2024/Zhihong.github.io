@@ -5,6 +5,8 @@ Runs records through all stages with full state persistence.
 import json
 import os
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, List, Dict, Tuple, Optional
 from datetime import datetime
@@ -145,27 +147,41 @@ class PipelineRunner:
             DecisionLabel.EXCLUDE: 0,
             DecisionLabel.UNCERTAIN: 0,
         }
+        lock = threading.Lock()
+        completed = [0]
 
-        for i, pr in enumerate(candidates):
+        def _screen_one(pr: PipelineRecord):
             logger.info(f"Screening [{pr.record_id[:8]}]: {pr.dedup.title[:60]}...")
-            try:
-                result = screen_title_abstract(pr.dedup)
+            result = screen_title_abstract(pr.dedup)
+            return pr, result
 
-                if pr.screened is None:
-                    pr.screened = ScreenedRecord(**pr.dedup.model_dump())
-                pr.screened.title_screening = result
-                pr.screened.current_decision = result.final_decision
-                pr.update_stage(PipelineStage.TITLE_SCREENING, result.final_decision)
-                counts[result.final_decision] = counts.get(result.final_decision, 0) + 1
+        with ThreadPoolExecutor(max_workers=settings.screening_workers) as executor:
+            futures = {executor.submit(_screen_one, pr): pr for pr in candidates}
+            for future in as_completed(futures):
+                try:
+                    pr, result = future.result()
+                    if pr.screened is None:
+                        pr.screened = ScreenedRecord(**pr.dedup.model_dump())
+                    pr.screened.title_screening = result
+                    pr.screened.current_decision = result.final_decision
+                    pr.update_stage(PipelineStage.TITLE_SCREENING, result.final_decision)
+                    with lock:
+                        counts[result.final_decision] = counts.get(result.final_decision, 0) + 1
+                        completed[0] += 1
+                        n = completed[0]
+                except Exception as e:
+                    pr = futures[future]
+                    logger.error(f"Screening error for {pr.record_id}: {e}")
+                    pr.update_stage(PipelineStage.TITLE_SCREENING, DecisionLabel.UNCERTAIN)
+                    with lock:
+                        counts[DecisionLabel.UNCERTAIN] += 1
+                        completed[0] += 1
+                        n = completed[0]
 
-            except Exception as e:
-                logger.error(f"Screening error for {pr.record_id}: {e}")
-                pr.update_stage(PipelineStage.TITLE_SCREENING, DecisionLabel.UNCERTAIN)
-                counts[DecisionLabel.UNCERTAIN] += 1
-
-            if (i + 1) % 50 == 0:
-                self._save_state()
-                logger.info(f"Checkpoint saved at {i + 1}/{len(candidates)} records")
+                if n % 50 == 0:
+                    with lock:
+                        self._save_state()
+                    logger.info(f"Checkpoint saved at {n}/{len(candidates)} records")
 
         self._save_state()
         self._export_screening_lists()
@@ -202,34 +218,52 @@ class PipelineRunner:
             DecisionLabel.FULL_TEXT_NEEDED: 0,
         }
 
-        for i, pr in enumerate(candidates):
-            # Check PDF availability
+        # Separate records with/without PDFs before launching threads
+        pdf_ready = []
+        for pr in candidates:
             pdf_path = self._find_pdf(pr)
             if not pdf_path:
                 pr.screened.fulltext_available = False
                 pr.update_stage(PipelineStage.FULLTEXT_SCREENING, DecisionLabel.FULL_TEXT_NEEDED)
                 counts[DecisionLabel.FULL_TEXT_NEEDED] += 1
-                continue
+            else:
+                pr.screened.pdf_path = pdf_path
+                pr.screened.fulltext_available = True
+                pdf_ready.append(pr)
 
-            pr.screened.pdf_path = pdf_path
-            pr.screened.fulltext_available = True
+        lock = threading.Lock()
+        completed = [0]
 
-            try:
-                fulltext = self._extract_pdf_text(pdf_path)
-                result = screen_fulltext(pr.dedup, fulltext)
-                pr.screened.fulltext_screening = result
-                pr.screened.current_decision = result.final_decision
-                pr.update_stage(PipelineStage.FULLTEXT_SCREENING, result.final_decision)
-                counts[result.final_decision] = counts.get(result.final_decision, 0) + 1
+        def _fulltext_one(pr: PipelineRecord):
+            fulltext = self._extract_pdf_text(pr.screened.pdf_path)
+            result = screen_fulltext(pr.dedup, fulltext)
+            return pr, result
 
-            except Exception as e:
-                logger.error(f"Full-text screening error for {pr.record_id}: {e}")
-                pr.update_stage(PipelineStage.FULLTEXT_SCREENING, DecisionLabel.UNCERTAIN)
-                counts[DecisionLabel.UNCERTAIN] += 1
+        with ThreadPoolExecutor(max_workers=settings.screening_workers) as executor:
+            futures = {executor.submit(_fulltext_one, pr): pr for pr in pdf_ready}
+            for future in as_completed(futures):
+                try:
+                    pr, result = future.result()
+                    pr.screened.fulltext_screening = result
+                    pr.screened.current_decision = result.final_decision
+                    pr.update_stage(PipelineStage.FULLTEXT_SCREENING, result.final_decision)
+                    with lock:
+                        counts[result.final_decision] = counts.get(result.final_decision, 0) + 1
+                        completed[0] += 1
+                        n = completed[0]
+                except Exception as e:
+                    pr = futures[future]
+                    logger.error(f"Full-text screening error for {pr.record_id}: {e}")
+                    pr.update_stage(PipelineStage.FULLTEXT_SCREENING, DecisionLabel.UNCERTAIN)
+                    with lock:
+                        counts[DecisionLabel.UNCERTAIN] += 1
+                        completed[0] += 1
+                        n = completed[0]
 
-            if (i + 1) % 50 == 0:
-                self._save_state()
-                logger.info(f"Checkpoint saved at {i + 1}/{len(candidates)} records")
+                if n % 50 == 0:
+                    with lock:
+                        self._save_state()
+                    logger.info(f"Checkpoint saved at {n}/{len(pdf_ready)} records")
 
         self._save_state()
         self._export_fulltext_needed_list()

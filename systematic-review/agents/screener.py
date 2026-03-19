@@ -6,6 +6,7 @@ If they disagree → flag for human review.
 """
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -208,21 +209,24 @@ def screen_title_abstract(record: DedupRecord) -> ScreeningResult:
         abstract=record.abstract or "[No abstract available]",
     )
 
-    # Agent 1
-    agent1 = _screen_single_agent(
-        agent_id=f"agent1_{settings.model_title_screening}",
-        model=settings.model_title_screening,
-        system_prompt=TITLE_SCREENING_SYSTEM,
-        user_prompt=user_prompt,
-    )
-
-    # Agent 2 (different model if configured)
-    agent2 = _screen_single_agent(
-        agent_id=f"agent2_{settings.model_agent2_screening}",
-        model=settings.model_agent2_screening,
-        system_prompt=TITLE_SCREENING_SYSTEM,
-        user_prompt=user_prompt,
-    )
+    # Run agent1 and agent2 in parallel
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f1 = ex.submit(
+            _screen_single_agent,
+            f"agent1_{settings.model_title_screening}",
+            settings.model_title_screening,
+            TITLE_SCREENING_SYSTEM,
+            user_prompt,
+        )
+        f2 = ex.submit(
+            _screen_single_agent,
+            f"agent2_{settings.model_agent2_screening}",
+            settings.model_agent2_screening,
+            TITLE_SCREENING_SYSTEM,
+            user_prompt,
+        )
+        agent1 = f1.result()
+        agent2 = f2.result()
 
     result = _compare_agents(agent1, agent2)
     result.stage = PipelineStage.TITLE_SCREENING
@@ -245,19 +249,24 @@ def screen_fulltext(record: DedupRecord, fulltext: str) -> ScreeningResult:
         fulltext=truncated,
     )
 
-    agent1 = _screen_single_agent(
-        agent_id=f"agent1_{settings.model_fulltext_screening}",
-        model=settings.model_fulltext_screening,
-        system_prompt=FULLTEXT_SCREENING_SYSTEM,
-        user_prompt=user_prompt,
-    )
-
-    agent2 = _screen_single_agent(
-        agent_id=f"agent2_{settings.model_agent2_screening}",
-        model=settings.model_agent2_screening,
-        system_prompt=FULLTEXT_SCREENING_SYSTEM,
-        user_prompt=user_prompt,
-    )
+    # Run agent1 and agent2 in parallel
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f1 = ex.submit(
+            _screen_single_agent,
+            f"agent1_{settings.model_fulltext_screening}",
+            settings.model_fulltext_screening,
+            FULLTEXT_SCREENING_SYSTEM,
+            user_prompt,
+        )
+        f2 = ex.submit(
+            _screen_single_agent,
+            f"agent2_{settings.model_agent2_screening}",
+            settings.model_agent2_screening,
+            FULLTEXT_SCREENING_SYSTEM,
+            user_prompt,
+        )
+        agent1 = f1.result()
+        agent2 = f2.result()
 
     result = _compare_agents(agent1, agent2)
     result.stage = PipelineStage.FULLTEXT_SCREENING

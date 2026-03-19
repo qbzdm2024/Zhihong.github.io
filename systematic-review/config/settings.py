@@ -30,6 +30,9 @@ class ModelConfig(BaseSettings):
     confidence_threshold: float = Field(default=0.80, env="CONFIDENCE_THRESHOLD")
     agreement_required: bool = Field(default=True, env="AGREEMENT_REQUIRED")
 
+    # Concurrency: number of papers processed in parallel during screening/extraction
+    screening_workers: int = Field(default=5, env="SCREENING_WORKERS")
+
     # Paths
     data_dir: str = Field(default="data", env="DATA_DIR")
     raw_dir: str = Field(default="data/raw", env="RAW_DIR")
