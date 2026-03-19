@@ -2,6 +2,7 @@
 OpenAI API client wrapper with retry logic, error handling, and cost tracking.
 """
 import json
+import re
 import time
 import logging
 from typing import Optional, Dict, Any, Tuple
@@ -10,6 +11,13 @@ from openai import OpenAI, APIError, RateLimitError, APITimeoutError
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+_CTRL_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+
+
+def _sanitize(text: str) -> str:
+    """Strip null bytes and control characters that make JSON requests invalid."""
+    return _CTRL_CHARS.sub(' ', text)
 
 
 class OpenAIClient:
@@ -41,8 +49,8 @@ class OpenAIClient:
             RuntimeError after max_retries exhausted
         """
         messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": _sanitize(system_prompt)},
+            {"role": "user", "content": _sanitize(user_prompt)},
         ]
 
         kwargs: Dict[str, Any] = {
