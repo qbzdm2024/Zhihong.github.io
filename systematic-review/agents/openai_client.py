@@ -14,6 +14,16 @@ logger = logging.getLogger(__name__)
 
 _CTRL_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
 
+# Models that require max_completion_tokens instead of max_tokens
+_MAX_COMPLETION_PREFIXES = ("o1", "o3", "o4", "gpt-5")
+
+
+def _token_limit_key(model: str) -> str:
+    m = model.lower()
+    if any(m.startswith(p) for p in _MAX_COMPLETION_PREFIXES):
+        return "max_completion_tokens"
+    return "max_tokens"
+
 
 def _sanitize(text: str) -> str:
     """Strip null bytes and control characters that make JSON requests invalid."""
@@ -57,7 +67,7 @@ class OpenAIClient:
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
+            _token_limit_key(model): max_tokens,
         }
 
         # Only add response_format for models that support it
