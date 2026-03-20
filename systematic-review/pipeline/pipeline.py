@@ -794,18 +794,24 @@ class PipelineRunner:
             if pr.final_decision == DecisionLabel.INCLUDE
             and pr.pipeline_stage in (PipelineStage.FULLTEXT_SCREENING, PipelineStage.EXTRACTION)
         )
-        # "Needs human verification" = records that have BEEN processed by agents
-        # but agents disagreed; does NOT include pre-screening records (those are
-        # "awaiting_title_screening").
-        needs_human = sum(
+        # "Needs human verification" — broken down by stage so the UI can show
+        # separate labels for title, fulltext, and extraction reviews.
+        needs_human_title = sum(
             1 for pr in self.records.values()
             if pr.final_decision == DecisionLabel.UNCERTAIN
-            and pr.pipeline_stage in (
-                PipelineStage.TITLE_SCREENING,
-                PipelineStage.FULLTEXT_SCREENING,
-                PipelineStage.EXTRACTION,
-            )
+            and pr.pipeline_stage == PipelineStage.TITLE_SCREENING
         )
+        needs_human_fulltext = sum(
+            1 for pr in self.records.values()
+            if pr.final_decision == DecisionLabel.UNCERTAIN
+            and pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
+        )
+        needs_human_extraction = sum(
+            1 for pr in self.records.values()
+            if pr.final_decision == DecisionLabel.UNCERTAIN
+            and pr.pipeline_stage == PipelineStage.EXTRACTION
+        )
+        needs_human = needs_human_title + needs_human_fulltext + needs_human_extraction
 
         return {
             "identified": total,
@@ -819,6 +825,9 @@ class PipelineRunner:
             "full_text_excluded": fulltext_excluded,
             "final_included": final_included,
             "needs_human_verification": needs_human,
+            "needs_human_title_screening": needs_human_title,
+            "needs_human_fulltext_screening": needs_human_fulltext,
+            "needs_human_extraction": needs_human_extraction,
         }
 
     def export_evidence_table(self) -> List[Dict]:
@@ -899,6 +908,37 @@ class PipelineRunner:
         stats = {"rolled_back": rolled_back}
         self.stage_log["reset_failed_screenings"] = {**stats, "completed_at": datetime.utcnow().isoformat()}
         logger.info(f"Reset failed screenings: {stats}")
+        return stats
+
+    def restore_bulk_excluded(self, rationale_marker: str = "manual bulk decision") -> Dict:
+        """Reverse a bulk human-exclusion by clearing the human decision and restoring
+        UNCERTAIN so records appear under 'needs human verification' again.
+
+        Only touches records whose title_screening.human_rationale contains
+        rationale_marker (default matches the bulk-exclude snippet's rationale).
+        """
+        restored = 0
+        for pr in self.records.values():
+            ts = pr.screened and pr.screened.title_screening
+            if not ts:
+                continue
+            if not ts.human_verified:
+                continue
+            if rationale_marker not in (ts.human_rationale or ""):
+                continue
+            # Clear the human decision, restore UNCERTAIN
+            ts.human_verified = False
+            ts.human_decision = None
+            ts.human_rationale = None
+            ts.human_reviewer = None
+            ts.human_timestamp = None
+            pr.final_decision = DecisionLabel.UNCERTAIN
+            pr.updated_at = datetime.utcnow()
+            restored += 1
+        self._save_state()
+        stats = {"restored": restored}
+        self.stage_log["restore_bulk_excluded"] = {**stats, "completed_at": datetime.utcnow().isoformat()}
+        logger.info(f"Restore bulk excluded: {stats}")
         return stats
 
     # ──────────────────────────────────────────────────
