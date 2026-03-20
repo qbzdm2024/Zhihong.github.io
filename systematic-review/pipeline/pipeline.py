@@ -527,9 +527,16 @@ class PipelineRunner:
 
         candidates = [
             pr for pr in self.records.values()
-            if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
-            and pr.final_decision == DecisionLabel.INCLUDE
-            and pr.screened is not None
+            if pr.screened is not None
+            and (
+                # First pass: records that passed title screening, not yet fulltext-screened
+                (pr.pipeline_stage == PipelineStage.TITLE_SCREENING
+                 and pr.final_decision == DecisionLabel.INCLUDE)
+                or
+                # Retry pass: records that previously had no PDF (manual upload case)
+                (pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
+                 and pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED)
+            )
         ]
 
         if limit:
