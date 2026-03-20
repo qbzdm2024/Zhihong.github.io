@@ -6,6 +6,7 @@ If they disagree → flag for human review.
 """
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Tuple
@@ -458,14 +459,143 @@ def _compare_agents_fulltext(agent1: AgentDecision, agent2: AgentDecision) -> Sc
         )
 
 
+def _extract_key_sections(text: str, budget: int = 15000) -> str:
+    """Return the most screening-relevant portions of a paper's full text.
+
+    Priority (high → low):
+      1. Abstract / Aim / Objectives / Research questions
+      2. Methods / Methodology / Study design / Participants / Data analysis
+      3. Results / Findings / Themes / Categories
+      4. Discussion / Conclusion / Limitations   (tail-trimmed)
+      SKIP: Introduction, Background, Related work, References, Acknowledgements
+
+    If no recognisable section headers are found the function returns
+    the first third + last third of the text (avoids the intro-heavy head).
+    """
+    # ── section-name buckets ─────────────────────────────────────────────
+    SKIP = {
+        'introduction', 'background', 'related work', 'literature review',
+        'prior work', 'theoretical background', 'theoretical framework',
+        'references', 'bibliography', 'acknowledgements', 'acknowledgement',
+        'funding', 'conflict of interest', 'disclosure', 'appendix',
+        'supplementary', 'author contributions', 'abbreviations',
+    }
+    HIGH = {
+        'abstract', 'aim', 'aims', 'objective', 'objectives', 'purpose',
+        'research question', 'research questions', 'study aim', 'study aims',
+        'study purpose',
+    }
+    METHOD = {
+        'method', 'methods', 'methodology', 'study design', 'research design',
+        'design', 'participants', 'sample', 'sampling', 'procedure',
+        'data collection', 'data analysis', 'analytic approach',
+        'analytical approach', 'analysis', 'coding', 'coding process',
+        'thematic analysis', 'analytic procedure', 'measures', 'instrument',
+        'instruments', 'interview', 'interview guide',
+    }
+    RESULT = {
+        'result', 'results', 'finding', 'findings', 'outcome', 'outcomes',
+        'themes', 'theme', 'categories', 'codes', 'coded results',
+        'qualitative findings', 'key findings',
+    }
+    DISCUSSION = {
+        'discussion', 'conclusion', 'conclusions', 'summary',
+        'limitations', 'limitation', 'implication', 'implications',
+        'future work', 'future directions',
+    }
+
+    def _classify(header_raw: str) -> str:
+        h = header_raw.lower().strip().lstrip('0123456789. ')
+        for names, label in ((SKIP, 'skip'), (HIGH, 'high'),
+                              (METHOD, 'method'), (RESULT, 'result'),
+                              (DISCUSSION, 'discussion')):
+            for name in names:
+                if name in h:
+                    return label
+        return 'other'
+
+    # ── detect section-header lines ──────────────────────────────────────
+    # Header heuristic: short line (≤ 10 words), mostly title-case or all-caps,
+    # optionally prefixed with a section number.
+    HEADER_RE = re.compile(
+        r'^(?:\d[\d.]*[.\s]+)?'          # optional "1." / "2.1 "
+        r'[A-Z][A-Za-z0-9\s/&\-:,()]{2,70}'  # title text
+        r'$'
+    )
+
+    lines = text.splitlines()
+    sections: list[tuple[str, list[str]]] = []  # [(label, lines)]
+    current_label = 'other'
+    current_lines: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+        word_count = len(stripped.split())
+        is_header = (
+            stripped
+            and word_count <= 10
+            and HEADER_RE.match(stripped)
+            # Avoid false positives: a real sentence would be longer
+            and not stripped.endswith(('.', ',', ';', ':', '?'))
+        )
+        if is_header:
+            if current_lines:
+                sections.append((current_label, current_lines))
+            current_label = _classify(stripped)
+            current_lines = [line]
+        else:
+            current_lines.append(line)
+
+    if current_lines:
+        sections.append((current_label, current_lines))
+
+    # ── assemble by priority ─────────────────────────────────────────────
+    useful = [(lbl, lns) for lbl, lns in sections if lbl != 'skip']
+
+    if len(useful) >= 3:
+        assembled: list[str] = []
+        used = 0
+        # Per-priority budgets keep the output balanced
+        per_budget = {
+            'high': min(3000, budget // 4),
+            'method': min(5000, budget // 3),
+            'result': min(5000, budget // 3),
+            'other': min(2000, budget // 6),
+            'discussion': min(2000, budget // 8),
+        }
+        for priority in ('high', 'method', 'result', 'other', 'discussion'):
+            slot = per_budget[priority]
+            for lbl, lns in useful:
+                if lbl != priority:
+                    continue
+                block = '\n'.join(lns)
+                chunk = block[:slot]
+                assembled.append(chunk)
+                used += len(chunk)
+                if used >= budget:
+                    break
+            if used >= budget:
+                break
+        return '\n\n'.join(assembled)
+
+    # ── fallback: skip the intro-heavy head, use middle + tail ───────────
+    third = len(text) // 3
+    head  = text[:2000]           # just enough for title/abstract
+    mid   = text[third: third + budget // 2]
+    tail  = text[-(budget // 3):]
+    return f"{head}\n\n[...]\n\n{mid}\n\n[...]\n\n{tail}"
+
+
 def screen_fulltext(record: DedupRecord, fulltext: str) -> ScreeningResult:
     """
     Run two-agent full-text screening on a single record.
     Uses strict comparison — disagreement or low confidence → human review.
     Requires the extracted text from PDF or HTML.
     """
-    # Truncate to avoid token limits (keep first 15000 chars — more context for final decision)
-    truncated = fulltext[:15000] if len(fulltext) > 15000 else fulltext
+    # Extract the most relevant sections rather than naively taking the first N chars.
+    # Priority: abstract/aims → methods → results → discussion tail.
+    # Introduction and related work are skipped (least useful for screening decisions).
+    truncated = _extract_key_sections(fulltext, budget=15000)
 
     user_prompt = FULLTEXT_SCREENING_USER.format(
         title=record.title or "",
