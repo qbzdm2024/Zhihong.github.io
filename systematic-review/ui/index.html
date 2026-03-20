@@ -201,13 +201,17 @@
 
       <!-- Step 1b: Retry failed records with extended sources -->
       <div class="card mb-4">
-        <div class="card-header">Step 1b — Retry Failed Records (arXiv · CORE · Direct URL)</div>
+        <div class="card-header">Step 1b — Retry Failed Records (14 sources)</div>
         <div class="card-body">
           <p class="config-hint mb-2">
             Re-attempts download for all <strong id="ft-retry-count">—</strong> records that
-            could not be retrieved automatically. Uses additional sources:
-            <strong>arXiv</strong> (very effective for CS/AI papers),
-            <strong>CORE</strong> open-access aggregator, and the paper's direct URL.
+            could not be retrieved automatically. Tries 14 sources in sequence:
+            <strong>arXiv</strong> (CS/AI preprints) ·
+            <strong>CORE</strong> (open-access aggregator) ·
+            <strong>ACL Anthology</strong> (all NLP/CL papers free) ·
+            <strong>OpenReview</strong> (ICLR · NeurIPS · ICML) ·
+            <strong>Zenodo</strong> · <strong>bioRxiv/medRxiv</strong> ·
+            <strong>CrossRef</strong> · <strong>PubMed</strong> · and more.
           </p>
           <button class="btn btn-primary" onclick="retryFulltextDownload()">
             🔄 Retry Failed Downloads
