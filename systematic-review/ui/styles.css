@@ -1047,6 +1047,37 @@ input[type="range"] {
 }
 .btn-warning:hover { background: #d07a2a; }
 
+/* ── Full-Text Download Panel ── */
+.ft-progress {
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.ft-progress-bar-wrap {
+  height: 8px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.ft-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 4px;
+  transition: width 1s ease;
+}
+.ft-result-box {
+  background: var(--surface2);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+}
+.ft-result-row { display: flex; gap: 16px; flex-wrap: wrap; }
+.ft-result-stat { font-size: 14px; font-weight: 600; }
+.ft-ok { color: var(--green); }
+.ft-warn { color: var(--orange); }
+.mb-4 { margin-bottom: 16px; }
+.mt-3 { margin-top: 12px; }
+.mt-2 { margin-top: 8px; }
+
 /* Second-pass agent section labels */
 .sp-agent-section-label {
   grid-column: 1 / -1;

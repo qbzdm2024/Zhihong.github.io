@@ -84,6 +84,7 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
     stage_map = {
         "title_screening": lambda: runner.run_title_screening(request.limit),
         "second_pass_screening": lambda: runner.run_second_pass_screening(request.limit),
+        "fulltext_download": lambda: runner.run_fulltext_download(request.limit),
         "fulltext_screening": lambda: runner.run_fulltext_screening(request.limit),
         "extraction": lambda: runner.run_extraction(request.limit),
     }
@@ -379,6 +380,127 @@ async def upload_pdfs_batch(files: List[UploadFile] = File(...)):
         results.append({"filename": file.filename, "status": "uploaded", "path": str(save_path)})
 
     return {"uploaded": len([r for r in results if r["status"] == "uploaded"]), "results": results}
+
+
+# ─────────────────────────────────────────────────────
+# FULL-TEXT AUTO-DOWNLOAD
+# ─────────────────────────────────────────────────────
+
+class DownloadEmailRequest(BaseModel):
+    email: Optional[str] = None  # contact email for Unpaywall/OpenAlex polite pool
+    limit: Optional[int] = None
+
+
+@app.post("/api/fulltext/download")
+async def trigger_fulltext_download(
+    request: DownloadEmailRequest,
+    background_tasks: BackgroundTasks,
+):
+    """Trigger automatic full-text download for all INCLUDE records lacking a PDF.
+
+    Tries Unpaywall → Semantic Scholar → OpenAlex → Europe PMC for each record.
+    Records that cannot be auto-fetched are set to FULL_TEXT_NEEDED.
+    A PRISMA snapshot is saved before download begins.
+    """
+    if runner.running_stage:
+        raise HTTPException(409, f"Pipeline stage already running: {runner.running_stage}")
+
+    # Override contact email if provided
+    if request.email:
+        import agents.fulltext_downloader as dl_mod
+        dl_mod.CONTACT_EMAIL = request.email
+
+    def _run():
+        runner.run_fulltext_download(limit=request.limit)
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "stage": "fulltext_download"}
+
+
+@app.get("/api/fulltext/download-status")
+async def get_download_status():
+    """Return the result of the last fulltext download run."""
+    log = runner.stage_log.get("fulltext_download", {})
+    manual_needed_list = [
+        {
+            "record_id": pr.record_id,
+            "title": (pr.dedup or pr.raw).title if (pr.dedup or pr.raw) else "",
+            "authors": pr.dedup.authors if pr.dedup else "",
+            "year": pr.dedup.year if pr.dedup else None,
+            "doi": pr.dedup.doi if pr.dedup else "",
+            "journal": pr.dedup.journal_venue if pr.dedup else "",
+            "url": pr.dedup.url if pr.dedup else "",
+            "source_db": pr.dedup.source_db if pr.dedup else "",
+        }
+        for pr in runner.records.values()
+        if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED
+    ]
+    return {
+        "running": runner.running_stage == "fulltext_download",
+        "last_run": log,
+        "manual_needed_count": len(manual_needed_list),
+        "manual_needed": manual_needed_list,
+    }
+
+
+@app.get("/api/fulltext/manual-list/csv")
+async def export_manual_fulltext_csv():
+    """Download a CSV of papers needing manual full-text retrieval."""
+    import csv, io
+    records = [
+        pr for pr in runner.records.values()
+        if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED
+    ]
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "record_id", "title", "authors", "year", "journal_venue",
+        "doi", "url", "source_db",
+        "upload_filename_hint",
+    ])
+    for pr in records:
+        d = pr.dedup or pr.raw
+        if not d:
+            continue
+        writer.writerow([
+            pr.record_id,
+            d.title or "",
+            d.authors or "",
+            d.year or "",
+            d.journal_venue or "",
+            d.doi or "",
+            d.url or "",
+            d.source_db or "",
+            f"{pr.record_id}.pdf",  # hint: save file with this name for auto-match
+        ])
+    output.seek(0)
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=manual_fulltext_needed.csv"},
+    )
+
+
+# ─────────────────────────────────────────────────────
+# PRISMA SNAPSHOTS
+# ─────────────────────────────────────────────────────
+
+class PrismaSnapshotRequest(BaseModel):
+    label: str = ""
+
+
+@app.post("/api/prisma/snapshot")
+async def save_prisma_snapshot(request: PrismaSnapshotRequest):
+    """Save a labelled PRISMA flow snapshot to the audit trail."""
+    snapshot = runner.save_prisma_snapshot(request.label)
+    return {"status": "saved", "snapshot": snapshot}
+
+
+@app.get("/api/prisma/snapshots")
+async def get_prisma_snapshots():
+    """Return all saved PRISMA flow snapshots."""
+    return {"snapshots": runner.get_prisma_snapshots()}
 
 
 # ─────────────────────────────────────────────────────

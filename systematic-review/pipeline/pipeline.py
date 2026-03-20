@@ -278,6 +278,162 @@ class PipelineRunner:
         return counts
 
     # ──────────────────────────────────────────────────
+    # STAGE 3c: FULL-TEXT AUTO-DOWNLOAD
+    # ──────────────────────────────────────────────────
+
+    def run_fulltext_download(self, limit: Optional[int] = None) -> Dict:
+        """Auto-download full texts for the 302 included records.
+
+        Tries Unpaywall → Semantic Scholar → OpenAlex → Europe PMC for each
+        record (by DOI). Records where a PDF is obtained are kept as INCLUDE
+        with fulltext_available=True. Records that cannot be auto-fetched are
+        set to FULL_TEXT_NEEDED so the researcher can upload them manually.
+
+        A PRISMA snapshot is saved automatically at the start of this stage
+        to record the post-human-verification counts.
+        """
+        from agents.fulltext_downloader import try_download_fulltext
+
+        self.running_stage = "fulltext_download"
+        logger.info("=== STAGE: FULL-TEXT AUTO-DOWNLOAD ===")
+
+        # Save PRISMA snapshot BEFORE download (captures post-human-verification state)
+        self.save_prisma_snapshot("post_human_verification_pre_fulltext_download")
+
+        candidates = [
+            pr for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
+            and pr.final_decision == DecisionLabel.INCLUDE
+            and pr.screened is not None
+            and not pr.screened.fulltext_available
+        ]
+
+        if limit:
+            candidates = candidates[:limit]
+
+        logger.info(f"Attempting auto-download for {len(candidates)} records")
+
+        counts = {
+            "auto_downloaded": 0,
+            "manual_needed": 0,
+            "already_available": 0,
+            "total_candidates": len(candidates),
+        }
+        download_log: list = []
+        lock = threading.Lock()
+        pdf_dir = Path(settings.pdf_dir)
+
+        def _download_one(pr: PipelineRecord):
+            doi = pr.dedup.doi if pr.dedup else ""
+            title = pr.dedup.title if pr.dedup else ""
+            success, source = try_download_fulltext(doi, title, pr.record_id, pdf_dir)
+            return pr, success, source, doi, title
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_download_one, pr): pr for pr in candidates}
+            for future in as_completed(futures):
+                try:
+                    pr, success, source, doi, title = future.result()
+                    with lock:
+                        if success:
+                            pr.screened.pdf_path = str(pdf_dir / f"{pr.record_id}.pdf")
+                            pr.screened.fulltext_available = True
+                            pr.updated_at = datetime.utcnow()
+                            counts["auto_downloaded"] += 1
+                            download_log.append({
+                                "record_id": pr.record_id,
+                                "title": title[:100],
+                                "doi": doi,
+                                "status": "downloaded",
+                                "source": source,
+                            })
+                        else:
+                            pr.final_decision = DecisionLabel.FULL_TEXT_NEEDED
+                            pr.updated_at = datetime.utcnow()
+                            counts["manual_needed"] += 1
+                            download_log.append({
+                                "record_id": pr.record_id,
+                                "title": title[:100],
+                                "doi": doi,
+                                "status": "manual_needed",
+                                "source": None,
+                            })
+                except Exception as e:
+                    pr = futures[future]
+                    logger.error(f"Download error for {pr.record_id}: {e}")
+                    with lock:
+                        pr.final_decision = DecisionLabel.FULL_TEXT_NEEDED
+                        counts["manual_needed"] += 1
+
+        self._save_state()
+        self._export_fulltext_needed_list()
+        self._export_download_log(download_log)
+
+        log = {**counts, "completed_at": datetime.utcnow().isoformat()}
+        self.stage_log["fulltext_download"] = log
+        self.running_stage = ""
+        logger.info(f"Full-text download complete: {counts}")
+        return counts
+
+    def _export_download_log(self, log_rows: list):
+        """Write download attempt log to output directory."""
+        import json as _json
+        out_path = Path(settings.output_dir) / "fulltext_download_log.json"
+        with open(out_path, "w") as f:
+            _json.dump(log_rows, f, indent=2)
+
+    # ──────────────────────────────────────────────────
+    # PRISMA SNAPSHOTS (for plot generation)
+    # ──────────────────────────────────────────────────
+
+    def save_prisma_snapshot(self, label: str = "") -> Dict:
+        """Save current PRISMA counts as a timestamped snapshot.
+
+        Snapshots accumulate in data/output/prisma_snapshots.jsonl so the
+        complete PRISMA flow can be reproduced and plotted at any time.
+        """
+        import json as _json
+        counts = self.get_prisma_counts()
+        snapshot = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "label": label or f"snapshot_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}",
+            "counts": counts,
+            "total_records": len(self.records),
+            "bucket_totals": {
+                "included": sum(1 for pr in self.records.values()
+                                if pr.final_decision == DecisionLabel.INCLUDE),
+                "excluded": sum(1 for pr in self.records.values()
+                                if pr.final_decision == DecisionLabel.EXCLUDE),
+                "uncertain": sum(1 for pr in self.records.values()
+                                 if pr.final_decision == DecisionLabel.UNCERTAIN),
+                "full_text_needed": sum(1 for pr in self.records.values()
+                                        if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED),
+            },
+        }
+        out_path = Path(settings.output_dir) / "prisma_snapshots.jsonl"
+        with open(out_path, "a") as f:
+            f.write(_json.dumps(snapshot) + "\n")
+        logger.info(f"PRISMA snapshot saved: {label} → {counts}")
+        return snapshot
+
+    def get_prisma_snapshots(self) -> list:
+        """Return all saved PRISMA snapshots."""
+        import json as _json
+        out_path = Path(settings.output_dir) / "prisma_snapshots.jsonl"
+        if not out_path.exists():
+            return []
+        snapshots = []
+        with open(out_path) as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        snapshots.append(_json.loads(line))
+                    except Exception:
+                        pass
+        return snapshots
+
+    # ──────────────────────────────────────────────────
     # STAGE 4: FULL-TEXT SCREENING
     # ──────────────────────────────────────────────────
 

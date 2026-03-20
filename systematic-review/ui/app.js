@@ -826,6 +826,74 @@ async function checkSetupRequired() {
 }
 
 // ─────────────────────────────────────────────
+// FULL-TEXT AUTO-DOWNLOAD
+// ─────────────────────────────────────────────
+
+async function runFulltextDownload() {
+  const email = document.getElementById('ft-contact-email')?.value?.trim() || '';
+  const progressEl = document.getElementById('ft-download-progress');
+  const fillEl = document.getElementById('ft-progress-fill');
+  const labelEl = document.getElementById('ft-progress-label');
+  const resultEl = document.getElementById('ft-download-result');
+
+  if (progressEl) progressEl.classList.remove('hidden');
+  if (labelEl) labelEl.textContent = 'Starting auto-download…';
+  if (fillEl) fillEl.style.width = '5%';
+  if (resultEl) resultEl.innerHTML = '';
+
+  try {
+    await apiPost('/fulltext/download', { email: email || null, limit: null });
+    toast('info', 'Full-text auto-download started in background…');
+
+    // Poll every 5s until complete
+    const interval = setInterval(async () => {
+      try {
+        const status = await apiFetch('/fulltext/download-status');
+        if (!status.running && status.last_run && status.last_run.completed_at) {
+          clearInterval(interval);
+          const r = status.last_run;
+          if (fillEl) fillEl.style.width = '100%';
+          if (labelEl) labelEl.textContent = 'Complete';
+          if (resultEl) resultEl.innerHTML = `
+            <div class="ft-result-box">
+              <div class="ft-result-row">
+                <span class="ft-result-stat ft-ok">✓ ${r.auto_downloaded ?? 0} auto-downloaded</span>
+                <span class="ft-result-stat ft-warn">⚠ ${r.manual_needed ?? 0} need manual upload</span>
+              </div>
+              <p class="config-hint mt-2">Download the CSV below → retrieve PDFs → upload in Step 3.</p>
+            </div>`;
+          loadFulltextNeeded();
+          loadDashboard();
+          toast('success', `Done. ${r.auto_downloaded ?? 0} downloaded, ${r.manual_needed ?? 0} manual.`);
+        } else if (status.running) {
+          if (labelEl) labelEl.textContent = 'Downloading open-access PDFs… (may take several minutes)';
+          const cur = parseFloat((fillEl?.style.width || '5').replace('%', '')) || 5;
+          if (fillEl) fillEl.style.width = Math.min(90, cur + 1.5) + '%';
+        }
+      } catch {}
+    }, 5000);
+    setTimeout(() => clearInterval(interval), 40 * 60 * 1000); // 40min max
+  } catch (e) {
+    toast('error', 'Failed to start download: ' + e.message);
+    if (progressEl) progressEl.classList.add('hidden');
+  }
+}
+
+function downloadManualList() {
+  window.open(`${API}/fulltext/manual-list/csv`, '_blank');
+}
+
+async function savePrismaSnapshot() {
+  const label = prompt('Label for this PRISMA snapshot:', 'after_human_verification') || 'manual';
+  try {
+    const res = await apiPost('/prisma/snapshot', { label });
+    toast('success', `PRISMA snapshot saved: "${res.snapshot.label}"`);
+  } catch (e) {
+    toast('error', 'Failed to save snapshot: ' + e.message);
+  }
+}
+
+// ─────────────────────────────────────────────
 // SECOND-PASS REVIEW
 // ─────────────────────────────────────────────
 
