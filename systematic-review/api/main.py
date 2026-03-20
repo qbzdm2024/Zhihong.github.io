@@ -396,6 +396,54 @@ async def upload_pdfs_batch(files: List[UploadFile] = File(...)):
     return {"uploaded": len([r for r in results if r["status"] == "uploaded"]), "results": results}
 
 
+@app.post("/api/pdfs/register-from-disk")
+async def register_pdfs_from_disk():
+    """Scan data/pdfs/ and register every .pdf/.txt file found there.
+
+    This is the preferred bulk-upload path when files are copied directly
+    into data/pdfs/ (e.g. via Google Drive or scp).  Each file is matched
+    to a pipeline record by its stem (record_id or sanitised DOI).
+    Records in FULL_TEXT_NEEDED are promoted back to INCLUDE automatically.
+    """
+    pdf_dir = Path(settings.pdf_dir)
+    if not pdf_dir.exists():
+        return {"registered": 0, "unmatched": 0, "results": []}
+
+    results = []
+    for f in sorted(pdf_dir.iterdir()):
+        if f.suffix.lower() not in (".pdf", ".txt"):
+            continue
+
+        stem = f.stem
+        pr = runner.records.get(stem)
+
+        # Also try DOI reverse-lookup: "10.1016_j.foo.2024.101" → original DOI
+        if pr is None:
+            doi_candidate = stem.replace("_", "/", 1)  # restore first slash only
+            for rec in runner.records.values():
+                d = rec.dedup or rec.raw
+                if d and d.doi:
+                    doi_safe = d.doi.replace("/", "_").replace(":", "_")
+                    if doi_safe == stem:
+                        pr = rec
+                        break
+
+        if pr and pr.screened:
+            pr.screened.pdf_path = str(f)
+            pr.screened.fulltext_available = True
+            if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED:
+                pr.final_decision = DecisionLabel.INCLUDE
+            pr.updated_at = datetime.utcnow()
+            results.append({"file": f.name, "status": "registered", "record_id": pr.record_id})
+        else:
+            results.append({"file": f.name, "status": "unmatched"})
+
+    runner._save_state()
+    registered = sum(1 for r in results if r["status"] == "registered")
+    unmatched  = sum(1 for r in results if r["status"] == "unmatched")
+    return {"registered": registered, "unmatched": unmatched, "results": results}
+
+
 # ─────────────────────────────────────────────────────
 # FULL-TEXT AUTO-DOWNLOAD
 # ─────────────────────────────────────────────────────
