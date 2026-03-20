@@ -533,6 +533,12 @@ class PipelineRunner:
                 (pr.pipeline_stage == PipelineStage.TITLE_SCREENING
                  and pr.final_decision == DecisionLabel.INCLUDE)
                 or
+                # Uncertain at title screening: given benefit of the doubt, need fulltext review
+                (pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
+                 and pr.final_decision == DecisionLabel.UNCERTAIN
+                 and (pr.screened.fulltext_screening is None
+                      or not pr.screened.fulltext_screening.human_verified))
+                or
                 # Retry pass: records that previously had no PDF (manual upload case)
                 (pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
                  and pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED)
