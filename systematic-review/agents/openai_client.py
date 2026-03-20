@@ -66,9 +66,12 @@ class OpenAIClient:
         kwargs: Dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": temperature,
             _token_limit_key(model): max_tokens,
         }
+        # o-series and gpt-5 models only support temperature=1 (the default); omit it
+        m_lower = model.lower()
+        if not any(m_lower.startswith(p) for p in _MAX_COMPLETION_PREFIXES):
+            kwargs["temperature"] = temperature
 
         # Only add response_format for models that support it
         if response_format == "json_object" and "gpt" in model.lower():
