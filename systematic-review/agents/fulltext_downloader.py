@@ -525,17 +525,20 @@ def _biorxiv_pdf(doi: str, title: str) -> Optional[str]:
 # SOURCE 13: Google Scholar — best-effort PDF link scrape
 # ─────────────────────────────────────────────────────────
 
-def _google_scholar_pdf(title: str) -> Optional[str]:
+def _google_scholar_pdf(doi: str, title: str) -> Optional[str]:
     """Scrape Google Scholar search results for a direct PDF link.
 
-    Google Scholar shows [PDF] badges next to papers that have a freely
-    accessible PDF on the publisher/repository site.  We scrape the first
-    results page for those links.  Google sometimes returns 429/captcha for
-    automated requests — the function fails silently in that case.
+    Search order:
+      1. By DOI  — most precise; Scholar resolves DOIs to the exact paper and
+                   shows a [PDF] badge whenever a free copy is available
+                   (publisher OA, institutional repo, ResearchGate, etc.)
+      2. By title — fallback when DOI is absent
+
+    Google sometimes returns 429/captcha; the function fails silently then.
     """
-    if not title:
+    if not doi and not title:
         return None
-    # Use a browser-like User-Agent to reduce bot detection
+
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -545,31 +548,44 @@ def _google_scholar_pdf(title: str) -> Optional[str]:
         "Accept-Language": "en-US,en;q=0.9",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     }
-    q = requests.utils.quote(f'"{title}"')
-    url = f"https://scholar.google.com/scholar?q={q}&hl=en&as_sdt=0%2C5"
-    try:
-        r = requests.get(url, headers=headers, timeout=20)
-        if r.status_code != 200:
-            logger.debug(f"Google Scholar returned {r.status_code}")
-            return None
-        html = r.text
-        # Extract PDF links — Scholar marks them as gs_or_ggsm spans with a PDF href
-        # Pattern: links ending in .pdf or containing /pdf/ that appear near the title
-        pdf_links = re.findall(
-            r'href="(https?://[^"]+\.pdf[^"]*)"', html, re.IGNORECASE
-        )
-        if not pdf_links:
-            # Broader: any PDF link in a result block
-            pdf_links = re.findall(
-                r'href="(https?://[^"]*(?:/pdf/|/PDF/|full\.pdf|fulltext\.pdf)[^"]*)"',
-                html, re.IGNORECASE,
-            )
-        # Filter out Google's own redirect URLs and Scholar internal links
-        for link in pdf_links[:5]:
-            if "google.com" not in link and "scholar.google" not in link:
-                return link
-    except Exception as e:
-        logger.debug(f"Google Scholar scrape error: {e}")
+
+    def _scrape(query_str: str) -> Optional[str]:
+        q = requests.utils.quote(query_str)
+        url = f"https://scholar.google.com/scholar?q={q}&hl=en&as_sdt=0%2C5"
+        try:
+            r = requests.get(url, headers=headers, timeout=20)
+            if r.status_code != 200:
+                logger.debug(f"Google Scholar returned {r.status_code} for: {query_str[:60]}")
+                return None
+            html = r.text
+            # Primary: links ending in .pdf
+            pdf_links = re.findall(r'href="(https?://[^"]+\.pdf[^"]*)"', html, re.IGNORECASE)
+            if not pdf_links:
+                # Secondary: URLs containing /pdf/ path segments
+                pdf_links = re.findall(
+                    r'href="(https?://[^"]*(?:/pdf/|/PDF/|full\.pdf|fulltext\.pdf)[^"]*)"',
+                    html, re.IGNORECASE,
+                )
+            for link in pdf_links[:5]:
+                if "google.com" not in link and "scholar.google" not in link:
+                    return link
+        except Exception as e:
+            logger.debug(f"Google Scholar scrape error: {e}")
+        return None
+
+    # Pass 1: DOI search — highest precision
+    if doi:
+        result = _scrape(doi)
+        if result:
+            return result
+
+    # Pass 2: quoted title search — fallback
+    if title:
+        time.sleep(_RATE_LIMIT_SECS)
+        result = _scrape(f'"{title}"')
+        if result:
+            return result
+
     return None
 
 
@@ -871,7 +887,7 @@ def try_download_fulltext(
 
     # ── Step 12: Google Scholar — scrape [PDF] badge links ───────────────────
     time.sleep(_RATE_LIMIT_SECS)
-    gs_pdf = _google_scholar_pdf(title)
+    gs_pdf = _google_scholar_pdf(doi, title)
     if gs_pdf:
         logger.info(f"[GoogleScholar] PDF → {gs_pdf[:70]}")
         time.sleep(_RATE_LIMIT_SECS)
