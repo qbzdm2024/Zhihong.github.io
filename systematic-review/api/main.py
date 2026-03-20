@@ -101,6 +101,10 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
         stats = runner.restore_bulk_excluded()
         return {"status": "completed", "stage": "restore_bulk_excluded", "stats": stats}
 
+    if request.stage == "reset_fulltext_screening":
+        stats = runner.reset_fulltext_screening()
+        return {"status": "completed", "stage": "reset_fulltext_screening", "stats": stats}
+
     if request.stage == "mark_included_for_review":
         stats = runner.mark_included_for_review()
         return {"status": "completed", "stage": "mark_included_for_review", "stats": stats}

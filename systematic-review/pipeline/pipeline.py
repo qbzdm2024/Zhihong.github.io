@@ -959,6 +959,56 @@ class PipelineRunner:
         logger.info(f"Restore bulk excluded: {stats}")
         return stats
 
+    def reset_fulltext_screening(self) -> Dict:
+        """Reset all fulltext screening so it can be re-run on all 302 records.
+
+        For each record at FULLTEXT_SCREENING stage:
+        - Clears the fulltext_screening result (unless human-verified)
+        - Restores stage/decision based on original title_screening outcome:
+            title INCLUDE   → TITLE_SCREENING + INCLUDE   (picked up by fulltext_screening)
+            title UNCERTAIN → FULLTEXT_SCREENING + UNCERTAIN (picked up by fulltext_screening)
+            no title result → FULLTEXT_SCREENING + UNCERTAIN
+        Human-verified fulltext decisions are never touched.
+        """
+        reset = 0
+        skipped_human = 0
+        for pr in self.records.values():
+            if pr.pipeline_stage not in (
+                PipelineStage.FULLTEXT_SCREENING, PipelineStage.EXTRACTION
+            ):
+                continue
+            # Preserve human-verified fulltext decisions
+            if (pr.screened
+                    and pr.screened.fulltext_screening
+                    and pr.screened.fulltext_screening.human_verified):
+                skipped_human += 1
+                continue
+            # Clear fulltext result
+            if pr.screened:
+                pr.screened.fulltext_screening = None
+            # Restore stage/decision from title screening
+            title_decision = (
+                pr.screened.title_screening.final_decision
+                if pr.screened and pr.screened.title_screening
+                else None
+            )
+            if title_decision == DecisionLabel.INCLUDE:
+                pr.pipeline_stage = PipelineStage.TITLE_SCREENING
+                pr.final_decision = DecisionLabel.INCLUDE
+            else:
+                # Uncertain at title screening → keep at FULLTEXT_SCREENING for AI review
+                pr.pipeline_stage = PipelineStage.FULLTEXT_SCREENING
+                pr.final_decision = DecisionLabel.UNCERTAIN
+            pr.updated_at = datetime.utcnow()
+            reset += 1
+        self._save_state()
+        stats = {"reset": reset, "human_verified_kept": skipped_human}
+        self.stage_log["reset_fulltext_screening"] = {
+            **stats, "completed_at": datetime.utcnow().isoformat()
+        }
+        logger.info(f"Reset fulltext screening: {stats}")
+        return stats
+
     # ──────────────────────────────────────────────────
     # HELPERS
     # ──────────────────────────────────────────────────
