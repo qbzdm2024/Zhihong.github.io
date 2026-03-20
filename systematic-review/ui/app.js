@@ -72,6 +72,7 @@ async function loadDashboard() {
     setText('stat-identified', p.identified ?? '—');
     setText('stat-after-dedup', p.after_dedup ?? '—');
     setText('stat-title-included', p.title_abstract_included ?? '—');
+    setText('stat-fulltext-retrieved', p.fulltext_retrieved ?? '—');
     setText('stat-fulltext-needed', p.full_text_needed ?? '—');
     setText('stat-final-included', p.final_included ?? '—');
     setText('stat-needs-human', p.needs_human_verification ?? '—');
@@ -114,10 +115,11 @@ function renderPrismaFlow(p) {
       </div>
       <div class="prisma-arrow">↓</div>
       <div class="prisma-row">
-        <div class="prisma-box" style="border-color: var(--orange);">
-          <div class="pbox-count" style="color:var(--orange);">${p.full_text_needed ?? '—'}</div>
-          <div class="pbox-label">Full Text Needed</div>
+        <div class="prisma-box">
+          <div class="pbox-count" style="color:var(--green);">${p.fulltext_retrieved ?? '—'}</div>
+          <div class="pbox-label">Full Text Retrieved</div>
         </div>
+        <div class="prisma-side" style="color:var(--orange);">← ${p.full_text_needed ?? 0} need manual upload</div>
       </div>
       <div class="prisma-arrow">↓</div>
       <div class="prisma-row">

@@ -761,11 +761,25 @@ class PipelineRunner:
             if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
             and pr.final_decision == DecisionLabel.EXCLUDE
         )
+        # Title-included = all records that passed title/abstract screening
+        # (INCLUDE + FULL_TEXT_NEEDED + those that advanced to fulltext/extraction)
         title_screen_included = sum(
             1 for pr in self.records.values()
             if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
-            and pr.final_decision == DecisionLabel.INCLUDE
+            and pr.final_decision in (DecisionLabel.INCLUDE, DecisionLabel.FULL_TEXT_NEEDED)
+        ) + sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage in (PipelineStage.FULLTEXT_SCREENING, PipelineStage.EXTRACTION)
         )
+        # Of those, how many have full text already retrieved
+        fulltext_retrieved = sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
+            and pr.final_decision == DecisionLabel.INCLUDE
+            and pr.screened is not None
+            and pr.screened.fulltext_available
+        )
+        # How many still need manual upload
         fulltext_needed = sum(
             1 for pr in self.records.values()
             if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED
@@ -800,6 +814,7 @@ class PipelineRunner:
             "awaiting_title_screening": awaiting_screening,
             "title_abstract_excluded": title_screen_excluded,
             "title_abstract_included": title_screen_included,
+            "fulltext_retrieved": fulltext_retrieved,
             "full_text_needed": fulltext_needed,
             "full_text_excluded": fulltext_excluded,
             "final_included": final_included,
