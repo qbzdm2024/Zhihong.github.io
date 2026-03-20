@@ -924,27 +924,32 @@ class PipelineRunner:
         return stats
 
     def restore_bulk_excluded(self, rationale_marker: str = "manual bulk decision") -> Dict:
-        """Reverse a bulk human-exclusion by clearing the human decision and restoring
-        UNCERTAIN so records appear under 'needs human verification' again.
+        """Reverse a bulk human-exclusion by restoring records to UNCERTAIN.
 
-        Only touches records whose title_screening.human_rationale contains
-        rationale_marker (default matches the bulk-exclude snippet's rationale).
+        Targets records at FULLTEXT_SCREENING + EXCLUDE that have no fulltext_screening
+        result — meaning they were excluded before any full-text review happened.
+        This is the reliable fingerprint of the accidental bulk exclusion.
+
+        Also clears any human_verified flags on title_screening where the rationale
+        matches (belt-and-suspenders for cases where the flag was stored).
         """
         restored = 0
         for pr in self.records.values():
-            ts = pr.screened and pr.screened.title_screening
-            if not ts:
+            if pr.pipeline_stage != PipelineStage.FULLTEXT_SCREENING:
                 continue
-            if not ts.human_verified:
+            if pr.final_decision != DecisionLabel.EXCLUDE:
                 continue
-            if rationale_marker not in (ts.human_rationale or ""):
+            # Only restore records that were never actually fulltext-screened
+            if pr.screened and pr.screened.fulltext_screening:
                 continue
-            # Clear the human decision, restore UNCERTAIN
-            ts.human_verified = False
-            ts.human_decision = None
-            ts.human_rationale = None
-            ts.human_reviewer = None
-            ts.human_timestamp = None
+            # Clear any human_verified flag on title_screening if present
+            if pr.screened and pr.screened.title_screening:
+                ts = pr.screened.title_screening
+                ts.human_verified = False
+                ts.human_decision = None
+                ts.human_rationale = None
+                ts.human_reviewer = None
+                ts.human_timestamp = None
             pr.final_decision = DecisionLabel.UNCERTAIN
             pr.updated_at = datetime.utcnow()
             restored += 1
