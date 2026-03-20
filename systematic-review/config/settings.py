@@ -17,7 +17,7 @@ class ModelConfig(BaseSettings):
 
     # Model assignments (can be changed per task)
     model_title_screening: str = Field(default="gpt-4o-mini", env="MODEL_TITLE_SCREENING")
-    model_fulltext_screening: str = Field(default="gpt-4o", env="MODEL_FULLTEXT_SCREENING")
+    model_fulltext_screening: str = Field(default="gpt-4o-mini", env="MODEL_FULLTEXT_SCREENING")
     model_extraction: str = Field(default="gpt-4o", env="MODEL_EXTRACTION")
     model_qa_assessment: str = Field(default="gpt-4o", env="MODEL_QA_ASSESSMENT")
     model_synthesis: str = Field(default="gpt-4o", env="MODEL_SYNTHESIS")
