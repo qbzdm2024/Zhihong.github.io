@@ -371,6 +371,8 @@ async function loadFulltextNeeded() {
     const select = document.getElementById('fulltext-record-select');
 
     setBadge('badge-fulltext', data.count);
+    const retryBadge = document.getElementById('ft-retry-count');
+    if (retryBadge) retryBadge.textContent = data.count;
 
     // Populate select
     select.innerHTML = '<option value="">— Select record —</option>' +
@@ -899,6 +901,60 @@ async function runFulltextDownload() {
     setTimeout(() => clearInterval(interval), 40 * 60 * 1000); // 40min max
   } catch (e) {
     toast('error', 'Failed to start download: ' + e.message);
+    if (progressEl) progressEl.classList.add('hidden');
+  }
+}
+
+async function retryFulltextDownload() {
+  const progressEl = document.getElementById('ft-retry-progress');
+  const fillEl = document.getElementById('ft-retry-fill');
+  const labelEl = document.getElementById('ft-retry-label');
+  const resultEl = document.getElementById('ft-retry-result');
+
+  if (progressEl) progressEl.classList.remove('hidden');
+  if (labelEl) labelEl.textContent = 'Starting retry (arXiv · CORE · Direct URL)…';
+  if (fillEl) fillEl.style.width = '5%';
+  if (resultEl) resultEl.innerHTML = '';
+
+  try {
+    await apiPost('/fulltext/retry', {});
+    toast('info', 'Retry started — trying arXiv, CORE, and direct URLs…');
+
+    const interval = setInterval(async () => {
+      try {
+        const status = await apiFetch('/fulltext/retry-status');
+        const r = status.last_run || {};
+        const total = r.total_candidates ?? '?';
+        const done = r.processed ?? 0;
+        const dl = r.auto_downloaded ?? 0;
+        if (!status.running && r.completed_at) {
+          clearInterval(interval);
+          const still = r.still_needed ?? status.still_needed_count ?? 0;
+          if (fillEl) fillEl.style.width = '100%';
+          if (labelEl) labelEl.textContent = 'Retry complete';
+          if (resultEl) resultEl.innerHTML = `
+            <div class="ft-result-box">
+              <div class="ft-result-row">
+                <span class="ft-result-stat ft-ok">✓ ${dl} newly retrieved</span>
+                <span class="ft-result-stat ft-warn">⚠ ${still} still need manual upload</span>
+              </div>
+              ${still > 0 ? '<p class="config-hint mt-2">Download the updated CSV below → retrieve remaining PDFs → upload in Step 3.</p>' : '<p class="config-hint mt-2 text-ok">All records retrieved!</p>'}
+            </div>`;
+          // Update retry count badge
+          const badge = document.getElementById('ft-retry-count');
+          if (badge) badge.textContent = still;
+          loadDashboard();
+          toast('success', `Retry done. ${dl} newly retrieved, ${still} still manual.`);
+        } else if (status.running) {
+          if (labelEl) labelEl.textContent = `Retrying: ${done}/${total} processed, ${dl} newly retrieved…`;
+          const cur = parseFloat((fillEl?.style.width || '5').replace('%', '')) || 5;
+          if (fillEl) fillEl.style.width = Math.min(90, cur + 1.5) + '%';
+        }
+      } catch {}
+    }, 5000);
+    setTimeout(() => clearInterval(interval), 40 * 60 * 1000);
+  } catch (e) {
+    toast('error', 'Retry failed: ' + e.message);
     if (progressEl) progressEl.classList.add('hidden');
   }
 }

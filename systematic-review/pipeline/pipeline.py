@@ -330,7 +330,8 @@ class PipelineRunner:
         def _download_one(pr: PipelineRecord):
             doi = pr.dedup.doi if pr.dedup else ""
             title = pr.dedup.title if pr.dedup else ""
-            success, source = try_download_fulltext(doi, title, pr.record_id, pdf_dir)
+            url = pr.dedup.url if pr.dedup else ""
+            success, source = try_download_fulltext(doi, title, pr.record_id, pdf_dir, record_url=url)
             return pr, success, source, doi, title
 
         with ThreadPoolExecutor(max_workers=4) as executor:
@@ -385,6 +386,76 @@ class PipelineRunner:
         self.stage_log["fulltext_download"] = log
         self.running_stage = ""
         logger.info(f"Full-text download complete: {counts}")
+        return counts
+
+    def retry_fulltext_download(self, limit: Optional[int] = None) -> Dict:
+        """Retry downloading for all FULL_TEXT_NEEDED records using extended sources
+        (arXiv, CORE, direct URL added on top of original sources).
+        Records that succeed are moved back to INCLUDE + fulltext_available=True.
+        """
+        from agents.fulltext_downloader import try_download_fulltext
+
+        self.running_stage = "fulltext_retry"
+        logger.info("=== STAGE: FULL-TEXT RETRY DOWNLOAD ===")
+
+        candidates = [
+            pr for pr in self.records.values()
+            if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED
+        ]
+        if limit:
+            candidates = candidates[:limit]
+
+        logger.info(f"Retrying download for {len(candidates)} FULL_TEXT_NEEDED records")
+
+        counts = {
+            "auto_downloaded": 0,
+            "still_needed": 0,
+            "total_candidates": len(candidates),
+            "processed": 0,
+        }
+        self.stage_log["fulltext_retry"] = {**counts, "in_progress": True}
+
+        lock = threading.Lock()
+        pdf_dir = Path(settings.pdf_dir)
+
+        def _download_one(pr: PipelineRecord):
+            doi = pr.dedup.doi if pr.dedup else ""
+            title = pr.dedup.title if pr.dedup else ""
+            url = pr.dedup.url if pr.dedup else ""
+            success, source = try_download_fulltext(doi, title, pr.record_id, pdf_dir, record_url=url)
+            return pr, success, source
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {executor.submit(_download_one, pr): pr for pr in candidates}
+            for future in as_completed(futures):
+                try:
+                    pr, success, source = future.result()
+                    with lock:
+                        counts["processed"] += 1
+                        self.stage_log["fulltext_retry"] = {**counts, "in_progress": True}
+                        if success:
+                            txt_path = pdf_dir / f"{pr.record_id}.txt"
+                            saved = (txt_path if txt_path.exists()
+                                     else pdf_dir / f"{pr.record_id}.pdf")
+                            if pr.screened:
+                                pr.screened.pdf_path = str(saved)
+                                pr.screened.fulltext_available = True
+                            pr.final_decision = DecisionLabel.INCLUDE
+                            pr.updated_at = datetime.utcnow()
+                            counts["auto_downloaded"] += 1
+                        else:
+                            counts["still_needed"] += 1
+                except Exception as e:
+                    logger.error(f"Retry download error: {e}")
+                    with lock:
+                        counts["still_needed"] += 1
+
+        self._save_state()
+        counts.pop("in_progress", None)
+        log = {**counts, "completed_at": datetime.utcnow().isoformat()}
+        self.stage_log["fulltext_retry"] = log
+        self.running_stage = ""
+        logger.info(f"Retry download complete: {counts}")
         return counts
 
     def _export_download_log(self, log_rows: list):

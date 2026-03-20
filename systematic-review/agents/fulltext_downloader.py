@@ -7,6 +7,9 @@ Tries sources in this order, accepting whatever format is available first:
   3. OpenAlex        — pdf_url or oa_url (HTML/landing)
   4. Europe PMC      — PMC full-text HTML (very reliable for biomedical)
   5. PubMed Central  — HTML full-text directly via PMC ID
+  6. arXiv           — PDF via arXiv API title search (key for CS/AI papers)
+  7. CORE            — open-access aggregator PDF/text
+  8. Direct URL      — record's own URL field
 
 Saves the result as:
   - <record_id>.pdf   if a real PDF was obtained
@@ -275,6 +278,85 @@ def _fetch_html_text(url: str, min_chars: int = 1000) -> Optional[str]:
 
 
 # ─────────────────────────────────────────────────────────
+# SOURCE 6: arXiv (critical for CS/AI papers)
+# ─────────────────────────────────────────────────────────
+
+def _arxiv_pdf_url(doi: str, title: str) -> Optional[str]:
+    """Search arXiv by DOI comment field or title; return PDF URL if found."""
+    import xml.etree.ElementTree as ET
+
+    # Many CS papers mention their arXiv ID in their DOI or URL — try direct patterns
+    # e.g. doi 10.48550/arXiv.2301.00001
+    if doi and "arxiv" in doi.lower():
+        arxiv_id = doi.split("/")[-1].replace("arXiv.", "").replace("arxiv.", "")
+        if arxiv_id:
+            return f"https://arxiv.org/pdf/{arxiv_id}"
+
+    if not title:
+        return None
+    # arXiv atom API title search
+    query = requests.utils.quote(f'ti:"{title}"')
+    url = f"http://export.arxiv.org/api/query?search_query={query}&max_results=3&sortBy=relevance"
+    r = _get(url, accept="application/atom+xml", timeout=20)
+    if not r:
+        return None
+    try:
+        root = ET.fromstring(r.text)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        entries = root.findall("atom:entry", ns)
+        for entry in entries:
+            # Verify title similarity (avoid false matches)
+            entry_title = (entry.findtext("atom:title", "", ns) or "").lower().strip()
+            query_title = title.lower().strip()
+            # Simple overlap check: at least 60% of words match
+            t_words = set(query_title.split())
+            e_words = set(entry_title.split())
+            if t_words and len(t_words & e_words) / len(t_words) >= 0.6:
+                for link in entry.findall("atom:link", ns):
+                    if link.get("type") == "application/pdf" or link.get("title") == "pdf":
+                        return link.get("href")
+                # Fallback: construct PDF URL from entry id
+                entry_id = entry.findtext("atom:id", "", ns)
+                if entry_id:
+                    arxiv_id = entry_id.split("/abs/")[-1]
+                    return f"https://arxiv.org/pdf/{arxiv_id}"
+    except Exception as e:
+        logger.debug(f"arXiv parse error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
+# SOURCE 7: CORE open-access aggregator
+# ─────────────────────────────────────────────────────────
+
+def _core_download_url(doi: str, title: str) -> Optional[str]:
+    """Search CORE for an open-access download URL."""
+    query = doi if doi else title
+    if not query:
+        return None
+    # CORE v3 search
+    url = (f"https://api.core.ac.uk/v3/search/works"
+           f"?q={requests.utils.quote(query)}&limit=3&fields=downloadUrl,doi,title")
+    r = _get(url)
+    if not r:
+        return None
+    try:
+        results = r.json().get("results") or []
+        for item in results:
+            dl = item.get("downloadUrl")
+            if dl:
+                # Verify it's the right paper if we searched by title
+                if not doi:
+                    item_title = (item.get("title") or "").lower()
+                    if not any(w in item_title for w in title.lower().split()[:4]):
+                        continue
+                return dl
+    except Exception as e:
+        logger.debug(f"CORE error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
 # PUBLIC API
 # ─────────────────────────────────────────────────────────
 
@@ -283,6 +365,7 @@ def try_download_fulltext(
     title: str,
     record_id: str,
     pdf_dir: Path,
+    record_url: str = "",
 ) -> Tuple[bool, str]:
     """
     Try to obtain the full text for one record by any available means.
@@ -293,7 +376,10 @@ def try_download_fulltext(
       3. OpenAlex PDF
       4. PMC HTML (via Semantic Scholar PMCID or Europe PMC search)
       5. Europe PMC XML/HTML
-      6. Unpaywall HTML landing page (last resort)
+      6. Unpaywall / OpenAlex HTML landing page
+      7. arXiv PDF (title search — key for CS/AI papers)
+      8. CORE open-access aggregator
+      9. Direct record URL
 
     Saves result as <record_id>.pdf  (real PDF)
                  or <record_id>.txt  (plain text extracted from HTML/XML)
@@ -304,6 +390,7 @@ def try_download_fulltext(
     """
     doi = (doi or "").strip()
     title = (title or "").strip()
+    record_url = (record_url or "").strip()
 
     pdf_path = pdf_dir / f"{record_id}.pdf"
     txt_path = pdf_dir / f"{record_id}.txt"
@@ -355,9 +442,50 @@ def try_download_fulltext(
         if html_url:
             logger.info(f"[{source}] HTML → {html_url[:70]}")
             time.sleep(_RATE_LIMIT_SECS)
-            text = _fetch_html_text(html_url, min_chars=1500)
+            text = _fetch_html_text(html_url, min_chars=1000)
             if text:
                 txt_path.write_text(text, encoding="utf-8")
                 return True, source
+
+    # ── Step 5: arXiv (title search — highly effective for CS/AI papers) ────
+    time.sleep(_RATE_LIMIT_SECS)
+    arxiv_pdf = _arxiv_pdf_url(doi, title)
+    if arxiv_pdf:
+        logger.info(f"[arXiv] PDF → {arxiv_pdf[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if _download_pdf(arxiv_pdf, pdf_path):
+            return True, "arXiv_pdf"
+        # arXiv also serves HTML — try the abs page text
+        abs_url = arxiv_pdf.replace("pdf", "abs", 1)
+        text = _fetch_html_text(abs_url, min_chars=1000)
+        if text:
+            txt_path.write_text(text, encoding="utf-8")
+            return True, "arXiv_html"
+
+    # ── Step 6: CORE open-access aggregator ─────────────────────────────────
+    time.sleep(_RATE_LIMIT_SECS)
+    core_url = _core_download_url(doi, title)
+    if core_url:
+        logger.info(f"[CORE] → {core_url[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if core_url.endswith(".pdf") or "pdf" in core_url.lower():
+            if _download_pdf(core_url, pdf_path):
+                return True, "CORE_pdf"
+        text = _fetch_html_text(core_url, min_chars=1000)
+        if text:
+            txt_path.write_text(text, encoding="utf-8")
+            return True, "CORE_html"
+
+    # ── Step 7: Direct URL from record ──────────────────────────────────────
+    if record_url and record_url.startswith("http"):
+        logger.info(f"[DirectURL] → {record_url[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if record_url.endswith(".pdf"):
+            if _download_pdf(record_url, pdf_path):
+                return True, "direct_pdf"
+        text = _fetch_html_text(record_url, min_chars=1000)
+        if text:
+            txt_path.write_text(text, encoding="utf-8")
+            return True, "direct_html"
 
     return False, "not_found"

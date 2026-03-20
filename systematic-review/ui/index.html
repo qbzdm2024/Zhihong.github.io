@@ -195,6 +195,29 @@
         </div>
       </div>
 
+      <!-- Step 1b: Retry failed records with extended sources -->
+      <div class="card mb-4">
+        <div class="card-header">Step 1b — Retry Failed Records (arXiv · CORE · Direct URL)</div>
+        <div class="card-body">
+          <p class="config-hint mb-2">
+            Re-attempts download for all <strong id="ft-retry-count">—</strong> records that
+            could not be retrieved automatically. Uses additional sources:
+            <strong>arXiv</strong> (very effective for CS/AI papers),
+            <strong>CORE</strong> open-access aggregator, and the paper's direct URL.
+          </p>
+          <button class="btn btn-primary" onclick="retryFulltextDownload()">
+            🔄 Retry Failed Downloads
+          </button>
+          <div id="ft-retry-progress" class="ft-progress hidden mt-3">
+            <div class="ft-progress-bar-wrap">
+              <div id="ft-retry-fill" class="ft-progress-fill" style="width:0%"></div>
+            </div>
+            <div id="ft-retry-label" class="config-hint mt-1">Starting…</div>
+          </div>
+          <div id="ft-retry-result" class="mt-3"></div>
+        </div>
+      </div>
+
       <!-- Step 2: Export list for manual download -->
       <div class="card mb-4">
         <div class="card-header">Step 2 — Download Manual-Retrieval List</div>

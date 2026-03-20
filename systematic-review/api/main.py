@@ -450,10 +450,39 @@ async def get_download_status():
         if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED
     ]
     return {
-        "running": runner.running_stage == "fulltext_download",
+        "running": runner.running_stage in ("fulltext_download", "fulltext_retry"),
         "last_run": log,
         "manual_needed_count": len(manual_needed_list),
         "manual_needed": manual_needed_list,
+    }
+
+
+@app.post("/api/fulltext/retry")
+async def retry_fulltext_download(background_tasks: BackgroundTasks):
+    """Retry downloading full texts for all FULL_TEXT_NEEDED records
+    using extended sources (arXiv, CORE, direct URL)."""
+    if runner.running_stage:
+        raise HTTPException(409, f"Stage '{runner.running_stage}' already running")
+
+    def _run():
+        runner.retry_fulltext_download()
+
+    background_tasks.add_task(_run)
+    return {"status": "started", "stage": "fulltext_retry"}
+
+
+@app.get("/api/fulltext/retry-status")
+async def get_retry_status():
+    """Return progress of the retry download run."""
+    log = runner.stage_log.get("fulltext_retry", {})
+    still_needed = sum(
+        1 for pr in runner.records.values()
+        if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED
+    )
+    return {
+        "running": runner.running_stage == "fulltext_retry",
+        "last_run": log,
+        "still_needed_count": still_needed,
     }
 
 
