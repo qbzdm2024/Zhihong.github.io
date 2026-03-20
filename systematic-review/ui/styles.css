@@ -1047,6 +1047,30 @@ input[type="range"] {
 }
 .btn-warning:hover { background: #d07a2a; }
 
+/* Second-pass agent section labels */
+.sp-agent-section-label {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-top: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.sp-second-pass-label { color: var(--orange); border-color: var(--orange); }
+.sp-not-run { color: var(--text-dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+/* Stage 3b highlight in pipeline panel */
+.stage-card-highlight {
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(135deg, var(--surface) 0%, rgba(108,142,255,0.06) 100%);
+}
+
+/* Strict second-pass agent box */
+.sp-agent-box-strict { border-left: 2px solid var(--orange); }
+
 /* ── Responsive ── */
 @media (max-width: 900px) {
   .sidebar { width: 60px; min-width: 60px; }

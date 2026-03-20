@@ -80,6 +80,7 @@ class DedupRecord(RawRecord):
 class ScreenedRecord(DedupRecord):
     """Record after title/abstract screening."""
     title_screening: Optional[ScreeningResult] = None
+    second_pass_screening: Optional[ScreeningResult] = None  # stricter second-pass AI screen
     fulltext_screening: Optional[ScreeningResult] = None
     pdf_path: Optional[str] = None
     fulltext_available: bool = False

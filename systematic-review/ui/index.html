@@ -307,6 +307,17 @@
           </div>
           <button class="btn btn-primary" onclick="runStage('title_screening', 'title-limit')">Run</button>
         </div>
+        <div class="stage-card stage-card-highlight">
+          <div class="stage-number">3b</div>
+          <div class="stage-info">
+            <div class="stage-title">Second-Pass Screening <span class="badge badge-blue" style="font-size:10px;vertical-align:middle;margin-left:6px">Stricter</span></div>
+            <div class="stage-desc">AI re-screens the 1 038 included records with strict criteria: excludes lecture notes, non-QDA LLM use, writing-assistance-only, chatbot/UX studies, education-only, user-perception studies, conceptual/theoretical papers, quantitative-only, and human-conducted QDA. Uncertain cases → Human Verification queue.</div>
+            <div class="stage-extra">
+              <label>Limit: <input type="number" id="sp-screen-limit" class="input-sm" placeholder="All" /></label>
+            </div>
+          </div>
+          <button class="btn btn-primary" onclick="runStage('second_pass_screening', 'sp-screen-limit')">Run</button>
+        </div>
         <div class="stage-card">
           <div class="stage-number">4</div>
           <div class="stage-info">

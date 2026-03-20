@@ -83,6 +83,7 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
 
     stage_map = {
         "title_screening": lambda: runner.run_title_screening(request.limit),
+        "second_pass_screening": lambda: runner.run_second_pass_screening(request.limit),
         "fulltext_screening": lambda: runner.run_fulltext_screening(request.limit),
         "extraction": lambda: runner.run_extraction(request.limit),
     }
@@ -654,28 +655,34 @@ async def debug_test_api_key():
 # ─────────────────────────────────────────────────────
 
 def _serialize_second_pass(pr: PipelineRecord) -> Dict:
-    """Enriched record summary for second-pass human review (includes abstract + agent rationale)."""
+    """Enriched record summary for second-pass human review (includes abstract + both screening rounds)."""
     d = pr.dedup or pr.raw
     abstract = d.abstract if d else ""
 
-    a1_decision = a1_rationale = a1_ec = ""
-    a2_decision = a2_rationale = a2_ec = ""
-    a1_conf = a2_conf = 0.0
-    human_verified = False
+    def _extract_screening(sr):
+        if not sr:
+            return {"decision": "", "rationale": "", "confidence": 0.0, "ec": "",
+                    "a1_decision": "", "a1_rationale": "", "a1_conf": 0.0, "a1_ec": "",
+                    "a2_decision": "", "a2_rationale": "", "a2_conf": 0.0, "a2_ec": ""}
+        return {
+            "decision": sr.final_decision or "",
+            "rationale": "",
+            "confidence": sr.consensus_confidence or 0.0,
+            "ec": "",
+            "a1_decision": sr.agent1.decision if sr.agent1 else "",
+            "a1_rationale": sr.agent1.rationale if sr.agent1 else "",
+            "a1_conf": sr.agent1.confidence if sr.agent1 else 0.0,
+            "a1_ec": sr.agent1.exclusion_code if sr.agent1 else "",
+            "a2_decision": sr.agent2.decision if sr.agent2 else "",
+            "a2_rationale": sr.agent2.rationale if sr.agent2 else "",
+            "a2_conf": sr.agent2.confidence if sr.agent2 else 0.0,
+            "a2_ec": sr.agent2.exclusion_code if sr.agent2 else "",
+        }
 
-    if pr.screened and pr.screened.title_screening:
-        ts = pr.screened.title_screening
-        human_verified = ts.human_verified or False
-        if ts.agent1:
-            a1_decision = ts.agent1.decision or ""
-            a1_rationale = ts.agent1.rationale or ""
-            a1_conf = ts.agent1.confidence or 0.0
-            a1_ec = ts.agent1.exclusion_code or ""
-        if ts.agent2:
-            a2_decision = ts.agent2.decision or ""
-            a2_rationale = ts.agent2.rationale or ""
-            a2_conf = ts.agent2.confidence or 0.0
-            a2_ec = ts.agent2.exclusion_code or ""
+    ts = _extract_screening(pr.screened.title_screening if pr.screened else None)
+    sp = _extract_screening(pr.screened.second_pass_screening if pr.screened else None)
+    human_verified = (pr.screened.title_screening.human_verified
+                      if pr.screened and pr.screened.title_screening else False)
 
     return {
         "record_id": pr.record_id,
@@ -686,14 +693,25 @@ def _serialize_second_pass(pr: PipelineRecord) -> Dict:
         "doi": d.doi if d else "",
         "source_db": d.source_db if d else "",
         "abstract": abstract,
-        "agent1_decision": a1_decision,
-        "agent1_rationale": a1_rationale,
-        "agent1_confidence": a1_conf,
-        "agent1_ec": a1_ec,
-        "agent2_decision": a2_decision,
-        "agent2_rationale": a2_rationale,
-        "agent2_confidence": a2_conf,
-        "agent2_ec": a2_ec,
+        # First-pass agent rationale
+        "agent1_decision": ts["a1_decision"],
+        "agent1_rationale": ts["a1_rationale"],
+        "agent1_confidence": ts["a1_conf"],
+        "agent1_ec": ts["a1_ec"],
+        "agent2_decision": ts["a2_decision"],
+        "agent2_rationale": ts["a2_rationale"],
+        "agent2_confidence": ts["a2_conf"],
+        "agent2_ec": ts["a2_ec"],
+        # Second-pass agent rationale (populated after second_pass_screening stage)
+        "sp_agent1_decision": sp["a1_decision"],
+        "sp_agent1_rationale": sp["a1_rationale"],
+        "sp_agent1_confidence": sp["a1_conf"],
+        "sp_agent1_ec": sp["a1_ec"],
+        "sp_agent2_decision": sp["a2_decision"],
+        "sp_agent2_rationale": sp["a2_rationale"],
+        "sp_agent2_confidence": sp["a2_conf"],
+        "sp_agent2_ec": sp["a2_ec"],
+        "sp_done": pr.screened.second_pass_screening is not None if pr.screened else False,
         "human_verified": human_verified,
         "final_decision": pr.final_decision,
     }

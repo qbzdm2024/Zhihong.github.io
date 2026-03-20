@@ -15,6 +15,8 @@ from .prompts import (
     TITLE_SCREENING_SYSTEM, TITLE_SCREENING_USER,
     FULLTEXT_SCREENING_SYSTEM, FULLTEXT_SCREENING_USER,
     COMPARISON_SYSTEM,
+    SECOND_PASS_SCREENING_SYSTEM, SECOND_PASS_SCREENING_USER,
+    SECOND_PASS_COMPARISON_SYSTEM,
 )
 from config.settings import settings
 from pipeline.models import (
@@ -229,6 +231,134 @@ def screen_title_abstract(record: DedupRecord) -> ScreeningResult:
         agent2 = f2.result()
 
     result = _compare_agents(agent1, agent2)
+    result.stage = PipelineStage.TITLE_SCREENING
+    return result
+
+
+def _compare_agents_strict(agent1: AgentDecision, agent2: AgentDecision) -> ScreeningResult:
+    """Strict comparison for second-pass: uncertain cases go to human, not auto-included."""
+    client = get_client()
+
+    # Either agent errored → human review
+    if (agent1.decision == DecisionLabel.UNCERTAIN and "AGENT_ERROR" in (agent1.flagged_criteria or [])) or \
+       (agent2.decision == DecisionLabel.UNCERTAIN and "AGENT_ERROR" in (agent2.flagged_criteria or [])):
+        return ScreeningResult(
+            stage=PipelineStage.TITLE_SCREENING,
+            final_decision=DecisionLabel.UNCERTAIN,
+            agent1=agent1,
+            agent2=agent2,
+            agents_agree=False,
+            consensus_confidence=0.0,
+            human_verified=False,
+        )
+
+    # Both confidently agree → auto-decide
+    same_decision = agent1.decision == agent2.decision
+    min_conf = min(agent1.confidence, agent2.confidence)
+    conf_diff = abs(agent1.confidence - agent2.confidence)
+
+    if same_decision and agent1.decision == DecisionLabel.EXCLUDE and min_conf >= 0.60:
+        return ScreeningResult(
+            stage=PipelineStage.TITLE_SCREENING,
+            final_decision=DecisionLabel.EXCLUDE,
+            agent1=agent1,
+            agent2=agent2,
+            agents_agree=True,
+            consensus_confidence=(agent1.confidence + agent2.confidence) / 2,
+            human_verified=False,
+        )
+
+    if same_decision and agent1.decision == DecisionLabel.INCLUDE and min_conf >= settings.confidence_threshold and conf_diff < 0.15:
+        return ScreeningResult(
+            stage=PipelineStage.TITLE_SCREENING,
+            final_decision=DecisionLabel.INCLUDE,
+            agent1=agent1,
+            agent2=agent2,
+            agents_agree=True,
+            consensus_confidence=(agent1.confidence + agent2.confidence) / 2,
+            human_verified=False,
+        )
+
+    # All other cases: use comparison model with strict prompt
+    try:
+        comparison_prompt = COMPARISON_USER.format(
+            agent1_json=json.dumps(agent1.model_dump(), default=str),
+            agent2_json=json.dumps(agent2.model_dump(), default=str),
+        )
+        raw, _ = client.chat_json(
+            system_prompt=SECOND_PASS_COMPARISON_SYSTEM,
+            user_prompt=comparison_prompt,
+            model=settings.model_fulltext_screening,
+        )
+
+        consensus_dec_str = raw.get("consensus_decision", "Needs Human Verification")
+        try:
+            consensus_dec = DecisionLabel(consensus_dec_str)
+        except ValueError:
+            consensus_dec = DecisionLabel.UNCERTAIN
+
+        recommendation = raw.get("recommendation", "send_to_human")
+        if recommendation == "send_to_human":
+            consensus_dec = DecisionLabel.UNCERTAIN
+
+        return ScreeningResult(
+            stage=PipelineStage.TITLE_SCREENING,
+            final_decision=consensus_dec,
+            agent1=agent1,
+            agent2=agent2,
+            agents_agree=raw.get("agents_agree", False),
+            consensus_confidence=float(raw.get("consensus_confidence", 0.5)),
+            human_verified=False,
+        )
+
+    except Exception as e:
+        logger.error(f"Second-pass comparison agent failed: {e}")
+        return ScreeningResult(
+            stage=PipelineStage.TITLE_SCREENING,
+            final_decision=DecisionLabel.UNCERTAIN,
+            agent1=agent1,
+            agent2=agent2,
+            agents_agree=False,
+            consensus_confidence=0.0,
+            human_verified=False,
+        )
+
+
+def screen_second_pass(record: DedupRecord, agent1_rationale: str = "", agent2_rationale: str = "") -> ScreeningResult:
+    """
+    Run strict two-agent second-pass screening on a record that passed first-pass.
+    Passes the first-pass agent rationale as context so agents can see why it was included.
+    Returns ScreeningResult; uncertain cases are flagged for human review (not auto-included).
+    """
+    user_prompt = SECOND_PASS_SCREENING_USER.format(
+        title=record.title or "",
+        authors=record.authors or "Unknown",
+        year=record.year or "Unknown",
+        journal_venue=record.journal_venue or "Unknown",
+        abstract=record.abstract or "[No abstract available]",
+        agent1_rationale=agent1_rationale or "Not available",
+        agent2_rationale=agent2_rationale or "Not available",
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f1 = ex.submit(
+            _screen_single_agent,
+            f"sp_agent1_{settings.model_title_screening}",
+            settings.model_title_screening,
+            SECOND_PASS_SCREENING_SYSTEM,
+            user_prompt,
+        )
+        f2 = ex.submit(
+            _screen_single_agent,
+            f"sp_agent2_{settings.model_agent2_screening}",
+            settings.model_agent2_screening,
+            SECOND_PASS_SCREENING_SYSTEM,
+            user_prompt,
+        )
+        agent1 = f1.result()
+        agent2 = f2.result()
+
+    result = _compare_agents_strict(agent1, agent2)
     result.stage = PipelineStage.TITLE_SCREENING
     return result
 

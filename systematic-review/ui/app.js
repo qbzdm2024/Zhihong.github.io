@@ -900,6 +900,7 @@ function renderSecondPassCard(r) {
       </div>
 
       <div class="sp-agents">
+        <div class="sp-agent-section-label">First-Pass AI Screen</div>
         <div class="sp-agent-box">
           <div class="sp-agent-label" style="color:${a1color}">Agent 1: ${esc(r.agent1_decision)} (${a1pct}%)</div>
           <div class="confidence-bar"><div class="confidence-fill" style="width:${a1pct}%; background:${a1color}"></div></div>
@@ -910,6 +911,7 @@ function renderSecondPassCard(r) {
           <div class="confidence-bar"><div class="confidence-fill" style="width:${a2pct}%; background:${a2color}"></div></div>
           <div class="sp-agent-rationale">${esc(r.agent2_rationale || '—')}</div>
         </div>
+        ${r.sp_done ? renderSecondPassAgentBoxes(r) : spNotRunBanner()}
       </div>
 
       <div class="sp-card-actions">
@@ -918,6 +920,40 @@ function renderSecondPassCard(r) {
         <button class="btn btn-ghost btn-sm" onclick="openVerifyModal('${r.record_id}')" title="Open full review modal">Full Review</button>
         ${r.doi ? `<a class="btn btn-ghost btn-sm" href="https://doi.org/${r.doi}" target="_blank">DOI ↗</a>` : ''}
       </div>
+    </div>
+  `;
+}
+
+function spNotRunBanner() {
+  return `<div class="sp-agent-section-label sp-not-run" style="grid-column:1/-1">
+    ⚠ Second-pass AI screening not yet run — go to <strong>Run Pipeline → Stage 3b</strong>
+  </div>`;
+}
+
+function renderSecondPassAgentBoxes(r) {
+  const sp1pct = Math.round((r.sp_agent1_confidence || 0) * 100);
+  const sp2pct = Math.round((r.sp_agent2_confidence || 0) * 100);
+  const sp1color = r.sp_agent1_decision === 'Included' ? 'var(--green)' :
+                   r.sp_agent1_decision === 'Excluded' ? 'var(--red)' : 'var(--orange)';
+  const sp2color = r.sp_agent2_decision === 'Included' ? 'var(--green)' :
+                   r.sp_agent2_decision === 'Excluded' ? 'var(--red)' : 'var(--orange)';
+  return `
+    <div class="sp-agent-section-label sp-second-pass-label" style="grid-column:1/-1">Second-Pass AI Screen (Strict)</div>
+    <div class="sp-agent-box sp-agent-box-strict">
+      <div class="sp-agent-label" style="color:${sp1color}">
+        Agent 1: ${esc(r.sp_agent1_decision || '—')} (${sp1pct}%)
+        ${r.sp_agent1_ec ? `<span class="pill pill-red" style="font-size:10px;margin-left:4px">${esc(r.sp_agent1_ec)}</span>` : ''}
+      </div>
+      <div class="confidence-bar"><div class="confidence-fill" style="width:${sp1pct}%; background:${sp1color}"></div></div>
+      <div class="sp-agent-rationale">${esc(r.sp_agent1_rationale || '—')}</div>
+    </div>
+    <div class="sp-agent-box sp-agent-box-strict">
+      <div class="sp-agent-label" style="color:${sp2color}">
+        Agent 2: ${esc(r.sp_agent2_decision || '—')} (${sp2pct}%)
+        ${r.sp_agent2_ec ? `<span class="pill pill-red" style="font-size:10px;margin-left:4px">${esc(r.sp_agent2_ec)}</span>` : ''}
+      </div>
+      <div class="confidence-bar"><div class="confidence-fill" style="width:${sp2pct}%; background:${sp2color}"></div></div>
+      <div class="sp-agent-rationale">${esc(r.sp_agent2_rationale || '—')}</div>
     </div>
   `;
 }

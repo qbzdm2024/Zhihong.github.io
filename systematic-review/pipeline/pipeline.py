@@ -17,7 +17,7 @@ from .models import (
 )
 from .importer import load_all_from_directory, save_records, load_records
 from .deduplicator import deduplicate, filter_unique, save_deduped, load_deduped
-from agents.screener import screen_title_abstract, screen_fulltext
+from agents.screener import screen_title_abstract, screen_fulltext, screen_second_pass
 from agents.extractor import extract_and_assess
 from config.settings import settings
 
@@ -190,6 +190,91 @@ class PipelineRunner:
         self.stage_log["title_screening"] = log
         self.running_stage = ""
         logger.info(f"Title screening complete: {counts}")
+        return counts
+
+    # ──────────────────────────────────────────────────
+    # STAGE 3b: SECOND-PASS SCREENING
+    # ──────────────────────────────────────────────────
+
+    def run_second_pass_screening(self, limit: Optional[int] = None) -> Dict:
+        """Run strict two-agent second-pass screening on title-screened INCLUDE records.
+
+        Applies tighter exclusion criteria (lecture notes, non-QDA LLM use,
+        writing assistance, chatbot UX, education-only, user perception studies,
+        conceptual/theoretical papers, quantitative-only, human-only QDA).
+
+        Auto-excludes when both agents agree (≥0.60 conf). Auto-includes when
+        both agents agree clearly (≥confidence_threshold). Everything else →
+        Needs Human Verification (sent to human review queue).
+        """
+        self.running_stage = "second_pass_screening"
+        logger.info("=== STAGE: SECOND-PASS SCREENING ===")
+
+        candidates = [
+            pr for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
+            and pr.final_decision == DecisionLabel.INCLUDE
+            and pr.screened is not None
+            and pr.screened.second_pass_screening is None  # not yet second-pass screened
+        ]
+
+        if limit:
+            candidates = candidates[:limit]
+
+        logger.info(f"Second-pass screening {len(candidates)} included records")
+
+        counts = {
+            DecisionLabel.INCLUDE: 0,
+            DecisionLabel.EXCLUDE: 0,
+            DecisionLabel.UNCERTAIN: 0,
+        }
+        lock = threading.Lock()
+        completed = [0]
+
+        def _screen_one(pr: PipelineRecord):
+            # Extract first-pass rationale to give context to second-pass agents
+            a1_rat = a2_rat = ""
+            if pr.screened and pr.screened.title_screening:
+                ts = pr.screened.title_screening
+                if ts.agent1:
+                    a1_rat = ts.agent1.rationale or ""
+                if ts.agent2:
+                    a2_rat = ts.agent2.rationale or ""
+            result = screen_second_pass(pr.dedup, a1_rat, a2_rat)
+            return pr, result
+
+        with ThreadPoolExecutor(max_workers=settings.screening_workers) as executor:
+            futures = {executor.submit(_screen_one, pr): pr for pr in candidates}
+            for future in as_completed(futures):
+                try:
+                    pr, result = future.result()
+                    pr.screened.second_pass_screening = result
+                    pr.screened.current_decision = result.final_decision
+                    pr.update_stage(PipelineStage.TITLE_SCREENING, result.final_decision)
+                    with lock:
+                        counts[result.final_decision] = counts.get(result.final_decision, 0) + 1
+                        completed[0] += 1
+                        n = completed[0]
+                except Exception as e:
+                    pr = futures[future]
+                    logger.error(f"Second-pass error for {pr.record_id}: {e}")
+                    # On error, keep as INCLUDE (do not lose records silently)
+                    with lock:
+                        counts[DecisionLabel.INCLUDE] += 1
+                        completed[0] += 1
+                        n = completed[0]
+
+                if n % 50 == 0:
+                    with lock:
+                        self._save_state()
+                    logger.info(f"Second-pass checkpoint at {n}/{len(candidates)}")
+
+        self._save_state()
+        log = {str(k): v for k, v in counts.items()}
+        log["completed_at"] = datetime.utcnow().isoformat()
+        self.stage_log["second_pass_screening"] = log
+        self.running_stage = ""
+        logger.info(f"Second-pass screening complete: {counts}")
         return counts
 
     # ──────────────────────────────────────────────────
