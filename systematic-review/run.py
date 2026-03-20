@@ -33,7 +33,7 @@ def run_server():
     )
 
 
-def run_stage(stage: str, limit=None):
+def run_stage(stage: str, limit=None, force=False):
     from pipeline.pipeline import PipelineRunner
     runner = PipelineRunner()
     runner.load_state()
@@ -44,6 +44,9 @@ def run_stage(stage: str, limit=None):
         "title_screening": lambda: runner.run_title_screening(limit),
         "fulltext_screening": lambda: runner.run_fulltext_screening(limit),
         "extraction": lambda: runner.run_extraction(limit),
+        "reset_fulltext_screening": lambda: runner.reset_fulltext_screening(force=force),
+        "restore_bulk_excluded": runner.restore_bulk_excluded,
+        "reset_failed_screenings": runner.reset_failed_screenings,
     }
 
     if stage not in stage_map:
@@ -52,7 +55,7 @@ def run_stage(stage: str, limit=None):
 
     print(f"\n▶ Running stage: {stage}" + (f" (limit={limit})" if limit else ""))
     result = stage_map[stage]()
-    print(f"✓ Stage complete: {result}")
+    print(f"✓ {stage} complete.\n  {result}")
 
 
 def print_status():

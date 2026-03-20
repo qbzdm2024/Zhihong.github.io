@@ -959,16 +959,17 @@ class PipelineRunner:
         logger.info(f"Restore bulk excluded: {stats}")
         return stats
 
-    def reset_fulltext_screening(self) -> Dict:
+    def reset_fulltext_screening(self, force: bool = False) -> Dict:
         """Reset all fulltext screening so it can be re-run on all 302 records.
 
         For each record at FULLTEXT_SCREENING stage:
-        - Clears the fulltext_screening result (unless human-verified)
+        - Clears the fulltext_screening result
         - Restores stage/decision based on original title_screening outcome:
             title INCLUDE   → TITLE_SCREENING + INCLUDE   (picked up by fulltext_screening)
             title UNCERTAIN → FULLTEXT_SCREENING + UNCERTAIN (picked up by fulltext_screening)
             no title result → FULLTEXT_SCREENING + UNCERTAIN
-        Human-verified fulltext decisions are never touched.
+        Human-verified fulltext decisions are preserved unless force=True.
+        Use force=True to also reset bulk-excluded records.
         """
         reset = 0
         skipped_human = 0
@@ -977,8 +978,9 @@ class PipelineRunner:
                 PipelineStage.FULLTEXT_SCREENING, PipelineStage.EXTRACTION
             ):
                 continue
-            # Preserve human-verified fulltext decisions
-            if (pr.screened
+            # Preserve human-verified fulltext decisions unless force=True
+            if (not force
+                    and pr.screened
                     and pr.screened.fulltext_screening
                     and pr.screened.fulltext_screening.human_verified):
                 skipped_human += 1

@@ -65,6 +65,7 @@ async def startup():
 class PipelineRunRequest(BaseModel):
     stage: str  # "import", "dedup", "title_screening", "fulltext_screening", "extraction"
     limit: Optional[int] = None
+    force: Optional[bool] = False
 
 
 @app.post("/api/pipeline/run")
@@ -102,7 +103,7 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
         return {"status": "completed", "stage": "restore_bulk_excluded", "stats": stats}
 
     if request.stage == "reset_fulltext_screening":
-        stats = runner.reset_fulltext_screening()
+        stats = runner.reset_fulltext_screening(force=request.force)
         return {"status": "completed", "stage": "reset_fulltext_screening", "stats": stats}
 
     if request.stage == "mark_included_for_review":
