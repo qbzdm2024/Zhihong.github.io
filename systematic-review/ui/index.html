@@ -166,15 +166,16 @@
     <div id="panel-fulltext" class="panel">
       <div class="panel-header">
         <h2>Full Text Retrieval</h2>
-        <span class="panel-subtitle">Auto-download open-access PDFs, then manually upload the rest</span>
+        <span class="panel-subtitle">Auto-retrieve full texts (PDF or HTML), then manually upload what's left</span>
       </div>
 
       <!-- Step 1: Auto-download -->
       <div class="card mb-4">
-        <div class="card-header">Step 1 — Auto-Download Open-Access PDFs</div>
+        <div class="card-header">Step 1 — Auto-Retrieve Full Texts</div>
         <div class="card-body">
           <p class="config-hint mb-3">
-            Tries Unpaywall → Semantic Scholar → OpenAlex → Europe PMC for each record.
+            Tries <strong>Unpaywall → Semantic Scholar → OpenAlex → Europe PMC</strong> for each record.
+            Gets PDFs where available, otherwise extracts HTML full text (saved as <code>.txt</code>).
             A PRISMA snapshot is saved before the run begins.
           </p>
           <div class="form-row">
@@ -199,10 +200,10 @@
         <div class="card-header">Step 2 — Download Manual-Retrieval List</div>
         <div class="card-body">
           <p class="config-hint mb-2">
-            Export a CSV of papers the auto-downloader could not fetch.
-            The CSV includes DOI, URL, and an upload filename hint
-            (<code>record_id.pdf</code>) — save each PDF with that filename
-            so the system can match it automatically.
+            Export a CSV of papers the auto-retriever could not fetch.
+            The CSV includes DOI, URL, journal link, and the upload filename hint
+            (<code>record_id.pdf</code> or <code>record_id.txt</code>) —
+            save each file with that name so the system matches it automatically.
           </p>
           <div class="form-row">
             <button class="btn btn-primary" onclick="downloadManualList()">
@@ -215,18 +216,18 @@
         </div>
       </div>
 
-      <!-- Step 3: Upload manually retrieved PDFs -->
+      <!-- Step 3: Upload manually retrieved full texts -->
       <div class="card mb-4">
-        <div class="card-header">Step 3 — Upload Manually Retrieved PDFs</div>
+        <div class="card-header">Step 3 — Upload Manually Retrieved Full Texts</div>
         <div class="card-body">
           <div class="upload-zone" id="upload-zone">
             <div class="upload-icon">📎</div>
-            <p>Drag & drop PDFs here, or click to select files</p>
+            <p>Drag & drop PDFs or text files here, or click to select</p>
             <p class="upload-hint">
-              Name each file <code>&lt;record_id&gt;.pdf</code>
+              Name each file <code>&lt;record_id&gt;.pdf</code> or <code>&lt;record_id&gt;.txt</code>
               (see the CSV export for the exact filename per record)
             </p>
-            <input type="file" id="pdf-file-input" multiple accept=".pdf" class="hidden"
+            <input type="file" id="pdf-file-input" multiple accept=".pdf,.txt" class="hidden"
               onchange="handlePDFUpload(event)" />
             <button class="btn btn-primary mt-2"
               onclick="document.getElementById('pdf-file-input').click()">

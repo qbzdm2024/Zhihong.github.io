@@ -336,7 +336,11 @@ class PipelineRunner:
                     pr, success, source, doi, title = future.result()
                     with lock:
                         if success:
-                            pr.screened.pdf_path = str(pdf_dir / f"{pr.record_id}.pdf")
+                            # Resolve actual saved file (may be .pdf or .txt)
+                            txt_path = pdf_dir / f"{pr.record_id}.txt"
+                            saved = (txt_path if txt_path.exists()
+                                     else pdf_dir / f"{pr.record_id}.pdf")
+                            pr.screened.pdf_path = str(saved)
                             pr.screened.fulltext_available = True
                             pr.updated_at = datetime.utcnow()
                             counts["auto_downloaded"] += 1
@@ -808,30 +812,43 @@ class PipelineRunner:
     # ──────────────────────────────────────────────────
 
     def _find_pdf(self, pr: PipelineRecord) -> Optional[str]:
-        """Look for PDF by DOI, title, or study_id in pdf_dir."""
+        """Look for full-text file (.pdf or .txt) by record_id or DOI."""
         pdf_dir = Path(settings.pdf_dir)
         if not pdf_dir.exists():
             return None
 
-        # Try by record_id
-        candidate = pdf_dir / f"{pr.record_id}.pdf"
-        if candidate.exists():
-            return str(candidate)
-
-        # Try by DOI (sanitized)
-        if pr.dedup and pr.dedup.doi:
-            doi_safe = pr.dedup.doi.replace("/", "_").replace(":", "_")
-            candidate = pdf_dir / f"{doi_safe}.pdf"
+        # Try record_id with both extensions
+        for ext in (".pdf", ".txt"):
+            candidate = pdf_dir / f"{pr.record_id}{ext}"
             if candidate.exists():
                 return str(candidate)
 
+        # Try DOI (sanitized) with both extensions
+        if pr.dedup and pr.dedup.doi:
+            doi_safe = pr.dedup.doi.replace("/", "_").replace(":", "_")
+            for ext in (".pdf", ".txt"):
+                candidate = pdf_dir / f"{doi_safe}{ext}"
+                if candidate.exists():
+                    return str(candidate)
+
         return None
 
-    def _extract_pdf_text(self, pdf_path: str) -> str:
-        """Extract text from PDF using pdfminer or PyMuPDF."""
+    def _extract_pdf_text(self, file_path: str) -> str:
+        """Extract text from a .pdf or .txt full-text file."""
+        path = Path(file_path)
+
+        # Plain-text files (HTML-extracted by downloader)
+        if path.suffix == ".txt":
+            try:
+                return path.read_text(encoding="utf-8", errors="replace")
+            except Exception as e:
+                logger.warning(f"Could not read txt {file_path}: {e}")
+                return ""
+
+        # PDF files
         try:
             import fitz  # PyMuPDF
-            doc = fitz.open(pdf_path)
+            doc = fitz.open(file_path)
             text = ""
             for page in doc:
                 text += page.get_text()
@@ -841,11 +858,11 @@ class PipelineRunner:
 
         try:
             from pdfminer.high_level import extract_text
-            return extract_text(pdf_path)
+            return extract_text(file_path)
         except ImportError:
             pass
 
-        logger.warning(f"No PDF extraction library available for {pdf_path}")
+        logger.warning(f"No PDF extraction library available for {file_path}")
         return ""
 
     def _get_next_study_id(self) -> int:

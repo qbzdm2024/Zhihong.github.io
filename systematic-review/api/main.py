@@ -332,12 +332,14 @@ async def upload_pdf(
     if not pr:
         raise HTTPException(404, f"Record {record_id} not found")
 
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(400, "Only PDF files are accepted")
+    allowed = (".pdf", ".txt")
+    if not any(file.filename.endswith(ext) for ext in allowed):
+        raise HTTPException(400, "Only .pdf or .txt files are accepted")
 
+    suffix = Path(file.filename).suffix.lower()
     pdf_dir = Path(settings.pdf_dir)
     pdf_dir.mkdir(parents=True, exist_ok=True)
-    save_path = pdf_dir / f"{record_id}.pdf"
+    save_path = pdf_dir / f"{record_id}{suffix}"
 
     with open(save_path, "wb") as f:
         shutil.copyfileobj(file.file, f)
@@ -357,8 +359,8 @@ async def upload_pdf(
     return {
         "status": "uploaded",
         "record_id": record_id,
-        "pdf_path": str(save_path),
-        "message": "PDF uploaded. Run full-text screening to process this record.",
+        "file_path": str(save_path),
+        "message": f"File uploaded ({suffix}). Run full-text screening to process this record.",
     }
 
 
@@ -370,15 +372,27 @@ async def upload_pdfs_batch(files: List[UploadFile] = File(...)):
     results = []
 
     for file in files:
-        if not file.filename.endswith(".pdf"):
-            results.append({"filename": file.filename, "status": "skipped (not PDF)"})
+        if not any(file.filename.endswith(ext) for ext in (".pdf", ".txt")):
+            results.append({"filename": file.filename, "status": "skipped (not .pdf or .txt)"})
             continue
 
         save_path = pdf_dir / file.filename
         with open(save_path, "wb") as f:
             shutil.copyfileobj(file.file, f)
+
+        # Auto-mark matching record as fulltext_available
+        stem = Path(file.filename).stem  # record_id part
+        pr = runner.records.get(stem)
+        if pr and pr.screened:
+            pr.screened.pdf_path = str(save_path)
+            pr.screened.fulltext_available = True
+            if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED:
+                pr.final_decision = DecisionLabel.INCLUDE
+            pr.updated_at = datetime.utcnow()
+
         results.append({"filename": file.filename, "status": "uploaded", "path": str(save_path)})
 
+    runner._save_state()
     return {"uploaded": len([r for r in results if r["status"] == "uploaded"]), "results": results}
 
 
