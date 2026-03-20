@@ -14,7 +14,8 @@ Tries sources in this order, accepting whatever format is available first:
  10.  OpenReview       — ICLR/NeurIPS/ICML papers (free PDF/HTML)
  11.  Zenodo           — open-access repository
  12.  bioRxiv/medRxiv  — biomedical preprints
- 13.  Google Scholar   — scrape [PDF] badge links (best-effort)
+ 13.  Google Scholar   — real Chromium browser via Playwright (DOI first, then title)
+ 13b. Google Scholar   — requests scrape fallback (when Playwright unavailable)
  14.  BASE             — Bielefeld Academic Search Engine (300M+ OA docs)
  15.  CrossRef         — DOI landing page resolution
  16.  PubMed           — title search → PMCID → full text
@@ -525,6 +526,118 @@ def _biorxiv_pdf(doi: str, title: str) -> Optional[str]:
 # SOURCE 13: Google Scholar — best-effort PDF link scrape
 # ─────────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────────
+# SOURCE 13: Google Scholar via Playwright (real browser)
+# ─────────────────────────────────────────────────────────
+
+def _playwright_scholar_pdf(doi: str, title: str, pdf_path: Path) -> bool:
+    """Use a real Chromium browser (Playwright) to find and download a PDF
+    from Google Scholar.
+
+    Why this works when requests-based scraping fails:
+    - Playwright executes JavaScript, so Scholar renders its full results page
+    - The browser looks identical to a real user visit (headers, TLS, timing)
+    - Google Scholar [PDF] links are found in the rendered DOM, not the raw HTML
+    - The PDF is then downloaded via the browser, inheriting any session cookies
+
+    Search order: DOI first (exact match), then quoted title as fallback.
+    Returns True and saves the PDF to pdf_path if successful.
+    Falls back silently if Playwright is not installed.
+    """
+    try:
+        from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    except ImportError:
+        logger.debug("Playwright not installed — skipping browser-based Scholar fetch")
+        return False
+
+    def _search_and_grab(query: str, browser) -> Optional[str]:
+        """Open Scholar search page and return first real PDF URL found."""
+        page = browser.new_page()
+        try:
+            q = requests.utils.quote(query)
+            url = f"https://scholar.google.com/scholar?q={q}&hl=en&as_sdt=0%2C5"
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(2000)  # let JS finish rendering
+
+            # Collect all href values from the rendered page
+            hrefs = page.eval_on_selector_all(
+                "a[href]", "els => els.map(e => e.getAttribute('href'))"
+            )
+            for href in hrefs:
+                if not href or "google.com" in href or "scholar.google" in href:
+                    continue
+                href_lower = href.lower()
+                if href.endswith(".pdf") or "/pdf/" in href_lower or "full.pdf" in href_lower:
+                    return href
+        except PWTimeout:
+            logger.debug(f"Playwright Scholar timeout for: {query[:60]}")
+        except Exception as e:
+            logger.debug(f"Playwright Scholar page error: {e}")
+        finally:
+            page.close()
+        return None
+
+    def _browser_download_pdf(pdf_url: str, browser) -> bool:
+        """Download a PDF URL using the browser (handles redirects/auth)."""
+        page = browser.new_page()
+        try:
+            # Use the browser's built-in download capability
+            with page.expect_download(timeout=30000) as dl_info:
+                page.goto(pdf_url, timeout=30000)
+            download = dl_info.value
+            download.save_as(str(pdf_path))
+            # Verify it's a real PDF
+            if pdf_path.exists() and pdf_path.stat().st_size > 1000:
+                content = pdf_path.read_bytes()[:5]
+                if content.startswith(b"%PDF"):
+                    return True
+                pdf_path.unlink(missing_ok=True)
+        except Exception:
+            # Page loaded without triggering a download → try reading content directly
+            try:
+                resp = page.request.get(pdf_url)
+                if resp.status == 200:
+                    body = resp.body()
+                    if body[:4] == b"%PDF":
+                        pdf_path.write_bytes(body)
+                        return True
+            except Exception as e2:
+                logger.debug(f"Playwright PDF fetch error: {e2}")
+        finally:
+            page.close()
+        return False
+
+    try:
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            try:
+                # Pass 1: DOI search (most precise)
+                pdf_url = None
+                if doi:
+                    pdf_url = _search_and_grab(doi, browser)
+
+                # Pass 2: quoted title fallback
+                if not pdf_url and title:
+                    pdf_url = _search_and_grab(f'"{title}"', browser)
+
+                if pdf_url:
+                    logger.info(f"[Playwright/Scholar] found PDF → {pdf_url[:70]}")
+                    # First try direct download via requests (faster)
+                    if _download_pdf(pdf_url, pdf_path):
+                        return True
+                    # Fallback: use the browser to download (handles JS redirects)
+                    return _browser_download_pdf(pdf_url, browser)
+            finally:
+                browser.close()
+    except Exception as e:
+        logger.debug(f"Playwright launch error: {e}")
+
+    return False
+
+
 def _google_scholar_pdf(doi: str, title: str) -> Optional[str]:
     """Scrape Google Scholar search results for a direct PDF link.
 
@@ -885,7 +998,14 @@ def try_download_fulltext(
         if _download_pdf(biorxiv_pdf, pdf_path):
             return True, "bioRxiv_pdf"
 
-    # ── Step 12: Google Scholar — scrape [PDF] badge links ───────────────────
+    # ── Step 12: Google Scholar via real Chromium browser (Playwright) ──────
+    # Playwright renders JS, bypasses bot detection, and finds [PDF] links
+    # that the plain requests-based scraper cannot see.
+    if _playwright_scholar_pdf(doi, title, pdf_path):
+        return True, "GoogleScholar_playwright"
+
+    # ── Step 12b: Google Scholar — requests-based scrape fallback ────────────
+    # Used when Playwright is not installed or returns no result.
     time.sleep(_RATE_LIMIT_SECS)
     gs_pdf = _google_scholar_pdf(doi, title)
     if gs_pdf:
@@ -893,7 +1013,6 @@ def try_download_fulltext(
         time.sleep(_RATE_LIMIT_SECS)
         if _download_pdf(gs_pdf, pdf_path):
             return True, "GoogleScholar_pdf"
-        # Try as HTML if PDF download fails (some links redirect to a reader)
         text = _fetch_html_text(gs_pdf, min_chars=1000)
         if text:
             txt_path.write_text(text, encoding="utf-8")
