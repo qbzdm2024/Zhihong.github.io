@@ -318,7 +318,11 @@ class PipelineRunner:
             "manual_needed": 0,
             "already_available": 0,
             "total_candidates": len(candidates),
+            "processed": 0,
         }
+        # Publish initial progress so UI can show candidate count immediately
+        self.stage_log["fulltext_download"] = {**counts, "in_progress": True}
+
         download_log: list = []
         lock = threading.Lock()
         pdf_dir = Path(settings.pdf_dir)
@@ -335,6 +339,9 @@ class PipelineRunner:
                 try:
                     pr, success, source, doi, title = future.result()
                     with lock:
+                        counts["processed"] += 1
+                        # Update live progress in stage_log for UI polling
+                        self.stage_log["fulltext_download"] = {**counts, "in_progress": True}
                         if success:
                             # Resolve actual saved file (may be .pdf or .txt)
                             txt_path = pdf_dir / f"{pr.record_id}.txt"
@@ -373,6 +380,7 @@ class PipelineRunner:
         self._export_fulltext_needed_list()
         self._export_download_log(download_log)
 
+        counts.pop("in_progress", None)
         log = {**counts, "completed_at": datetime.utcnow().isoformat()}
         self.stage_log["fulltext_download"] = log
         self.running_stage = ""

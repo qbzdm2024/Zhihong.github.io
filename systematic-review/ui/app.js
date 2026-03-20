@@ -544,12 +544,36 @@ async function runStage(stage, limitInputId = null) {
     logLine(`Stage ${stage} started in background. Status: ${res.status}`);
     toast('info', `Pipeline stage "${stage}" running...`);
 
-    // Poll status every 3s
+    // For fulltext_download use the dedicated status endpoint for meaningful progress
+    if (stage === 'fulltext_download') {
+      const interval = setInterval(async () => {
+        try {
+          const status = await apiFetch('/fulltext/download-status');
+          const r = status.last_run || {};
+          const total = r.total_candidates ?? '?';
+          const done = r.processed ?? 0;
+          const dl = r.auto_downloaded ?? 0;
+          if (!status.running && r.completed_at) {
+            clearInterval(interval);
+            logLine(`Download complete: ${dl} auto-downloaded, ${r.manual_needed ?? 0} need manual upload (${total} total candidates)`);
+            loadDashboard();
+            toast('success', `Done. ${dl} downloaded, ${r.manual_needed ?? 0} manual.`);
+          } else {
+            logLine(`Downloading: ${done}/${total} processed, ${dl} retrieved so far…`);
+            loadDashboard();
+          }
+        } catch {}
+      }, 5000);
+      setTimeout(() => clearInterval(interval), 40 * 60 * 1000); // 40min max
+      return;
+    }
+
+    // Generic stage polling
     const interval = setInterval(async () => {
       try {
         const status = await apiFetch('/pipeline/status');
         const p = status.prisma_counts;
-        logLine(`Status: identified=${p.identified}, included=${p.final_included}, uncertain=${p.needs_human_verification}`);
+        logLine(`Status: identified=${p.identified}, title_included=${p.title_abstract_included}, uncertain=${p.needs_human_verification}`);
         loadDashboard();
       } catch {}
     }, 3000);
