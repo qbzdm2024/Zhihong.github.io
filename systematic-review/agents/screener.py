@@ -14,6 +14,7 @@ from .openai_client import get_client
 from .prompts import (
     TITLE_SCREENING_SYSTEM, TITLE_SCREENING_USER,
     FULLTEXT_SCREENING_SYSTEM, FULLTEXT_SCREENING_USER,
+    FULLTEXT_COMPARISON_SYSTEM,
     COMPARISON_SYSTEM,
     SECOND_PASS_SCREENING_SYSTEM, SECOND_PASS_SCREENING_USER,
     SECOND_PASS_COMPARISON_SYSTEM,
@@ -363,13 +364,108 @@ def screen_second_pass(record: DedupRecord, agent1_rationale: str = "", agent2_r
     return result
 
 
+def _compare_agents_fulltext(agent1: AgentDecision, agent2: AgentDecision) -> ScreeningResult:
+    """Strict comparison for full-text screening.
+
+    Rules (mirrors FULLTEXT_COMPARISON_SYSTEM prompt):
+    - Both confidently agree (conf ≥ 0.70) on Include → Include
+    - Both agree on Exclude → Exclude
+    - Either agent errored, either conf < 0.60, or any disagreement involving
+      Needs-Human-Verification → send to human
+    - Disagreement Include vs Exclude → call comparison model; default to human
+    """
+    client = get_client()
+
+    # Either agent errored → human review
+    if (agent1.decision == DecisionLabel.UNCERTAIN and "AGENT_ERROR" in (agent1.flagged_criteria or [])) or \
+       (agent2.decision == DecisionLabel.UNCERTAIN and "AGENT_ERROR" in (agent2.flagged_criteria or [])):
+        return ScreeningResult(
+            stage=PipelineStage.FULLTEXT_SCREENING,
+            final_decision=DecisionLabel.UNCERTAIN,
+            agent1=agent1, agent2=agent2,
+            agents_agree=False, consensus_confidence=0.0, human_verified=False,
+        )
+
+    same_decision = agent1.decision == agent2.decision
+    min_conf = min(agent1.confidence, agent2.confidence)
+
+    # Both confidently Include
+    if same_decision and agent1.decision == DecisionLabel.INCLUDE and min_conf >= 0.70:
+        return ScreeningResult(
+            stage=PipelineStage.FULLTEXT_SCREENING,
+            final_decision=DecisionLabel.INCLUDE,
+            agent1=agent1, agent2=agent2,
+            agents_agree=True,
+            consensus_confidence=(agent1.confidence + agent2.confidence) / 2,
+            human_verified=False,
+        )
+
+    # Both agree on Exclude (any confidence)
+    if same_decision and agent1.decision == DecisionLabel.EXCLUDE:
+        return ScreeningResult(
+            stage=PipelineStage.FULLTEXT_SCREENING,
+            final_decision=DecisionLabel.EXCLUDE,
+            agent1=agent1, agent2=agent2,
+            agents_agree=True,
+            consensus_confidence=(agent1.confidence + agent2.confidence) / 2,
+            human_verified=False,
+        )
+
+    # Either agent flagged uncertain, or low confidence, or disagreement
+    # → call the comparison model with strict prompt
+    try:
+        comparison_prompt = COMPARISON_USER.format(
+            agent1_json=json.dumps(agent1.model_dump(), default=str),
+            agent2_json=json.dumps(agent2.model_dump(), default=str),
+        )
+        raw, _ = client.chat_json(
+            system_prompt=FULLTEXT_COMPARISON_SYSTEM,
+            user_prompt=comparison_prompt,
+            model=settings.model_fulltext_screening,
+        )
+
+        consensus_dec_str = raw.get("consensus_decision", "Needs Human Verification")
+        try:
+            consensus_dec = DecisionLabel(consensus_dec_str)
+        except ValueError:
+            consensus_dec = DecisionLabel.UNCERTAIN
+
+        # Low consensus confidence → escalate to human regardless
+        consensus_conf = float(raw.get("consensus_confidence", 0.5))
+        if consensus_conf < 0.60:
+            consensus_dec = DecisionLabel.UNCERTAIN
+
+        recommendation = raw.get("recommendation", "send_to_human")
+        if recommendation == "send_to_human":
+            consensus_dec = DecisionLabel.UNCERTAIN
+
+        return ScreeningResult(
+            stage=PipelineStage.FULLTEXT_SCREENING,
+            final_decision=consensus_dec,
+            agent1=agent1, agent2=agent2,
+            agents_agree=raw.get("agents_agree", False),
+            consensus_confidence=consensus_conf,
+            human_verified=False,
+        )
+
+    except Exception as e:
+        logger.error(f"Fulltext comparison agent failed: {e}")
+        return ScreeningResult(
+            stage=PipelineStage.FULLTEXT_SCREENING,
+            final_decision=DecisionLabel.UNCERTAIN,
+            agent1=agent1, agent2=agent2,
+            agents_agree=False, consensus_confidence=0.0, human_verified=False,
+        )
+
+
 def screen_fulltext(record: DedupRecord, fulltext: str) -> ScreeningResult:
     """
     Run two-agent full-text screening on a single record.
+    Uses strict comparison — disagreement or low confidence → human review.
     Requires the extracted text from PDF or HTML.
     """
-    # Truncate to avoid token limits (keep first 12000 chars)
-    truncated = fulltext[:12000] if len(fulltext) > 12000 else fulltext
+    # Truncate to avoid token limits (keep first 15000 chars — more context for final decision)
+    truncated = fulltext[:15000] if len(fulltext) > 15000 else fulltext
 
     user_prompt = FULLTEXT_SCREENING_USER.format(
         title=record.title or "",
@@ -383,14 +479,14 @@ def screen_fulltext(record: DedupRecord, fulltext: str) -> ScreeningResult:
     with ThreadPoolExecutor(max_workers=2) as ex:
         f1 = ex.submit(
             _screen_single_agent,
-            f"agent1_{settings.model_fulltext_screening}",
+            f"ft_agent1_{settings.model_fulltext_screening}",
             settings.model_fulltext_screening,
             FULLTEXT_SCREENING_SYSTEM,
             user_prompt,
         )
         f2 = ex.submit(
             _screen_single_agent,
-            f"agent2_{settings.model_agent2_screening}",
+            f"ft_agent2_{settings.model_agent2_screening}",
             settings.model_agent2_screening,
             FULLTEXT_SCREENING_SYSTEM,
             user_prompt,
@@ -398,6 +494,6 @@ def screen_fulltext(record: DedupRecord, fulltext: str) -> ScreeningResult:
         agent1 = f1.result()
         agent2 = f2.result()
 
-    result = _compare_agents(agent1, agent2)
+    result = _compare_agents_fulltext(agent1, agent2)
     result.stage = PipelineStage.FULLTEXT_SCREENING
     return result
