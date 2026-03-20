@@ -2,20 +2,22 @@
 Automatic full-text downloader for systematic review records.
 
 Tries sources in this order, accepting whatever format is available first:
-  1. Unpaywall       — open-access PDF or HTML landing page
-  2. Semantic Scholar — openAccessPdf or externalIds → PMC
-  3. OpenAlex        — pdf_url or oa_url (HTML/landing)
-  4. Europe PMC      — PMC full-text HTML (very reliable for biomedical)
-  5. PubMed Central  — HTML full-text directly via PMC ID
-  6. arXiv           — PDF via arXiv API title search (key for CS/AI papers)
-  7. CORE            — open-access aggregator PDF/text
-  8. Direct URL      — record's own URL field
-  9. ACL Anthology   — all ACL/EMNLP/NAACL/COLING NLP papers (free PDF)
- 10. OpenReview      — ICLR/NeurIPS/ICML papers (free PDF/HTML)
- 11. Zenodo          — open-access repository
- 12. bioRxiv/medRxiv — biomedical preprints
- 13. CrossRef        — DOI landing page resolution
- 14. PubMed          — title search → PMCID → full text
+  1.  Unpaywall        — open-access PDF or HTML landing page
+  2.  Semantic Scholar — openAccessPdf or externalIds → PMC
+  3.  OpenAlex         — pdf_url or oa_url (HTML/landing)
+  4.  Europe PMC       — PMC full-text HTML (very reliable for biomedical)
+  5.  PubMed Central   — HTML full-text directly via PMC ID
+  6.  arXiv            — PDF via arXiv API (exact + keyword title search)
+  7.  CORE             — open-access aggregator PDF/text
+  8.  Direct URL       — record's own URL field
+  9.  ACL Anthology    — all ACL/EMNLP/NAACL/COLING NLP papers (free PDF)
+ 10.  OpenReview       — ICLR/NeurIPS/ICML papers (free PDF/HTML)
+ 11.  Zenodo           — open-access repository
+ 12.  bioRxiv/medRxiv  — biomedical preprints
+ 13.  Google Scholar   — scrape [PDF] badge links (best-effort)
+ 14.  BASE             — Bielefeld Academic Search Engine (300M+ OA docs)
+ 15.  CrossRef         — DOI landing page resolution
+ 16.  PubMed           — title search → PMCID → full text
 
 Saves the result as:
   - <record_id>.pdf   if a real PDF was obtained
@@ -215,20 +217,23 @@ def _pmc_html_text(pmcid: str) -> Optional[str]:
 
 
 def _europepmc_find_pmcid(doi: str, title: str) -> Optional[str]:
-    """Search Europe PMC to find PMC ID for a record."""
+    """Search Europe PMC to find PMC ID for a record.
+    Returns PMCID whenever found — PMC full-text is always free regardless of
+    the isOpenAccess flag, which is sometimes missing on valid PMC articles.
+    """
     query = doi if doi else title
     if not query:
         return None
     url = (f"https://www.ebi.ac.uk/europepmc/webservices/rest/search"
            f"?query={requests.utils.quote(query)}"
-           f"&format=json&resulttype=core&pageSize=1")
+           f"&format=json&resulttype=core&pageSize=3")
     r = _get(url)
     if r:
         results = r.json().get("resultList", {}).get("result", [])
-        if results:
-            rec = results[0]
-            if rec.get("isOpenAccess") == "Y" or rec.get("pmcid"):
-                return rec.get("pmcid")
+        for rec in results:
+            pmcid = rec.get("pmcid")
+            if pmcid:
+                return pmcid
     return None
 
 
@@ -288,11 +293,17 @@ def _fetch_html_text(url: str, min_chars: int = 1000) -> Optional[str]:
 # ─────────────────────────────────────────────────────────
 
 def _arxiv_pdf_url(doi: str, title: str) -> Optional[str]:
-    """Search arXiv by DOI comment field or title; return PDF URL if found."""
+    """Search arXiv by DOI or title; return PDF URL if found.
+
+    Two passes:
+      1. Exact quoted title search  (ti:"...") — precise but misses subtitle variants
+      2. Keyword title search       (ti:word1+word2+...) — catches renamed preprints
+    Match threshold: 40% word overlap (down from 60%) to handle published titles
+    that differ slightly from their arXiv preprint version.
+    """
     import xml.etree.ElementTree as ET
 
-    # Many CS papers mention their arXiv ID in their DOI or URL — try direct patterns
-    # e.g. doi 10.48550/arXiv.2301.00001
+    # Direct arXiv DOI (e.g. 10.48550/arXiv.2301.00001)
     if doi and "arxiv" in doi.lower():
         arxiv_id = doi.split("/")[-1].replace("arXiv.", "").replace("arxiv.", "")
         if arxiv_id:
@@ -300,34 +311,55 @@ def _arxiv_pdf_url(doi: str, title: str) -> Optional[str]:
 
     if not title:
         return None
-    # arXiv atom API title search
-    query = requests.utils.quote(f'ti:"{title}"')
-    url = f"http://export.arxiv.org/api/query?search_query={query}&max_results=3&sortBy=relevance"
-    r = _get(url, accept="application/atom+xml", timeout=20)
-    if not r:
+
+    def _parse_entries(xml_text: str) -> Optional[str]:
+        try:
+            root = ET.fromstring(xml_text)
+            ns = {"atom": "http://www.w3.org/2005/Atom"}
+            entries = root.findall("atom:entry", ns)
+            for entry in entries:
+                entry_title = (entry.findtext("atom:title", "", ns) or "").lower().strip()
+                query_title = title.lower().strip()
+                t_words = set(query_title.split())
+                e_words = set(entry_title.split())
+                # 40% overlap — tolerates subtitle/punctuation differences
+                if t_words and len(t_words & e_words) / len(t_words) >= 0.40:
+                    for link in entry.findall("atom:link", ns):
+                        if link.get("type") == "application/pdf" or link.get("title") == "pdf":
+                            return link.get("href")
+                    entry_id = entry.findtext("atom:id", "", ns)
+                    if entry_id:
+                        arxiv_id = entry_id.split("/abs/")[-1]
+                        return f"https://arxiv.org/pdf/{arxiv_id}"
+        except Exception as e:
+            logger.debug(f"arXiv parse error: {e}")
         return None
-    try:
-        root = ET.fromstring(r.text)
-        ns = {"atom": "http://www.w3.org/2005/Atom"}
-        entries = root.findall("atom:entry", ns)
-        for entry in entries:
-            # Verify title similarity (avoid false matches)
-            entry_title = (entry.findtext("atom:title", "", ns) or "").lower().strip()
-            query_title = title.lower().strip()
-            # Simple overlap check: at least 60% of words match
-            t_words = set(query_title.split())
-            e_words = set(entry_title.split())
-            if t_words and len(t_words & e_words) / len(t_words) >= 0.6:
-                for link in entry.findall("atom:link", ns):
-                    if link.get("type") == "application/pdf" or link.get("title") == "pdf":
-                        return link.get("href")
-                # Fallback: construct PDF URL from entry id
-                entry_id = entry.findtext("atom:id", "", ns)
-                if entry_id:
-                    arxiv_id = entry_id.split("/abs/")[-1]
-                    return f"https://arxiv.org/pdf/{arxiv_id}"
-    except Exception as e:
-        logger.debug(f"arXiv parse error: {e}")
+
+    # Pass 1: exact quoted title
+    query1 = requests.utils.quote(f'ti:"{title}"')
+    url1 = f"http://export.arxiv.org/api/query?search_query={query1}&max_results=5&sortBy=relevance"
+    r1 = _get(url1, accept="application/atom+xml", timeout=20)
+    if r1:
+        result = _parse_entries(r1.text)
+        if result:
+            return result
+
+    # Pass 2: keyword search — important words only (skip stop-words, ≥4 chars)
+    stop = {"with", "from", "that", "this", "using", "based", "deep", "neural",
+            "learning", "approach", "study", "analysis", "towards", "method"}
+    keywords = [w for w in re.sub(r"[^\w\s]", " ", title.lower()).split()
+                if len(w) >= 4 and w not in stop][:8]
+    if keywords:
+        kw_query = requests.utils.quote("ti:" + "+".join(keywords))
+        url2 = (f"http://export.arxiv.org/api/query?search_query={kw_query}"
+                f"&max_results=5&sortBy=relevance")
+        time.sleep(_RATE_LIMIT_SECS)
+        r2 = _get(url2, accept="application/atom+xml", timeout=20)
+        if r2:
+            result = _parse_entries(r2.text)
+            if result:
+                return result
+
     return None
 
 
@@ -490,7 +522,106 @@ def _biorxiv_pdf(doi: str, title: str) -> Optional[str]:
 
 
 # ─────────────────────────────────────────────────────────
-# SOURCE 13: CrossRef DOI resolution → landing page
+# SOURCE 13: Google Scholar — best-effort PDF link scrape
+# ─────────────────────────────────────────────────────────
+
+def _google_scholar_pdf(title: str) -> Optional[str]:
+    """Scrape Google Scholar search results for a direct PDF link.
+
+    Google Scholar shows [PDF] badges next to papers that have a freely
+    accessible PDF on the publisher/repository site.  We scrape the first
+    results page for those links.  Google sometimes returns 429/captcha for
+    automated requests — the function fails silently in that case.
+    """
+    if not title:
+        return None
+    # Use a browser-like User-Agent to reduce bot detection
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    }
+    q = requests.utils.quote(f'"{title}"')
+    url = f"https://scholar.google.com/scholar?q={q}&hl=en&as_sdt=0%2C5"
+    try:
+        r = requests.get(url, headers=headers, timeout=20)
+        if r.status_code != 200:
+            logger.debug(f"Google Scholar returned {r.status_code}")
+            return None
+        html = r.text
+        # Extract PDF links — Scholar marks them as gs_or_ggsm spans with a PDF href
+        # Pattern: links ending in .pdf or containing /pdf/ that appear near the title
+        pdf_links = re.findall(
+            r'href="(https?://[^"]+\.pdf[^"]*)"', html, re.IGNORECASE
+        )
+        if not pdf_links:
+            # Broader: any PDF link in a result block
+            pdf_links = re.findall(
+                r'href="(https?://[^"]*(?:/pdf/|/PDF/|full\.pdf|fulltext\.pdf)[^"]*)"',
+                html, re.IGNORECASE,
+            )
+        # Filter out Google's own redirect URLs and Scholar internal links
+        for link in pdf_links[:5]:
+            if "google.com" not in link and "scholar.google" not in link:
+                return link
+    except Exception as e:
+        logger.debug(f"Google Scholar scrape error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
+# SOURCE 14: BASE — Bielefeld Academic Search Engine
+# ─────────────────────────────────────────────────────────
+
+def _base_search_pdf(title: str) -> Optional[str]:
+    """Search BASE (Bielefeld Academic Search Engine) for an open-access PDF.
+
+    BASE aggregates >300 million documents from open-access repositories
+    worldwide.  It has a public JSON API with no API key required.
+    """
+    if not title:
+        return None
+    # Use the first 8 significant words to keep the query focused
+    words = [w for w in re.sub(r"[^\w\s]", " ", title).split() if len(w) >= 3][:8]
+    if not words:
+        return None
+    q = requests.utils.quote(" ".join(words))
+    url = (
+        "https://api.base-search.net/cgi-bin/BaseHttpSearchInterface.fcgi"
+        f"?func=PerformSearch&query=dctitle:{q}"
+        "&hits=5&offset=0&format=json&boost=oa"
+    )
+    r = _get(url, timeout=25)
+    if not r:
+        return None
+    try:
+        docs = r.json().get("response", {}).get("docs") or []
+        for doc in docs:
+            # Verify title similarity
+            doc_title = " ".join(doc.get("dctitle") or []).lower() if isinstance(
+                doc.get("dctitle"), list) else (doc.get("dctitle") or "").lower()
+            t_words = set(title.lower().split())
+            d_words = set(doc_title.split())
+            if not t_words or len(t_words & d_words) / len(t_words) < 0.45:
+                continue
+            # dclinktype == "1" means open-access full text
+            links = doc.get("dclink") or []
+            if isinstance(links, str):
+                links = [links]
+            for link in links:
+                if link and link.startswith("http"):
+                    return link
+    except Exception as e:
+        logger.debug(f"BASE search error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
+# SOURCE (old 13): CrossRef DOI resolution → landing page
 # ─────────────────────────────────────────────────────────
 
 def _crossref_landing_url(doi: str) -> Optional[str]:
@@ -583,15 +714,17 @@ def try_download_fulltext(
       4.  PMC HTML (via Semantic Scholar PMCID or Europe PMC search)
       5.  Europe PMC XML/HTML
       6.  Unpaywall / OpenAlex HTML landing page
-      7.  arXiv PDF (title search — key for CS/AI papers)
+      7.  arXiv PDF (exact + keyword title search)
       8.  CORE open-access aggregator
       9.  Direct record URL
       10. ACL Anthology PDF (all NLP/CL papers)
       11. OpenReview PDF (ICLR, NeurIPS, ICML)
       12. Zenodo open-access repository
       13. bioRxiv / medRxiv preprints
-      14. CrossRef DOI → landing page / PDF link
-      15. PubMed title search → PMCID → PMC full text
+      14. Google Scholar [PDF] badge scrape (best-effort)
+      15. BASE search engine (300M+ open-access docs)
+      16. CrossRef DOI → landing page / PDF link
+      17. PubMed title search → PMCID → PMC full text
 
     Saves result as <record_id>.pdf  (real PDF)
                  or <record_id>.txt  (plain text extracted from HTML/XML)
@@ -736,7 +869,35 @@ def try_download_fulltext(
         if _download_pdf(biorxiv_pdf, pdf_path):
             return True, "bioRxiv_pdf"
 
-    # ── Step 12: CrossRef → landing page HTML ────────────────────────────────
+    # ── Step 12: Google Scholar — scrape [PDF] badge links ───────────────────
+    time.sleep(_RATE_LIMIT_SECS)
+    gs_pdf = _google_scholar_pdf(title)
+    if gs_pdf:
+        logger.info(f"[GoogleScholar] PDF → {gs_pdf[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if _download_pdf(gs_pdf, pdf_path):
+            return True, "GoogleScholar_pdf"
+        # Try as HTML if PDF download fails (some links redirect to a reader)
+        text = _fetch_html_text(gs_pdf, min_chars=1000)
+        if text:
+            txt_path.write_text(text, encoding="utf-8")
+            return True, "GoogleScholar_html"
+
+    # ── Step 12b: BASE (Bielefeld Academic Search Engine) ─────────────────────
+    time.sleep(_RATE_LIMIT_SECS)
+    base_url = _base_search_pdf(title)
+    if base_url:
+        logger.info(f"[BASE] → {base_url[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if base_url.lower().endswith(".pdf") or "pdf" in base_url.lower():
+            if _download_pdf(base_url, pdf_path):
+                return True, "BASE_pdf"
+        text = _fetch_html_text(base_url, min_chars=1000)
+        if text:
+            txt_path.write_text(text, encoding="utf-8")
+            return True, "BASE_html"
+
+    # ── Step 13: CrossRef → landing page HTML ────────────────────────────────
     time.sleep(_RATE_LIMIT_SECS)
     cr_url = _crossref_landing_url(doi)
     if cr_url:
