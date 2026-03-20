@@ -10,6 +10,12 @@ Tries sources in this order, accepting whatever format is available first:
   6. arXiv           — PDF via arXiv API title search (key for CS/AI papers)
   7. CORE            — open-access aggregator PDF/text
   8. Direct URL      — record's own URL field
+  9. ACL Anthology   — all ACL/EMNLP/NAACL/COLING NLP papers (free PDF)
+ 10. OpenReview      — ICLR/NeurIPS/ICML papers (free PDF/HTML)
+ 11. Zenodo          — open-access repository
+ 12. bioRxiv/medRxiv — biomedical preprints
+ 13. CrossRef        — DOI landing page resolution
+ 14. PubMed          — title search → PMCID → full text
 
 Saves the result as:
   - <record_id>.pdf   if a real PDF was obtained
@@ -357,6 +363,206 @@ def _core_download_url(doi: str, title: str) -> Optional[str]:
 
 
 # ─────────────────────────────────────────────────────────
+# SOURCE 9: ACL Anthology (NLP/CL papers — all freely available)
+# ─────────────────────────────────────────────────────────
+
+def _acl_anthology_pdf(doi: str, title: str) -> Optional[str]:
+    """Find a paper in the ACL Anthology and return its PDF URL."""
+    # ACL DOIs look like 10.18653/v1/P19-1001 or 10.18653/v1/2020.acl-main.1
+    if doi and "18653" in doi:
+        # Direct PDF: https://aclanthology.org/P19-1001.pdf
+        paper_id = doi.split("/")[-1]
+        return f"https://aclanthology.org/{paper_id}.pdf"
+
+    if not title:
+        return None
+    # ACL Anthology search API
+    q = requests.utils.quote(title)
+    r = _get(f"https://aclanthology.org/search/?q={q}&limit=5", accept="text/html")
+    if not r:
+        return None
+    # Extract first result link from the HTML
+    matches = re.findall(r'href="/([\w\d.]+?)/"[^>]*>\s*<strong', r.text)
+    if not matches:
+        matches = re.findall(r'href="/(20\d\d\.\S+?|[A-Z]\d\d-\d+?)\.(?:html|pdf)"', r.text)
+    for paper_id in matches[:3]:
+        candidate = f"https://aclanthology.org/{paper_id}.pdf"
+        # Lightweight check: verify title in the anthology page
+        page = _get(f"https://aclanthology.org/{paper_id}/", accept="text/html")
+        if page:
+            page_title = re.search(r'<title>([^<]+)</title>', page.text)
+            if page_title:
+                pt = page_title.group(1).lower()
+                tw = set(title.lower().split())
+                if len(tw & set(pt.split())) / max(len(tw), 1) >= 0.6:
+                    return candidate
+    return None
+
+
+# ─────────────────────────────────────────────────────────
+# SOURCE 10: OpenReview (ICLR, NeurIPS, ICML, etc.)
+# ─────────────────────────────────────────────────────────
+
+def _openreview_pdf(title: str) -> Optional[str]:
+    """Search OpenReview for a paper and return its PDF URL."""
+    if not title:
+        return None
+    q = requests.utils.quote(title)
+    r = _get(f"https://api2.openreview.net/notes/search?term={q}&limit=5&source=forum&sort=cdate:desc")
+    if not r:
+        return None
+    try:
+        notes = r.json().get("notes") or []
+        for note in notes:
+            note_title = (note.get("content", {}).get("title", {}).get("value") or
+                          note.get("content", {}).get("title") or "")
+            if isinstance(note_title, dict):
+                note_title = note_title.get("value", "")
+            t_words = set(title.lower().split())
+            n_words = set(str(note_title).lower().split())
+            if t_words and len(t_words & n_words) / len(t_words) >= 0.65:
+                forum_id = note.get("forum") or note.get("id")
+                if forum_id:
+                    return f"https://openreview.net/pdf?id={forum_id}"
+    except Exception as e:
+        logger.debug(f"OpenReview error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
+# SOURCE 11: Zenodo
+# ─────────────────────────────────────────────────────────
+
+def _zenodo_pdf(doi: str, title: str) -> Optional[str]:
+    """Search Zenodo for open-access record; return PDF URL if available."""
+    query = doi if doi else title
+    if not query:
+        return None
+    q = requests.utils.quote(query)
+    r = _get(f"https://zenodo.org/api/records?q={q}&size=3&sort=bestmatch")
+    if not r:
+        return None
+    try:
+        hits = r.json().get("hits", {}).get("hits", [])
+        for hit in hits:
+            # Check title match if querying by title
+            if not doi:
+                hit_title = (hit.get("metadata", {}).get("title") or "").lower()
+                t_words = set(title.lower().split())
+                if not t_words or len(t_words & set(hit_title.split())) / len(t_words) < 0.6:
+                    continue
+            for f in hit.get("files", []):
+                if f.get("type") == "pdf" or f.get("key", "").endswith(".pdf"):
+                    return f.get("links", {}).get("self") or f.get("links", {}).get("download")
+    except Exception as e:
+        logger.debug(f"Zenodo error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
+# SOURCE 12: bioRxiv / medRxiv preprints
+# ─────────────────────────────────────────────────────────
+
+def _biorxiv_pdf(doi: str, title: str) -> Optional[str]:
+    """Check bioRxiv/medRxiv for a preprint version; return PDF URL."""
+    # If DOI is already a biorxiv/medrxiv DOI (10.1101/...)
+    if doi and doi.startswith("10.1101/"):
+        return f"https://www.biorxiv.org/content/{doi}v1.full.pdf"
+
+    if not title:
+        return None
+    # bioRxiv search API
+    q = requests.utils.quote(title)
+    r = _get(f"https://api.biorxiv.org/details/biorxiv/{q}/0/5/json", timeout=15)
+    if r:
+        try:
+            collection = r.json().get("collection") or []
+            for item in collection:
+                item_title = (item.get("title") or "").lower()
+                t_words = set(title.lower().split())
+                if t_words and len(t_words & set(item_title.split())) / len(t_words) >= 0.7:
+                    biorxiv_doi = item.get("doi")
+                    if biorxiv_doi:
+                        return f"https://www.biorxiv.org/content/{biorxiv_doi}v1.full.pdf"
+        except Exception as e:
+            logger.debug(f"bioRxiv error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
+# SOURCE 13: CrossRef DOI resolution → landing page
+# ─────────────────────────────────────────────────────────
+
+def _crossref_landing_url(doi: str) -> Optional[str]:
+    """Use CrossRef to get the canonical landing page URL for a DOI."""
+    if not doi:
+        return None
+    r = _get(f"https://api.crossref.org/works/{requests.utils.quote(doi)}"
+             f"?mailto={CONTACT_EMAIL}")
+    if not r:
+        return None
+    try:
+        msg = r.json().get("message", {})
+        # Direct URL or resource link
+        url = msg.get("URL") or msg.get("resource", {}).get("primary", {}).get("URL")
+        if url and url != f"https://doi.org/{doi}":
+            return url
+        # links field may contain open-access PDF/HTML
+        for link in msg.get("link", []):
+            content_type = link.get("content-type", "")
+            if "pdf" in content_type:
+                return link.get("URL")
+        for link in msg.get("link", []):
+            if link.get("URL"):
+                return link["URL"]
+    except Exception as e:
+        logger.debug(f"CrossRef error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
+# SOURCE 14: PubMed title search → PMCID
+# ─────────────────────────────────────────────────────────
+
+def _pubmed_pmcid(doi: str, title: str) -> Optional[str]:
+    """Search PubMed by DOI or title and return PMCID if open-access available."""
+    if doi:
+        query = f"{doi}[DOI]"
+    elif title:
+        # Use the first 10 words to reduce false matches
+        short = " ".join(title.split()[:10])
+        query = f"{short}[Title]"
+    else:
+        return None
+    q = requests.utils.quote(query)
+    # eSearch to get PMID
+    r = _get(f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+             f"?db=pubmed&term={q}&retmax=3&retmode=json&tool=SysReviewBot&email={CONTACT_EMAIL}")
+    if not r:
+        return None
+    try:
+        ids = r.json().get("esearchresult", {}).get("idlist", [])
+        if not ids:
+            return None
+        pmid = ids[0]
+        # eLink: check if this PMID has a PMC full-text link
+        rl = _get(f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
+                  f"?dbfrom=pubmed&db=pmc&id={pmid}&retmode=json"
+                  f"&tool=SysReviewBot&email={CONTACT_EMAIL}")
+        if rl:
+            linksets = rl.json().get("linksets", [])
+            for ls in linksets:
+                for ld in ls.get("linksetdbs", []):
+                    if ld.get("dbto") == "pmc":
+                        pmc_ids = ld.get("links", [])
+                        if pmc_ids:
+                            return f"PMC{pmc_ids[0]}"
+    except Exception as e:
+        logger.debug(f"PubMed error: {e}")
+    return None
+
+
+# ─────────────────────────────────────────────────────────
 # PUBLIC API
 # ─────────────────────────────────────────────────────────
 
@@ -371,15 +577,21 @@ def try_download_fulltext(
     Try to obtain the full text for one record by any available means.
 
     Strategy:
-      1. Unpaywall PDF
-      2. Semantic Scholar PDF
-      3. OpenAlex PDF
-      4. PMC HTML (via Semantic Scholar PMCID or Europe PMC search)
-      5. Europe PMC XML/HTML
-      6. Unpaywall / OpenAlex HTML landing page
-      7. arXiv PDF (title search — key for CS/AI papers)
-      8. CORE open-access aggregator
-      9. Direct record URL
+      1.  Unpaywall PDF
+      2.  Semantic Scholar PDF
+      3.  OpenAlex PDF
+      4.  PMC HTML (via Semantic Scholar PMCID or Europe PMC search)
+      5.  Europe PMC XML/HTML
+      6.  Unpaywall / OpenAlex HTML landing page
+      7.  arXiv PDF (title search — key for CS/AI papers)
+      8.  CORE open-access aggregator
+      9.  Direct record URL
+      10. ACL Anthology PDF (all NLP/CL papers)
+      11. OpenReview PDF (ICLR, NeurIPS, ICML)
+      12. Zenodo open-access repository
+      13. bioRxiv / medRxiv preprints
+      14. CrossRef DOI → landing page / PDF link
+      15. PubMed title search → PMCID → PMC full text
 
     Saves result as <record_id>.pdf  (real PDF)
                  or <record_id>.txt  (plain text extracted from HTML/XML)
@@ -487,5 +699,67 @@ def try_download_fulltext(
         if text:
             txt_path.write_text(text, encoding="utf-8")
             return True, "direct_html"
+
+    # ── Step 8: ACL Anthology (all NLP/CL conference papers free) ───────────
+    time.sleep(_RATE_LIMIT_SECS)
+    acl_pdf = _acl_anthology_pdf(doi, title)
+    if acl_pdf:
+        logger.info(f"[ACL] PDF → {acl_pdf[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if _download_pdf(acl_pdf, pdf_path):
+            return True, "ACL_pdf"
+
+    # ── Step 9: OpenReview (ICLR, NeurIPS, ICML, ICLR workshops) ────────────
+    time.sleep(_RATE_LIMIT_SECS)
+    or_pdf = _openreview_pdf(title)
+    if or_pdf:
+        logger.info(f"[OpenReview] PDF → {or_pdf[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if _download_pdf(or_pdf, pdf_path):
+            return True, "OpenReview_pdf"
+
+    # ── Step 10: Zenodo open-access repository ───────────────────────────────
+    time.sleep(_RATE_LIMIT_SECS)
+    zen_pdf = _zenodo_pdf(doi, title)
+    if zen_pdf:
+        logger.info(f"[Zenodo] PDF → {zen_pdf[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if _download_pdf(zen_pdf, pdf_path):
+            return True, "Zenodo_pdf"
+
+    # ── Step 11: bioRxiv / medRxiv preprint ─────────────────────────────────
+    time.sleep(_RATE_LIMIT_SECS)
+    biorxiv_pdf = _biorxiv_pdf(doi, title)
+    if biorxiv_pdf:
+        logger.info(f"[bioRxiv] PDF → {biorxiv_pdf[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if _download_pdf(biorxiv_pdf, pdf_path):
+            return True, "bioRxiv_pdf"
+
+    # ── Step 12: CrossRef → landing page HTML ────────────────────────────────
+    time.sleep(_RATE_LIMIT_SECS)
+    cr_url = _crossref_landing_url(doi)
+    if cr_url:
+        logger.info(f"[CrossRef] → {cr_url[:70]}")
+        time.sleep(_RATE_LIMIT_SECS)
+        if cr_url.lower().endswith(".pdf"):
+            if _download_pdf(cr_url, pdf_path):
+                return True, "CrossRef_pdf"
+        text = _fetch_html_text(cr_url, min_chars=1000)
+        if text:
+            txt_path.write_text(text, encoding="utf-8")
+            return True, "CrossRef_html"
+
+    # ── Step 13: PubMed title search → new PMCID not found above ─────────────
+    if not pmcid:  # only if Steps 3-4 didn't find one
+        time.sleep(_RATE_LIMIT_SECS)
+        pmcid2 = _pubmed_pmcid(doi, title)
+        if pmcid2:
+            logger.info(f"[PubMed] PMCID → {pmcid2}")
+            time.sleep(_RATE_LIMIT_SECS)
+            text = _pmc_html_text(pmcid2)
+            if text and len(text) >= 1000:
+                txt_path.write_text(text, encoding="utf-8")
+                return True, "PubMed_PMC"
 
     return False, "not_found"
