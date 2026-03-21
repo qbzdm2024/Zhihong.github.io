@@ -59,7 +59,7 @@
         <button class="btn btn-sm btn-ghost" onclick="refreshAll()">↻ Refresh</button>
       </div>
 
-      <!-- PRISMA Flow Cards -->
+      <!-- PRISMA Summary Cards (top row) -->
       <div class="stats-grid">
         <div class="stat-card">
           <div class="stat-label">Identified</div>
@@ -78,8 +78,20 @@
           <div class="stat-value stat-green" id="stat-fulltext-retrieved">—</div>
         </div>
         <div class="stat-card">
-          <div class="stat-label">Full Text Needed (Manual)</div>
+          <div class="stat-label">Full Text Needed</div>
           <div class="stat-value stat-orange" id="stat-fulltext-needed">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Round-1 Excluded</div>
+          <div class="stat-value stat-red" id="stat-r1-excluded">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Round-1 Passed</div>
+          <div class="stat-value stat-orange" id="stat-r1-passed">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Round-2 Excluded</div>
+          <div class="stat-value stat-red" id="stat-r2-excluded">—</div>
         </div>
         <div class="stat-card">
           <div class="stat-label">Final Included</div>

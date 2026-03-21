@@ -953,7 +953,18 @@ class PipelineRunner:
             )
         )
         # Of those, how many have full text already retrieved
+        # Count all records with a PDF at any fulltext-screening stage
         fulltext_retrieved = sum(
+            1 for pr in self.records.values()
+            if pr.screened is not None
+            and pr.screened.fulltext_available
+            and pr.pipeline_stage in (
+                PipelineStage.FULLTEXT_SCREENING,
+                PipelineStage.SECOND_FULLTEXT_SCREENING,
+                PipelineStage.EXTRACTION,
+            )
+        ) + sum(
+            # Still at TITLE_SCREENING with PDF (fulltext screening not yet run)
             1 for pr in self.records.values()
             if pr.pipeline_stage == PipelineStage.TITLE_SCREENING
             and pr.final_decision == DecisionLabel.INCLUDE
@@ -965,22 +976,44 @@ class PipelineRunner:
             1 for pr in self.records.values()
             if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED
         )
-        fulltext_excluded = sum(
+        # Round-1 fulltext screening breakdown
+        fulltext_r1_excluded = sum(
             1 for pr in self.records.values()
             if pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
             and pr.final_decision == DecisionLabel.EXCLUDE
         )
-        # Round-2 full-text screening counts
-        round2_excluded = sum(
+        fulltext_r1_uncertain = sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
+            and pr.final_decision == DecisionLabel.UNCERTAIN
+        )
+        # "passed round 1" = moved to SECOND_FULLTEXT_SCREENING, or still INCLUDE at FULLTEXT_SCREENING
+        fulltext_r1_passed = sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
+        ) + sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
+            and pr.final_decision == DecisionLabel.INCLUDE
+        )
+        # Round-2 fulltext screening breakdown
+        fulltext_r2_excluded = sum(
             1 for pr in self.records.values()
             if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
             and pr.final_decision == DecisionLabel.EXCLUDE
         )
-        round2_included = sum(
+        fulltext_r2_included = sum(
             1 for pr in self.records.values()
             if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
             and pr.final_decision == DecisionLabel.INCLUDE
         )
+        fulltext_r2_uncertain = sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
+            and pr.final_decision == DecisionLabel.UNCERTAIN
+        )
+        # backward-compat alias: r1 excluded (what old code called fulltext_excluded)
+        fulltext_excluded = fulltext_r1_excluded
         final_included = sum(
             1 for pr in self.records.values()
             if pr.final_decision == DecisionLabel.INCLUDE
@@ -1014,6 +1047,13 @@ class PipelineRunner:
         )
         needs_human = needs_human_title + needs_human_fulltext + needs_human_round2 + needs_human_extraction
 
+        # Verification checks (logged for debugging)
+        # fulltext_retrieved + fulltext_needed should equal title_screen_included
+        # fulltext_r1_excluded + fulltext_r1_passed + fulltext_r1_uncertain + fulltext_needed
+        #   should equal title_screen_included
+        # fulltext_r2_excluded + fulltext_r2_included + fulltext_r2_uncertain
+        #   should equal fulltext_r1_passed (when round-2 has run)
+
         return {
             "identified": total,
             "duplicates_removed": dups,
@@ -1021,12 +1061,21 @@ class PipelineRunner:
             "awaiting_title_screening": awaiting_screening,
             "title_abstract_excluded": title_screen_excluded,
             "title_abstract_included": title_screen_included,
+            # Full-text retrieval
             "fulltext_retrieved": fulltext_retrieved,
             "full_text_needed": fulltext_needed,
-            "full_text_excluded": fulltext_excluded,
-            "round2_fulltext_excluded": round2_excluded,
-            "round2_fulltext_included": round2_included,
+            # Round-1 full-text screening
+            "full_text_excluded": fulltext_r1_excluded,          # backward compat
+            "fulltext_r1_excluded": fulltext_r1_excluded,
+            "fulltext_r1_uncertain": fulltext_r1_uncertain,
+            "fulltext_r1_passed": fulltext_r1_passed,
+            # Round-2 full-text screening
+            "fulltext_r2_excluded": fulltext_r2_excluded,
+            "fulltext_r2_included": fulltext_r2_included,
+            "fulltext_r2_uncertain": fulltext_r2_uncertain,
+            # Final
             "final_included": final_included,
+            # Needs-human breakdown
             "needs_human_verification": needs_human,
             "needs_human_title_screening": needs_human_title,
             "needs_human_fulltext_screening": needs_human_fulltext,

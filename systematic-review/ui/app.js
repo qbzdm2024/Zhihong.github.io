@@ -74,6 +74,9 @@ async function loadDashboard() {
     setText('stat-title-included', p.title_abstract_included ?? '—');
     setText('stat-fulltext-retrieved', p.fulltext_retrieved ?? '—');
     setText('stat-fulltext-needed', p.full_text_needed ?? '—');
+    setText('stat-r1-excluded', p.fulltext_r1_excluded ?? '—');
+    setText('stat-r1-passed', p.fulltext_r1_passed ?? '—');
+    setText('stat-r2-excluded', p.fulltext_r2_excluded ?? '—');
     setText('stat-final-included', p.final_included ?? '—');
     setText('stat-needs-human', p.needs_human_verification ?? '—');
 
@@ -89,51 +92,124 @@ async function loadDashboard() {
 
 function renderPrismaFlow(p) {
   const el = document.getElementById('prisma-flow');
+
+  // Helper: show '—' for null/undefined, with optional color
+  const n = (v, color) => {
+    const val = (v == null) ? '—' : v;
+    return color ? `<span style="color:${color};">${val}</span>` : val;
+  };
+
+  // Derived check totals (for the verification note)
+  const ftSum = (p.fulltext_retrieved ?? 0) + (p.full_text_needed ?? 0);
+  const r1Sum = (p.fulltext_r1_excluded ?? 0) + (p.fulltext_r1_passed ?? 0) + (p.fulltext_r1_uncertain ?? 0) + (p.full_text_needed ?? 0);
+  const r2Sum = (p.fulltext_r2_excluded ?? 0) + (p.fulltext_r2_included ?? 0) + (p.fulltext_r2_uncertain ?? 0);
+  const ta = p.title_abstract_included ?? 0;
+
+  const checkIcon = (sum, expected) =>
+    (expected > 0 && sum === expected)
+      ? `<span style="color:var(--green); font-size:11px;"> ✓ sums to ${sum}</span>`
+      : (expected > 0 ? `<span style="color:var(--red); font-size:11px;"> ✗ ${sum} ≠ ${expected}</span>` : '');
+
+  const r2HasRun = (p.fulltext_r2_excluded ?? 0) + (p.fulltext_r2_included ?? 0) + (p.fulltext_r2_uncertain ?? 0) > 0;
+
   el.innerHTML = `
-    <div style="font-size:13px; line-height:2.2;">
-      <div class="prisma-row">
-        <div class="prisma-box">
-          <div class="pbox-count">${p.identified ?? '—'}</div>
-          <div class="pbox-label">Records Identified</div>
-        </div>
+  <div style="font-family:var(--mono); font-size:12px; line-height:1.8; padding:8px 0;">
+
+    <!-- Row: Identified -->
+    <div class="prisma-row">
+      <div class="prisma-box">
+        <div class="pbox-count">${n(p.identified)}</div>
+        <div class="pbox-label">Records Identified</div>
       </div>
-      <div class="prisma-arrow">↓</div>
-      <div class="prisma-row">
-        <div class="prisma-box">
-          <div class="pbox-count">${p.after_dedup ?? '—'}</div>
-          <div class="pbox-label">After Deduplication</div>
-        </div>
-        <div class="prisma-side">← ${p.duplicates_removed ?? 0} duplicates removed</div>
-      </div>
-      <div class="prisma-arrow">↓</div>
-      <div class="prisma-row">
-        <div class="prisma-box">
-          <div class="pbox-count">${p.title_abstract_included ?? '—'}</div>
-          <div class="pbox-label">Title/Abstract Included</div>
-        </div>
-        <div class="prisma-side">← ${p.title_abstract_excluded ?? 0} excluded at T/A</div>
-      </div>
-      <div class="prisma-arrow">↓</div>
-      <div class="prisma-row">
-        <div class="prisma-box">
-          <div class="pbox-count" style="color:var(--green);">${p.fulltext_retrieved ?? '—'}</div>
-          <div class="pbox-label">Full Text Retrieved</div>
-        </div>
-        <div class="prisma-side" style="color:var(--orange);">← ${p.full_text_needed ?? 0} need manual upload</div>
-      </div>
-      <div class="prisma-arrow">↓</div>
-      <div class="prisma-row">
-        <div class="prisma-box" style="border-color: var(--green);">
-          <div class="pbox-count" style="color:var(--green);">${p.final_included ?? '—'}</div>
-          <div class="pbox-label">Final Included</div>
-        </div>
-        <div class="prisma-side">← ${p.full_text_excluded ?? 0} excluded at full-text</div>
-      </div>
-      ${p.needs_human_verification > 0 ? `
-      <div class="mt-3" style="color:var(--orange); font-size:12px;">
-        ⚠ ${p.needs_human_verification} records need human verification
-      </div>` : ''}
     </div>
+    <div class="prisma-arrow">↓</div>
+
+    <!-- Row: After dedup -->
+    <div class="prisma-row">
+      <div class="prisma-box">
+        <div class="pbox-count">${n(p.after_dedup)}</div>
+        <div class="pbox-label">After Deduplication</div>
+      </div>
+      <div class="prisma-side" style="color:var(--red);">← ${n(p.duplicates_removed)} duplicates removed</div>
+    </div>
+    <div class="prisma-arrow">↓</div>
+
+    <!-- Row: Title/abstract included -->
+    <div class="prisma-row">
+      <div class="prisma-box">
+        <div class="pbox-count">${n(p.title_abstract_included)}</div>
+        <div class="pbox-label">Title / Abstract Included</div>
+      </div>
+      <div class="prisma-side" style="color:var(--red);">← ${n(p.title_abstract_excluded)} excluded at title/abstract</div>
+    </div>
+    <div class="prisma-arrow">↓</div>
+
+    <!-- Row: Full text retrieved vs needed -->
+    <div class="prisma-row">
+      <div class="prisma-box">
+        <div class="pbox-count" style="color:var(--green);">${n(p.fulltext_retrieved)}</div>
+        <div class="pbox-label">Full Text Retrieved</div>
+      </div>
+      <div class="prisma-side" style="color:var(--orange);">← ${n(p.full_text_needed)} full texts not retrieved (manual upload needed)</div>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); text-align:center; margin:-4px 0 4px;">
+      retrieved + not retrieved = ${n(ftSum)}${checkIcon(ftSum, ta)}
+    </div>
+    <div class="prisma-arrow">↓</div>
+
+    <!-- Row: Round-1 full-text screening -->
+    <div class="prisma-row">
+      <div class="prisma-box" style="border-color:var(--accent);">
+        <div class="pbox-count" style="color:var(--accent);">${n(p.fulltext_r1_passed)}</div>
+        <div class="pbox-label">Round-1 Passed (for Round-2)</div>
+      </div>
+      <div class="prisma-side" style="color:var(--red);">← ${n(p.fulltext_r1_excluded)} excluded at round-1 full-text
+        ${p.fulltext_r1_uncertain > 0 ? `<br>← ${n(p.fulltext_r1_uncertain, 'var(--orange)')} pending human review (round-1)` : ''}
+      </div>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); text-align:center; margin:-4px 0 4px;">
+      r1-excluded + r1-passed + r1-uncertain + not-retrieved = ${n(r1Sum)}${checkIcon(r1Sum, ta)}
+    </div>
+
+    ${r2HasRun ? `
+    <div class="prisma-arrow">↓</div>
+
+    <!-- Row: Round-2 full-text screening -->
+    <div class="prisma-row">
+      <div class="prisma-box" style="border-color:var(--green);">
+        <div class="pbox-count" style="color:var(--green);">${n(p.final_included)}</div>
+        <div class="pbox-label">Final Included</div>
+      </div>
+      <div class="prisma-side">
+        <span style="color:var(--red);">← ${n(p.fulltext_r2_excluded)} excluded at round-2 full-text</span>
+        ${p.fulltext_r2_uncertain > 0 ? `<br><span style="color:var(--orange);">← ${n(p.fulltext_r2_uncertain)} pending human review (round-2)</span>` : ''}
+      </div>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); text-align:center; margin:-4px 0 4px;">
+      r2-included + r2-excluded + r2-uncertain = ${n(r2Sum)}${checkIcon(r2Sum, p.fulltext_r1_passed ?? 0)}
+    </div>
+    ` : `
+    <div style="font-size:11px; color:var(--text-muted); text-align:center; margin:8px 0;">
+      ↓ Round-2 full-text screening not yet run
+    </div>
+    <div class="prisma-row">
+      <div class="prisma-box" style="border-color:var(--green);">
+        <div class="pbox-count" style="color:var(--green);">${n(p.final_included)}</div>
+        <div class="pbox-label">Final Included (Round-1)</div>
+      </div>
+    </div>
+    `}
+
+    ${p.needs_human_verification > 0 ? `
+    <div class="mt-3" style="color:var(--orange); font-size:12px;">
+      ⚠ ${p.needs_human_verification} records pending human verification
+      (title: ${p.needs_human_title_screening ?? 0},
+       round-1 FT: ${p.needs_human_fulltext_screening ?? 0},
+       round-2 FT: ${p.needs_human_round2_screening ?? 0},
+       extraction: ${p.needs_human_extraction ?? 0})
+    </div>` : ''}
+
+  </div>
   `;
 }
 
