@@ -946,7 +946,11 @@ class PipelineRunner:
             and pr.final_decision in (DecisionLabel.INCLUDE, DecisionLabel.FULL_TEXT_NEEDED)
         ) + sum(
             1 for pr in self.records.values()
-            if pr.pipeline_stage in (PipelineStage.FULLTEXT_SCREENING, PipelineStage.EXTRACTION)
+            if pr.pipeline_stage in (
+                PipelineStage.FULLTEXT_SCREENING,
+                PipelineStage.SECOND_FULLTEXT_SCREENING,
+                PipelineStage.EXTRACTION,
+            )
         )
         # Of those, how many have full text already retrieved
         fulltext_retrieved = sum(
