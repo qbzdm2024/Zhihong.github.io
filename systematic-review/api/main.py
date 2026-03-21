@@ -87,6 +87,7 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
         "second_pass_screening": lambda: runner.run_second_pass_screening(request.limit),
         "fulltext_download": lambda: runner.run_fulltext_download(request.limit),
         "fulltext_screening": lambda: runner.run_fulltext_screening(request.limit),
+        "second_fulltext_screening": lambda: runner.run_second_fulltext_screening(request.limit),
         "extraction": lambda: runner.run_extraction(request.limit),
     }
 
@@ -105,6 +106,10 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
     if request.stage == "reset_fulltext_screening":
         stats = runner.reset_fulltext_screening(force=request.force)
         return {"status": "completed", "stage": "reset_fulltext_screening", "stats": stats}
+
+    if request.stage == "reset_second_fulltext_screening":
+        stats = runner.reset_second_fulltext_screening(force=request.force)
+        return {"status": "completed", "stage": "reset_second_fulltext_screening", "stats": stats}
 
     if request.stage == "mark_included_for_review":
         stats = runner.mark_included_for_review()
@@ -601,6 +606,132 @@ async def save_prisma_snapshot(request: PrismaSnapshotRequest):
 async def get_prisma_snapshots():
     """Return all saved PRISMA flow snapshots."""
     return {"snapshots": runner.get_prisma_snapshots()}
+
+
+# ─────────────────────────────────────────────────────
+# ROUND-2 FULL-TEXT SCREENING
+# ─────────────────────────────────────────────────────
+
+@app.get("/api/round2-screening/status")
+async def get_round2_screening_status():
+    """Return counts and status of second-round full-text screening."""
+    from pipeline.models import PipelineStage as PS
+    r2_records = [
+        pr for pr in runner.records.values()
+        if pr.pipeline_stage == PS.SECOND_FULLTEXT_SCREENING
+    ]
+    included = [pr for pr in r2_records if pr.final_decision == DecisionLabel.INCLUDE]
+    excluded = [pr for pr in r2_records if pr.final_decision == DecisionLabel.EXCLUDE]
+    uncertain = [pr for pr in r2_records if pr.final_decision == DecisionLabel.UNCERTAIN]
+    pending = [
+        pr for pr in runner.records.values()
+        if pr.final_decision == DecisionLabel.INCLUDE
+        and pr.pipeline_stage == PS.FULLTEXT_SCREENING
+        and pr.screened is not None
+        and pr.screened.second_fulltext_screening is None
+    ]
+    return {
+        "total_screened_round2": len(r2_records),
+        "included": len(included),
+        "excluded": len(excluded),
+        "needs_human_verification": len(uncertain),
+        "pending_round2_screening": len(pending),
+        "running": runner.running_stage == "second_fulltext_screening",
+        "last_run": runner.stage_log.get("second_fulltext_screening", {}),
+    }
+
+
+@app.get("/api/round2-screening/exclusion-summary")
+async def get_round2_exclusion_summary():
+    """Return PRISMA-ready breakdown of round-2 exclusion reasons."""
+    summary = runner.get_round2_exclusion_summary()
+    return summary
+
+
+@app.get("/api/round2-screening/excluded-records")
+async def list_round2_excluded_records(page: int = 1, page_size: int = 50):
+    """List all records excluded in round-2 with their exclusion codes and rationale."""
+    from pipeline.models import PipelineStage as PS
+    excluded = [
+        pr for pr in runner.records.values()
+        if pr.pipeline_stage == PS.SECOND_FULLTEXT_SCREENING
+        and pr.final_decision == DecisionLabel.EXCLUDE
+        and pr.screened is not None
+        and pr.screened.second_fulltext_screening is not None
+    ]
+    excluded.sort(key=lambda r: r.updated_at, reverse=True)
+    start = (page - 1) * page_size
+    page_records = excluded[start: start + page_size]
+
+    def _fmt(pr: PipelineRecord):
+        d = pr.dedup or pr.raw
+        r2 = pr.screened.second_fulltext_screening
+        ec_code = None
+        ec_rationale = None
+        if r2.agent1 and r2.agent1.exclusion_code:
+            ec_code = r2.agent1.exclusion_code
+            ec_rationale = r2.agent1.rationale
+        elif r2.agent2 and r2.agent2.exclusion_code:
+            ec_code = r2.agent2.exclusion_code
+            ec_rationale = r2.agent2.rationale
+        return {
+            "record_id": pr.record_id,
+            "title": d.title if d else "",
+            "authors": d.authors if d else "",
+            "year": d.year if d else None,
+            "journal_venue": d.journal_venue if d else "",
+            "doi": d.doi if d else "",
+            "exclusion_code": ec_code,
+            "agent1_exclusion_code": r2.agent1.exclusion_code if r2.agent1 else None,
+            "agent2_exclusion_code": r2.agent2.exclusion_code if r2.agent2 else None,
+            "agent1_rationale": r2.agent1.rationale if r2.agent1 else None,
+            "agent2_rationale": r2.agent2.rationale if r2.agent2 else None,
+            "consensus_confidence": r2.consensus_confidence,
+            "human_verified": r2.human_verified,
+            "human_rationale": r2.human_rationale,
+        }
+
+    return {
+        "total": len(excluded),
+        "page": page,
+        "page_size": page_size,
+        "records": [_fmt(pr) for pr in page_records],
+    }
+
+
+@app.get("/api/round2-screening/uncertain-records")
+async def list_round2_uncertain_records():
+    """List records needing human verification after round-2 screening."""
+    from pipeline.models import PipelineStage as PS
+    uncertain = [
+        pr for pr in runner.records.values()
+        if pr.pipeline_stage == PS.SECOND_FULLTEXT_SCREENING
+        and pr.final_decision == DecisionLabel.UNCERTAIN
+        and pr.screened is not None
+        and pr.screened.second_fulltext_screening is not None
+        and not pr.screened.second_fulltext_screening.human_verified
+    ]
+
+    def _fmt(pr: PipelineRecord):
+        d = pr.dedup or pr.raw
+        r2 = pr.screened.second_fulltext_screening
+        return {
+            "record_id": pr.record_id,
+            "title": d.title if d else "",
+            "authors": d.authors if d else "",
+            "year": d.year if d else None,
+            "journal_venue": d.journal_venue if d else "",
+            "doi": d.doi if d else "",
+            "agent1_decision": r2.agent1.decision if r2.agent1 else None,
+            "agent1_exclusion_code": r2.agent1.exclusion_code if r2.agent1 else None,
+            "agent1_rationale": r2.agent1.rationale if r2.agent1 else None,
+            "agent2_decision": r2.agent2.decision if r2.agent2 else None,
+            "agent2_exclusion_code": r2.agent2.exclusion_code if r2.agent2 else None,
+            "agent2_rationale": r2.agent2.rationale if r2.agent2 else None,
+            "consensus_confidence": r2.consensus_confidence,
+        }
+
+    return {"total": len(uncertain), "records": [_fmt(pr) for pr in uncertain]}
 
 
 # ─────────────────────────────────────────────────────

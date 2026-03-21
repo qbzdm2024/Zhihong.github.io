@@ -17,7 +17,7 @@ from .models import (
 )
 from .importer import load_all_from_directory, save_records, load_records
 from .deduplicator import deduplicate, filter_unique, save_deduped, load_deduped
-from agents.screener import screen_title_abstract, screen_fulltext, screen_second_pass
+from agents.screener import screen_title_abstract, screen_fulltext, screen_second_pass, screen_fulltext_round2
 from agents.extractor import extract_and_assess
 from config.settings import settings
 
@@ -612,6 +612,163 @@ class PipelineRunner:
         return counts
 
     # ──────────────────────────────────────────────────
+    # STAGE 4b: SECOND ROUND FULL-TEXT SCREENING
+    # Applied to the 115 studies included after round-1 full-text screening.
+    # Uses refined criteria requiring evaluation of LLM-generated outputs.
+    # ──────────────────────────────────────────────────
+
+    def run_second_fulltext_screening(self, limit: Optional[int] = None) -> Dict:
+        """Run second-round full-text screening on studies included after round-1.
+
+        Targets records where:
+          - final_decision == INCLUDE
+          - pipeline_stage == FULLTEXT_SCREENING  (confirmed included after round-1 + human review)
+          - second_fulltext_screening is None (not yet screened in round-2)
+
+        Also retries records left as UNCERTAIN at SECOND_FULLTEXT_SCREENING stage
+        that have not been human-verified.
+        """
+        self.running_stage = "second_fulltext_screening"
+        logger.info("=== STAGE: SECOND ROUND FULL-TEXT SCREENING ===")
+
+        candidates = [
+            pr for pr in self.records.values()
+            if pr.screened is not None
+            and pr.screened.fulltext_available
+            and (
+                # Round-1 included — not yet round-2 screened
+                (pr.final_decision == DecisionLabel.INCLUDE
+                 and pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
+                 and pr.screened.second_fulltext_screening is None)
+                or
+                # Previously sent to human at round-2 and not yet verified
+                (pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
+                 and pr.final_decision == DecisionLabel.UNCERTAIN
+                 and pr.screened.second_fulltext_screening is not None
+                 and not pr.screened.second_fulltext_screening.human_verified)
+            )
+        ]
+
+        if limit:
+            candidates = candidates[:limit]
+
+        logger.info(f"Round-2 screening candidates: {len(candidates)}")
+
+        counts = {
+            DecisionLabel.INCLUDE: 0,
+            DecisionLabel.EXCLUDE: 0,
+            DecisionLabel.UNCERTAIN: 0,
+        }
+
+        lock = threading.Lock()
+        completed = [0]
+
+        def _round2_one(pr: PipelineRecord):
+            fulltext = self._extract_pdf_text(pr.screened.pdf_path)
+            # Pass round-1 rationale as context for agents
+            round1_rationale = ""
+            if pr.screened.fulltext_screening:
+                r1 = pr.screened.fulltext_screening
+                parts = []
+                if r1.agent1:
+                    parts.append(f"Agent 1 ({r1.agent1.model_used}): {r1.agent1.rationale}")
+                if r1.agent2:
+                    parts.append(f"Agent 2 ({r1.agent2.model_used}): {r1.agent2.rationale}")
+                if r1.human_verified and r1.human_rationale:
+                    parts.append(f"Human reviewer: {r1.human_rationale}")
+                round1_rationale = "\n".join(parts)
+            result = screen_fulltext_round2(pr.dedup, fulltext, round1_rationale)
+            return pr, result
+
+        with ThreadPoolExecutor(max_workers=settings.screening_workers) as executor:
+            futures = {executor.submit(_round2_one, pr): pr for pr in candidates}
+            for future in as_completed(futures):
+                try:
+                    pr, result = future.result()
+                    pr.screened.second_fulltext_screening = result
+                    pr.screened.current_decision = result.final_decision
+                    pr.update_stage(PipelineStage.SECOND_FULLTEXT_SCREENING, result.final_decision)
+                    with lock:
+                        counts[result.final_decision] = counts.get(result.final_decision, 0) + 1
+                        completed[0] += 1
+                        n = completed[0]
+                except Exception as e:
+                    pr = futures[future]
+                    logger.error(f"Round-2 screening error for {pr.record_id}: {e}")
+                    pr.update_stage(PipelineStage.SECOND_FULLTEXT_SCREENING, DecisionLabel.UNCERTAIN)
+                    with lock:
+                        counts[DecisionLabel.UNCERTAIN] += 1
+                        completed[0] += 1
+                        n = completed[0]
+
+                if n % 20 == 0:
+                    with lock:
+                        self._save_state()
+                    logger.info(f"Checkpoint saved at {n}/{len(candidates)} records")
+
+        self._save_state()
+        log = {str(k): v for k, v in counts.items()}
+        log["completed_at"] = datetime.utcnow().isoformat()
+        self.stage_log["second_fulltext_screening"] = log
+        self.running_stage = ""
+        logger.info(f"Round-2 full-text screening complete: {counts}")
+        return counts
+
+    def reset_second_fulltext_screening(self, force: bool = False) -> Dict:
+        """Reset round-2 full-text screening results, reverting records to INCLUDE at FULLTEXT_SCREENING stage."""
+        reset_count = 0
+        for pr in self.records.values():
+            if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING or (
+                force and pr.screened and pr.screened.second_fulltext_screening is not None
+            ):
+                if pr.screened:
+                    pr.screened.second_fulltext_screening = None
+                # Revert to round-1 included state
+                pr.final_decision = DecisionLabel.INCLUDE
+                pr.pipeline_stage = PipelineStage.FULLTEXT_SCREENING
+                pr.updated_at = datetime.utcnow()
+                reset_count += 1
+        self._save_state()
+        logger.info(f"Reset {reset_count} records from round-2 full-text screening")
+        return {"reset": reset_count}
+
+    def get_round2_exclusion_summary(self) -> Dict:
+        """Return a breakdown of round-2 exclusion reasons for PRISMA reporting."""
+        from collections import Counter
+        excluded = [
+            pr for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
+            and pr.final_decision == DecisionLabel.EXCLUDE
+            and pr.screened is not None
+            and pr.screened.second_fulltext_screening is not None
+        ]
+
+        code_counter: Counter = Counter()
+        for pr in excluded:
+            r2 = pr.screened.second_fulltext_screening
+            # Prefer agent1 exclusion code; fall back to agent2
+            code = None
+            if r2.agent1 and r2.agent1.exclusion_code:
+                code = r2.agent1.exclusion_code
+            elif r2.agent2 and r2.agent2.exclusion_code:
+                code = r2.agent2.exclusion_code
+            code_counter[code or "unknown"] += 1
+
+        from config.settings import ROUND2_EXCLUSION_CODES
+        summary = {
+            "total_excluded": len(excluded),
+            "by_code": dict(code_counter),
+            "by_code_with_labels": {
+                code: {
+                    "count": cnt,
+                    "label": ROUND2_EXCLUSION_CODES.get(code, code),
+                }
+                for code, cnt in code_counter.items()
+            },
+        }
+        return summary
+
+    # ──────────────────────────────────────────────────
     # STAGE 5: DATA EXTRACTION
     # ──────────────────────────────────────────────────
 
@@ -622,7 +779,10 @@ class PipelineRunner:
         included = [
             pr for pr in self.records.values()
             if pr.final_decision == DecisionLabel.INCLUDE
-            and pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
+            and pr.pipeline_stage in (
+                PipelineStage.FULLTEXT_SCREENING,
+                PipelineStage.SECOND_FULLTEXT_SCREENING,
+            )
             and pr.screened is not None
             and pr.screened.fulltext_available
         ]
@@ -691,9 +851,13 @@ class PipelineRunner:
         # Update screening result if at screening stage
         if pr.screened:
             active_screening = (
-                pr.screened.fulltext_screening
-                if pr.screened.fulltext_screening
-                else pr.screened.title_screening
+                pr.screened.second_fulltext_screening
+                if pr.screened.second_fulltext_screening
+                else (
+                    pr.screened.fulltext_screening
+                    if pr.screened.fulltext_screening
+                    else pr.screened.title_screening
+                )
             )
             if active_screening:
                 active_screening.human_verified = True
@@ -802,10 +966,25 @@ class PipelineRunner:
             if pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
             and pr.final_decision == DecisionLabel.EXCLUDE
         )
+        # Round-2 full-text screening counts
+        round2_excluded = sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
+            and pr.final_decision == DecisionLabel.EXCLUDE
+        )
+        round2_included = sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
+            and pr.final_decision == DecisionLabel.INCLUDE
+        )
         final_included = sum(
             1 for pr in self.records.values()
             if pr.final_decision == DecisionLabel.INCLUDE
-            and pr.pipeline_stage in (PipelineStage.FULLTEXT_SCREENING, PipelineStage.EXTRACTION)
+            and pr.pipeline_stage in (
+                PipelineStage.FULLTEXT_SCREENING,
+                PipelineStage.SECOND_FULLTEXT_SCREENING,
+                PipelineStage.EXTRACTION,
+            )
         )
         # "Needs human verification" — broken down by stage so the UI can show
         # separate labels for title, fulltext, and extraction reviews.
@@ -819,12 +998,17 @@ class PipelineRunner:
             if pr.final_decision == DecisionLabel.UNCERTAIN
             and pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
         )
+        needs_human_round2 = sum(
+            1 for pr in self.records.values()
+            if pr.final_decision == DecisionLabel.UNCERTAIN
+            and pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
+        )
         needs_human_extraction = sum(
             1 for pr in self.records.values()
             if pr.final_decision == DecisionLabel.UNCERTAIN
             and pr.pipeline_stage == PipelineStage.EXTRACTION
         )
-        needs_human = needs_human_title + needs_human_fulltext + needs_human_extraction
+        needs_human = needs_human_title + needs_human_fulltext + needs_human_round2 + needs_human_extraction
 
         return {
             "identified": total,
@@ -836,10 +1020,13 @@ class PipelineRunner:
             "fulltext_retrieved": fulltext_retrieved,
             "full_text_needed": fulltext_needed,
             "full_text_excluded": fulltext_excluded,
+            "round2_fulltext_excluded": round2_excluded,
+            "round2_fulltext_included": round2_included,
             "final_included": final_included,
             "needs_human_verification": needs_human,
             "needs_human_title_screening": needs_human_title,
             "needs_human_fulltext_screening": needs_human_fulltext,
+            "needs_human_round2_screening": needs_human_round2,
             "needs_human_extraction": needs_human_extraction,
         }
 

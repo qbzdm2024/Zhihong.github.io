@@ -21,6 +21,7 @@ class PipelineStage(str, Enum):
     DEDUP = "deduplication"
     TITLE_SCREENING = "title_abstract_screening"
     FULLTEXT_SCREENING = "fulltext_screening"
+    SECOND_FULLTEXT_SCREENING = "second_fulltext_screening"
     EXTRACTION = "data_extraction"
     QA = "quality_assessment"
     SYNTHESIS = "synthesis"
@@ -82,6 +83,7 @@ class ScreenedRecord(DedupRecord):
     title_screening: Optional[ScreeningResult] = None
     second_pass_screening: Optional[ScreeningResult] = None  # stricter second-pass AI screen
     fulltext_screening: Optional[ScreeningResult] = None
+    second_fulltext_screening: Optional[ScreeningResult] = None  # round-2 refined criteria screen
     pdf_path: Optional[str] = None
     fulltext_available: bool = False
     current_stage: PipelineStage = PipelineStage.TITLE_SCREENING

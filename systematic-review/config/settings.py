@@ -72,6 +72,21 @@ EXCLUSION_CODES = {
     "EC9": "Duplicate",
 }
 
+# Round-2 full-text screening exclusion codes (refined criteria for evaluation requirement)
+ROUND2_EXCLUSION_CODES = {
+    "R2-EC1": "Non-empirical or ineligible publication type (review, editorial, theoretical, framework without evaluation, lecture notes, author correction)",
+    "R2-EC2": "No real-world qualitative data (only simulated, synthetic, or hypothetical data used)",
+    "R2-EC3": "LLM not used for qualitative analysis (no coding, thematic analysis, content analysis, or theme extraction; analysis conducted entirely by humans)",
+    "R2-EC4": "Low-level or non-qualitative NLP task (sentiment analysis, text mining, information extraction, classification, tagging, or prediction without open coding/thematic synthesis)",
+    "R2-EC5": "Non-analytic or auxiliary LLM use only (writing/editing/summarization, chatbot responses, conducting interviews without analysis, generating plans or interventions)",
+    "R2-EC6": "Focus on LLM evaluation, perception, or interaction rather than analysis (user perceptions, human-AI interaction, chatbot experience, education/learning, system usability, consistency/bias/ethical reasoning evaluation without thematic synthesis)",
+    "R2-EC7": "Insufficient analytical depth — coding only without theme development, categorization, or interpretive synthesis",
+    "R2-EC8": "Lack of evaluation of LLM outputs (no validation, comparison, or assessment; unclear whether outputs are from LLMs or humans; themes generated without quality evaluation)",
+    "R2-EC9": "Methodological unclearity (unclear which LLM used, unclear how LLMs applied, unclear analytic workflow)",
+    "R2-EC10": "Platform/tool-only study (introduces platform using LLMs, reports only user feedback or usability, does not evaluate analytic performance)",
+    "R2-EC11": "Unclear eligibility (insufficient information to determine whether or how LLMs contributed to qualitative analysis)",
+}
+
 # Inclusion criteria codes
 INCLUSION_CODES = {
     "IC1": "LLM tool explicitly named and described",
