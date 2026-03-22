@@ -30,7 +30,7 @@ class ModelConfig(BaseSettings):
     # model_phase1_extraction: GPT-5 primary open extraction from methods + results
     # model_phase1_verification: smaller model for evidence verification (gpt-4o-mini)
     model_phase1_extraction: str = Field(default="gpt-5", env="MODEL_PHASE1_EXTRACTION")
-    model_phase1_verification: str = Field(default="gpt-4o-mini", env="MODEL_PHASE1_VERIFICATION")
+    model_phase1_verification: str = Field(default="gpt-4.1-mini", env="MODEL_PHASE1_VERIFICATION")
     phase1_output_dir: str = Field(default="data/extracted/phase1", env="PHASE1_OUTPUT_DIR")
 
     # Decision thresholds

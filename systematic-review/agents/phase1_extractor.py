@@ -3,7 +3,7 @@ Phase 1 Data Extraction Module.
 
 Two-step pipeline:
   Step 1 — GPT-5 open extraction from Methods + Results sections.
-  Step 2 — GPT-4o-mini (verification model) checks evidence alignment.
+  Step 2 — gpt-4.1-mini verification model checks evidence alignment.
 
 Outputs are saved separately so each step can be inspected / re-run:
   data/extracted/phase1/gpt5_extractions.jsonl   — Step 1 raw outputs
@@ -13,10 +13,9 @@ Outputs are saved separately so each step can be inspected / re-run:
 import json
 import logging
 import re
-import os
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 
 from .openai_client import get_client
 from .prompts import PHASE1_EXTRACTION_SYSTEM, PHASE1_EXTRACTION_USER
@@ -26,105 +25,259 @@ from config.settings import settings
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────────────────────
-# SECTION EXTRACTION UTILITIES
+# SECTION CATALOG
+# Each entry: canonical_name → list of bare keyword patterns (no anchors yet).
+# Anchors and number-prefix handling are added in _build_heading_re().
 # ─────────────────────────────────────────────
 
-# Ordered list of heading patterns that mark the start of Methods / Results.
-# Each tuple: (canonical_name, list_of_regex_patterns)
-_SECTION_PATTERNS = {
+_SECTION_CATALOG: Dict[str, List[str]] = {
+    "introduction": [
+        r"introduction",
+        r"background",
+        r"overview",
+        r"motivation",
+    ],
+    "related_work": [
+        r"related\s+work",
+        r"literature\s+review",
+        r"prior\s+work",
+        r"related\s+literature",
+    ],
     "methods": [
-        r"(?:^|\n)\s*(?:2\.?\s+)?(?:materials?\s+and\s+)?methods?\b",
-        r"(?:^|\n)\s*methodology\b",
-        r"(?:^|\n)\s*study\s+design\b",
-        r"(?:^|\n)\s*research\s+design\b",
-        r"(?:^|\n)\s*data\s+collection\s+(?:and\s+)?(?:analysis|procedure)",
-        r"(?:^|\n)\s*analytic\s+approach\b",
+        r"methods?",
+        r"methodology",
+        r"materials?\s+and\s+methods?",
+        r"study\s+design",
+        r"research\s+design",
+        r"experimental\s+(?:setup|design|procedure)",
+        r"data\s+collection(?:\s+and\s+(?:analysis|procedure))?",
+        r"analytic(?:al)?\s+(?:approach|framework|strategy|method)",
+        r"research\s+method(?:ology)?",
+        r"procedure[s]?",
+        r"participants?\s+and\s+(?:procedure|method)",
+        r"data\s+analysis(?:\s+approach)?",
+        r"coding\s+(?:procedure|process|approach)",
     ],
     "results": [
-        r"(?:^|\n)\s*(?:3\.?\s+)?results?\b",
-        r"(?:^|\n)\s*findings?\b",
-        r"(?:^|\n)\s*outcomes?\b",
+        r"results?",
+        r"findings?",
+        r"results?\s+and\s+discussion",
+        r"analysis(?:\s+and\s+(?:results?|findings?))?",
+        r"outcomes?",
+        r"empirical\s+(?:results?|findings?|analysis)",
+        r"main\s+(?:results?|findings?)",
+        r"themes?\s+and\s+(?:categories|findings?|results?)",
+        r"qualitative\s+(?:results?|findings?|analysis)",
+    ],
+    "discussion": [
+        r"discussion",
+        r"discussion\s+and\s+(?:conclusion[s]?|implication[s]?)",
+        r"implication[s]?",
+        r"interpretation[s]?",
+    ],
+    "conclusion": [
+        r"conclusion[s]?",
+        r"concluding\s+remarks?",
+        r"summary\s+and\s+conclusion[s]?",
+        r"final\s+remarks?",
+        r"summary",
+    ],
+    "limitations": [
+        r"limitation[s]?",
+        r"limitation[s]?\s+and\s+future\s+(?:work|direction[s]?|research)",
+        r"future\s+(?:work|direction[s]?|research)",
+    ],
+    "references": [
+        r"references?",
+        r"bibliography",
+        r"works?\s+cited",
+    ],
+    "acknowledgements": [
+        r"acknowledgements?",
+        r"acknowledgments?",
+        r"funding",
+    ],
+    "appendix": [
+        r"appendix",
+        r"appendices",
+        r"supplementary(?:\s+material[s]?)?",
+        r"supplemental(?:\s+material[s]?)?",
+    ],
+    "declarations": [
+        r"declarations?",
+        r"(?:competing\s+)?interests?",
+        r"conflicts?\s+of\s+interest[s]?",
+        r"data\s+availability(?:\s+statement)?",
+        r"ethics(?:\s+statement)?",
+        r"author\s+contributions?",
     ],
 }
 
-# Sections that typically follow Results — used to detect section end.
-_TRAILING_SECTIONS = [
-    r"(?:^|\n)\s*(?:4\.?\s+)?discussion\b",
-    r"(?:^|\n)\s*conclusion[s]?\b",
-    r"(?:^|\n)\s*limitation[s]?\b",
-    r"(?:^|\n)\s*references?\b",
-    r"(?:^|\n)\s*bibliography\b",
-    r"(?:^|\n)\s*acknowledgements?\b",
-    r"(?:^|\n)\s*appendix\b",
-    r"(?:^|\n)\s*declaration[s]?\b",
-]
-
-# Maximum characters to send per section (keeps API cost reasonable).
+# Maximum characters sent per section to the LLM (controls API cost).
 _MAX_SECTION_CHARS = 8_000
 
+# Keywords whose density signals methodology / results content (for fallback).
+_METHODS_KEYWORDS = [
+    "interview", "participant", "coding", "prompt", "llm", "gpt", "claude",
+    "sample", "recruited", "collected", "thematic", "inductive", "deductive",
+    "framework", "procedure", "analysis", "codebook", "researcher",
+]
+_RESULTS_KEYWORDS = [
+    "theme", "finding", "result", "category", "code", "pattern",
+    "identified", "emerged", "revealed", "showed", "reported", "table",
+    "figure", "percent", "majority", "participants described",
+]
 
-def _find_section(text: str, patterns: list[str]) -> Optional[int]:
-    """Return the character offset of the first pattern match, or None."""
-    earliest: Optional[int] = None
-    for pat in patterns:
-        m = re.search(pat, text, re.IGNORECASE | re.MULTILINE)
+
+# ─────────────────────────────────────────────
+# HEADING DETECTION
+# ─────────────────────────────────────────────
+
+def _build_heading_re(patterns: List[str]) -> re.Pattern:
+    """
+    Build a compiled regex that matches a heading line for the given patterns.
+
+    A valid heading line:
+      - Optionally starts with a section number like "2.", "2.1", "II."
+      - Is followed (optionally via whitespace) by one of the keyword patterns
+      - The entire line content (after stripping number prefix) is ≤ 80 chars
+        (prevents matching long sentences that happen to start with a keyword)
+      - Preceded by a line boundary (start of string or newline)
+    """
+    number_prefix = r"(?:\d+(?:\.\d+)*\.?\s+|[IVXivx]+\.\s+)?"
+    alts = "|".join(f"(?:{p})" for p in patterns)
+    # Full pattern: line start, optional number, keyword(s), end of short line
+    pat = (
+        r"(?:^|\n)"                        # line boundary
+        r"[ \t]*"                          # optional leading whitespace
+        + number_prefix +                  # optional "2." / "2.1." / "II."
+        r"(?:" + alts + r")"               # the keyword alternatives
+        r"[ \t]*(?::|\.)?[ \t]*$"          # optional trailing colon/period
+    )
+    return re.compile(pat, re.IGNORECASE | re.MULTILINE)
+
+
+# Pre-compile one regex per catalog entry
+_COMPILED: Dict[str, re.Pattern] = {
+    name: _build_heading_re(patterns)
+    for name, patterns in _SECTION_CATALOG.items()
+}
+
+
+def _find_all_headings(text: str) -> List[Tuple[int, str]]:
+    """
+    Scan the full text for all recognised section headings.
+    Returns a sorted list of (char_offset, canonical_section_name) tuples.
+    Only the first match of each canonical name is kept (deduplication).
+    """
+    found: Dict[str, int] = {}  # name -> offset
+
+    for name, pat in _COMPILED.items():
+        m = pat.search(text)
         if m:
-            if earliest is None or m.start() < earliest:
-                earliest = m.start()
-    return earliest
+            # Skip past the leading newline so the offset points to the heading text
+            offset = m.start() + (1 if text[m.start()] == "\n" else 0)
+            found[name] = offset
 
+    # Return as (offset, name) sorted by offset
+    return sorted(((pos, name) for name, pos in found.items()), key=lambda x: x[0])
+
+
+# ─────────────────────────────────────────────
+# KEYWORD-DENSITY FALLBACK
+# ─────────────────────────────────────────────
+
+def _density_fallback(text: str, keywords: List[str], window: int = 3000) -> str:
+    """
+    Slide a window over the text and return the window with the highest
+    keyword hit count.  Used when section headings cannot be found.
+    """
+    if not text:
+        return ""
+    lower = text.lower()
+    step = window // 2
+    best_score = -1
+    best_start = 0
+
+    for start in range(0, max(1, len(lower) - window + 1), step):
+        chunk = lower[start: start + window]
+        score = sum(chunk.count(kw) for kw in keywords)
+        if score > best_score:
+            best_score = score
+            best_start = start
+
+    return text[best_start: best_start + window].strip()
+
+
+# ─────────────────────────────────────────────
+# PUBLIC: extract_sections
+# ─────────────────────────────────────────────
 
 def extract_sections(fulltext: str) -> Tuple[str, str]:
     """
-    Parse Methods and Results sections from a full-text string.
+    Extract Methods and Results sections from a full-text string.
+
+    Strategy:
+      1. Find ALL recognised section headings and sort them by position.
+      2. For each target section (methods, results), the content runs from
+         its heading to the start of the next heading — no fixed length.
+      3. If a section heading is completely absent, use keyword-density
+         sliding-window search on the full text as a fallback.
+      4. Each section is capped at _MAX_SECTION_CHARS before being returned.
 
     Returns (methods_text, results_text).
-    Falls back to balanced halves of the full text if headings are not found.
-    Each section is capped at _MAX_SECTION_CHARS.
     """
     if not fulltext:
         return "", ""
 
-    methods_start = _find_section(fulltext, _SECTION_PATTERNS["methods"])
-    results_start = _find_section(fulltext, _SECTION_PATTERNS["results"])
+    # ── 1. Find all heading positions ─────────────────────────────────
+    headings = _find_all_headings(fulltext)   # [(offset, name), ...]
+    heading_positions = [pos for pos, _ in headings]
+    heading_names = {name: pos for pos, name in headings}
 
-    # ── Methods ──────────────────────────────────────────────────────────
-    if methods_start is not None:
-        # End of methods = start of results (if after) or first trailing section
-        candidates = []
-        if results_start is not None and results_start > methods_start:
-            candidates.append(results_start)
-        for pat in _TRAILING_SECTIONS:
-            m = re.search(pat, fulltext[methods_start:], re.IGNORECASE | re.MULTILINE)
-            if m:
-                candidates.append(methods_start + m.start())
-        methods_end = min(candidates) if candidates else methods_start + _MAX_SECTION_CHARS
-        methods_text = fulltext[methods_start:methods_end].strip()
+    def _slice_section(start_pos: int) -> str:
+        """Return text from start_pos to the next heading (or end of doc)."""
+        next_starts = [p for p in heading_positions if p > start_pos]
+        end_pos = min(next_starts) if next_starts else len(fulltext)
+        return fulltext[start_pos:end_pos].strip()
+
+    # ── 2. Methods ────────────────────────────────────────────────────
+    methods_text = ""
+    if "methods" in heading_names:
+        methods_text = _slice_section(heading_names["methods"])
+        logger.debug(f"[SectionParser] Methods found via heading at offset {heading_names['methods']}")
     else:
-        # Fallback: first half of text
-        mid = len(fulltext) // 2
-        methods_text = fulltext[:mid].strip()
+        methods_text = _density_fallback(fulltext, _METHODS_KEYWORDS)
+        logger.debug("[SectionParser] Methods heading not found — using keyword-density fallback")
 
-    # ── Results ──────────────────────────────────────────────────────────
-    if results_start is not None:
-        # End of results = first trailing section after results_start
-        candidates = []
-        for pat in _TRAILING_SECTIONS:
-            m = re.search(pat, fulltext[results_start:], re.IGNORECASE | re.MULTILINE)
-            if m:
-                candidates.append(results_start + m.start())
-        results_end = min(candidates) if candidates else results_start + _MAX_SECTION_CHARS
-        results_text = fulltext[results_start:results_end].strip()
+    # ── 3. Results ────────────────────────────────────────────────────
+    results_text = ""
+    if "results" in heading_names:
+        results_text = _slice_section(heading_names["results"])
+        logger.debug(f"[SectionParser] Results found via heading at offset {heading_names['results']}")
     else:
-        # Fallback: second half of text
-        mid = len(fulltext) // 2
-        results_text = fulltext[mid:].strip()
+        results_text = _density_fallback(fulltext, _RESULTS_KEYWORDS)
+        logger.debug("[SectionParser] Results heading not found — using keyword-density fallback")
 
-    # Truncate to safe API size
+    # ── 4. Truncate ───────────────────────────────────────────────────
     methods_text = methods_text[:_MAX_SECTION_CHARS]
     results_text = results_text[:_MAX_SECTION_CHARS]
 
     return methods_text, results_text
+
+
+def section_extraction_report(fulltext: str) -> Dict[str, Any]:
+    """
+    Diagnostic helper: return which headings were found and at what offsets.
+    Useful for inspecting / debugging section detection on a specific paper.
+    """
+    headings = _find_all_headings(fulltext)
+    return {
+        "headings_found": [{"section": name, "offset": pos} for pos, name in headings],
+        "methods_via_heading": any(n == "methods" for _, n in headings),
+        "results_via_heading": any(n == "results" for _, n in headings),
+        "total_chars": len(fulltext),
+    }
 
 
 # ─────────────────────────────────────────────
@@ -154,7 +307,7 @@ def _run_gpt5_extraction(
             model=settings.model_phase1_extraction,
             max_tokens=4000,
         )
-        raw["paper_id"] = paper_id  # ensure paper_id is set
+        raw["paper_id"] = paper_id
         raw["_meta"] = {
             "model": settings.model_phase1_extraction,
             "step": "gpt5_extraction",
@@ -177,7 +330,7 @@ def _run_gpt5_extraction(
 
 
 # ─────────────────────────────────────────────
-# STEP 2: VERIFICATION (gpt-4o-mini)
+# STEP 2: VERIFICATION (gpt-4.1-mini)
 # ─────────────────────────────────────────────
 
 def _run_verification(
@@ -187,12 +340,11 @@ def _run_verification(
     results_text: str,
 ) -> Dict[str, Any]:
     """
-    Run verification model against GPT-5 extraction + original sections.
+    Run the verification model against GPT-5 extraction + original sections.
     Returns the parsed JSON dict (or an error envelope on failure).
     """
     client = get_client()
 
-    # Serialize GPT-5 output neatly for the verification prompt
     gpt5_str = json.dumps(
         {k: v for k, v in gpt5_output.items() if not k.startswith("_")},
         indent=2,
@@ -265,12 +417,10 @@ def run_phase1_for_record(
 
     Steps:
       1. Parse Methods and Results sections from fulltext.
-      2. GPT-5 open extraction.
-      3. Verification model checks evidence alignment.
+      2. GPT-5 open extraction (Step 1).
+      3. Verification model checks evidence alignment (Step 2).
       4. Append each step's output to its dedicated JSONL file.
-      5. Return combined Phase 1 record (dict).
-
-    The combined record is also appended to phase1_complete.jsonl.
+      5. Return combined Phase 1 record.
     """
     out_dir = _ensure_phase1_dir()
     gpt5_path = out_dir / "gpt5_extractions.jsonl"
@@ -279,15 +429,21 @@ def run_phase1_for_record(
 
     paper_id = study_id or record_id
 
-    # ── 1. Extract sections ────────────────────────────────────────────
+    # ── 1. Section extraction ──────────────────────────────────────────
     methods_text, results_text = extract_sections(fulltext)
-    sections_found = {
+    report = section_extraction_report(fulltext)
+    sections_meta = {
         "methods_chars": len(methods_text),
         "results_chars": len(results_text),
+        "methods_via_heading": report["methods_via_heading"],
+        "results_via_heading": report["results_via_heading"],
+        "headings_found": [h["section"] for h in report["headings_found"]],
     }
     logger.info(
-        f"[Phase1] {paper_id}: methods={sections_found['methods_chars']} chars, "
-        f"results={sections_found['results_chars']} chars"
+        f"[Phase1] {paper_id}: methods={sections_meta['methods_chars']} chars "
+        f"(heading={sections_meta['methods_via_heading']}), "
+        f"results={sections_meta['results_chars']} chars "
+        f"(heading={sections_meta['results_via_heading']})"
     )
 
     # ── 2. GPT-5 extraction ────────────────────────────────────────────
@@ -307,9 +463,9 @@ def run_phase1_for_record(
         "paper_id": paper_id,
         "title": title,
         "phase": "phase1",
-        "sections_extracted": sections_found,
-        "gpt5_extraction": {k: v for k, v in gpt5_result.items() if not k.startswith("_meta")},
-        "verification": {k: v for k, v in verification_result.items() if not k.startswith("_meta")},
+        "sections_extracted": sections_meta,
+        "gpt5_extraction": {k: v for k, v in gpt5_result.items() if k != "_meta"},
+        "verification": {k: v for k, v in verification_result.items() if k != "_meta"},
         "extraction_model": settings.model_phase1_extraction,
         "verification_model": settings.model_phase1_verification,
         "completed_at": datetime.utcnow().isoformat(),
