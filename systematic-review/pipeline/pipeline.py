@@ -19,6 +19,7 @@ from .importer import load_all_from_directory, save_records, load_records
 from .deduplicator import deduplicate, filter_unique, save_deduped, load_deduped
 from agents.screener import screen_title_abstract, screen_fulltext, screen_second_pass, screen_fulltext_round2
 from agents.extractor import extract_and_assess
+from agents.phase1_extractor import run_phase1_for_record
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -826,6 +827,92 @@ class PipelineRunner:
         self.stage_log["extraction"] = {**counts, "completed_at": datetime.utcnow().isoformat()}
         self.running_stage = ""
         logger.info(f"Extraction complete: {counts}")
+        return counts
+
+    # ──────────────────────────────────────────────────
+    # PHASE 1: OPEN DATA EXTRACTION
+    # Step 1 – GPT-5 extracts from Methods + Results
+    # Step 2 – Verification model checks evidence alignment
+    # Outputs saved to data/extracted/phase1/
+    # ──────────────────────────────────────────────────
+
+    def run_phase1_extraction(self, limit: Optional[int] = None) -> Dict:
+        """
+        Run Phase 1 open extraction on all confirmed included studies that
+        have full text available.
+
+        Each paper produces two saved outputs:
+          • gpt5_extractions.jsonl  — GPT-5 open extraction (step 1)
+          • verifications.jsonl     — verification model output (step 2)
+          • phase1_complete.jsonl   — combined record
+
+        Records already present in phase1_complete.jsonl are skipped so the
+        method is safe to re-run after interruption.
+        """
+        from pathlib import Path as _Path
+        import json as _json
+
+        self.running_stage = "phase1_extraction"
+        logger.info("=== PHASE 1: DATA EXTRACTION ===")
+
+        included = [
+            pr for pr in self.records.values()
+            if pr.final_decision == DecisionLabel.INCLUDE
+            and pr.screened is not None
+            and pr.screened.fulltext_available
+        ]
+
+        if limit:
+            included = included[:limit]
+
+        # Build set of already-processed paper IDs to allow safe resume
+        complete_path = _Path(settings.phase1_output_dir) / "phase1_complete.jsonl"
+        already_done: set = set()
+        if complete_path.exists():
+            with open(complete_path, encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line:
+                        try:
+                            rec = _json.loads(line)
+                            pid = rec.get("record_id") or rec.get("paper_id")
+                            if pid:
+                                already_done.add(pid)
+                        except Exception:
+                            pass
+
+        counts = {"extracted": 0, "skipped_already_done": 0, "errors": 0}
+
+        for pr in included:
+            paper_id = pr.study_id or pr.record_id
+            if pr.record_id in already_done or paper_id in already_done:
+                counts["skipped_already_done"] += 1
+                continue
+
+            try:
+                pdf_path = pr.screened.pdf_path
+                fulltext = self._extract_pdf_text(pdf_path) if pdf_path else ""
+
+                run_phase1_for_record(
+                    record_id=pr.record_id,
+                    study_id=pr.study_id or "",
+                    title=pr.dedup.title if pr.dedup else "",
+                    fulltext=fulltext,
+                )
+                counts["extracted"] += 1
+
+            except Exception as e:
+                logger.error(f"[Phase1] Error for {pr.record_id}: {e}")
+                counts["errors"] += 1
+
+        self.stage_log["phase1_extraction"] = {
+            **counts,
+            "total_eligible": len(included),
+            "output_dir": str(settings.phase1_output_dir),
+            "completed_at": datetime.utcnow().isoformat(),
+        }
+        self.running_stage = ""
+        logger.info(f"Phase 1 extraction complete: {counts}")
         return counts
 
     # ──────────────────────────────────────────────────

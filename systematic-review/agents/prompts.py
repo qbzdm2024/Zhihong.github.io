@@ -682,6 +682,125 @@ Apply every criterion rigorously. Cite specific R2-EC or INCL codes. Provide key
 Return ONLY valid JSON."""
 
 
+# ─────────────────────────────────────────────
+# PHASE 1 DATA EXTRACTION
+# Step 1: GPT-5 open extraction from Methods + Results
+# Step 2: GPT-4o-mini verification of extraction
+# ─────────────────────────────────────────────
+
+PHASE1_EXTRACTION_SYSTEM = """You are an expert in qualitative research methods and systematic reviews.
+Your task is to extract detailed, evidence-based descriptions of how large language models (LLMs) are used for qualitative analysis in a research paper.
+
+IMPORTANT:
+- Do NOT assign predefined methodological categories.
+- Do NOT force labels such as thematic analysis or grounded theory unless explicitly stated.
+- Focus on describing processes, steps, and roles.
+- Use evidence from the text.
+- If information is missing, state "not reported".
+
+Return ONLY valid JSON matching the schema below. Do not include any text outside the JSON."""
+
+PHASE1_EXTRACTION_USER = """Analyze the following paper sections and extract detailed descriptions of LLM use in qualitative analysis.
+
+=== METHODS ===
+{methods_text}
+
+=== RESULTS ===
+{results_text}
+
+Return JSON:
+{{
+  "paper_id": "{paper_id}",
+  "llm_usage_overview": "",
+  "analysis_process": {{
+    "step_by_step_description": [],
+    "coding_process_description": "",
+    "theme_or_pattern_generation": "",
+    "iteration_or_refinement": "",
+    "human_involvement": ""
+  }},
+  "llm_details": {{
+    "model_name": "",
+    "prompting_strategy": "",
+    "input_data_type": "",
+    "unit_of_analysis": ""
+  }},
+  "evaluation": {{
+    "description": "",
+    "comparison": "",
+    "metrics": "",
+    "performance": ""
+  }},
+  "study_context": {{
+    "domain": "",
+    "sample_size": "",
+    "data_resources_or_type": "",
+    "is_preprint_arxiv": ""
+  }},
+  "key_phrases": [],
+  "evidence_quotes": []
+}}"""
+
+
+PHASE1_VERIFICATION_SYSTEM = """You are a research assistant trained in qualitative methods.
+Your task is to verify extracted information from a research paper.
+
+IMPORTANT RULES:
+- Do NOT re-summarize the paper
+- Do NOT assign categories
+- Do NOT introduce new interpretations unless necessary
+- ONLY verify whether the extracted information is supported by the text
+- Be conservative: if evidence is weak or missing, mark as "not supported" or "unclear"
+
+Your goal is to ensure accuracy and evidence alignment.
+
+Return ONLY valid JSON matching the schema below. Do not include any text outside the JSON."""
+
+PHASE1_VERIFICATION_USER = """Verify the following extracted information against the original paper sections.
+
+=== GPT-5 EXTRACTION ===
+{gpt5_output}
+
+=== METHODS ===
+{methods_text}
+
+=== RESULTS ===
+{results_text}
+
+Return JSON:
+{{
+  "paper_id": "{paper_id}",
+  "verification_results": {{
+    "llm_usage": {{
+      "supported": true,
+      "evidence_quote": "",
+      "issue": ""
+    }},
+    "analysis_process": {{
+      "supported": true,
+      "evidence_quote": "",
+      "issue": ""
+    }},
+    "human_involvement": {{
+      "supported": true,
+      "evidence_quote": "",
+      "issue": ""
+    }},
+    "evaluation": {{
+      "supported": true,
+      "evidence_quote": "",
+      "issue": ""
+    }}
+  }},
+  "missing_information": [],
+  "potential_overinterpretation": [],
+  "confidence_assessment": {{
+    "overall": "high / medium / low",
+    "reason": ""
+  }}
+}}"""
+
+
 ROUND2_FULLTEXT_COMPARISON_SYSTEM = """You are a meta-reviewer arbitrating two agents' SECOND-ROUND full-text screening decisions for a systematic review of LLMs in qualitative data analysis.
 
 This is a STRICT screening round. The goal is to exclude studies that do not meet the refined evaluation requirement (INCL-B): LLM-generated outputs must be evaluated in some interpretable way.
