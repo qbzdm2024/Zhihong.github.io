@@ -206,18 +206,23 @@ def _find_all_headings(text: str) -> List[Tuple[int, str]]:
     Returns a sorted list of (char_offset, canonical_section_name) tuples.
     Only the first match of each canonical name is kept (deduplication).
 
-    A match is accepted only if the heading line is preceded by a blank line
-    (or the start of the text).  This rejects PDF line-wrap artefacts where a
-    heading keyword appears as the last word on a wrapped continuation line.
+    PDF line-wrap artefacts (a keyword alone on a continuation line) are
+    rejected with the following heuristic:
+      - If the heading text starts with a digit (numbered section) or an
+        uppercase letter (Title Case heading), accept it unconditionally —
+        these forms are unambiguous section markers.
+      - If it starts with a lowercase letter, require a blank line before it
+        to rule out wrapped words (e.g. "subset of\\nresults\\nwith HDBSCAN").
     """
     found: Dict[str, int] = {}  # name -> offset
 
     for name, pat in _COMPILED.items():
         for m in pat.finditer(text):
-            if not _preceded_by_blank_line(text, m.start()):
-                continue  # line-wrap artefact — skip
-            # Skip past the leading newline so the offset points to the heading text
             offset = m.start() + (1 if text[m.start()] == "\n" else 0)
+            first_char = text[offset:offset + 1]
+            # Lowercase start → could be a wrapped word; require blank line before
+            if first_char.islower() and not _preceded_by_blank_line(text, m.start()):
+                continue
             found[name] = offset
             break  # keep only the first valid match
 
