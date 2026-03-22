@@ -49,7 +49,7 @@ _SECTION_CATALOG: Dict[str, List[str]] = {
         r"materials?\s+and\s+methods?",
         r"study\s+design",
         r"research\s+design",
-        r"experimental\s+(?:setup|design|procedure)",
+        r"experimental\s+(?:setup|design|procedure[s]?)",
         r"data\s+collection(?:\s+and\s+(?:analysis|procedure))?",
         r"analytic(?:al)?\s+(?:approach|framework|strategy|method)",
         r"research\s+method(?:ology)?",
@@ -57,17 +57,32 @@ _SECTION_CATALOG: Dict[str, List[str]] = {
         r"participants?\s+and\s+(?:procedure|method)",
         r"data\s+analysis(?:\s+approach)?",
         r"coding\s+(?:procedure|process|approach)",
+        # CS / NLP / computational paper section names
+        r"(?:our\s+)?approach",
+        r"(?:our\s+)?(?:proposed\s+)?(?:system|model|framework|pipeline|method)",
+        r"dataset(?:\s+and\s+(?:method|approach|setup))?",
+        r"data(?:\s+and\s+(?:method|setup|collection))?",
+        r"corpus(?:\s+and\s+(?:method|setup))?",
+        r"experimental\s+(?:evaluation|conditions?)",
+        r"(?:task|study)\s+(?:design|setup|description)",
+        r"(?:open|axial|inductive|deductive)\s+coding(?:\s+method)?",
+        r"qualitative\s+(?:method|procedure|coding|approach)",
+        r"(?:data|text)\s+(?:coding|annotation)\s+(?:process|procedure|approach)",
     ],
     "results": [
         r"results?",
         r"findings?",
         r"results?\s+and\s+discussion",
-        r"analysis(?:\s+and\s+(?:results?|findings?))?",
+        # NOTE: bare "analysis" removed — too generic, matches mid-paragraph in PDFs
+        r"analysis\s+and\s+(?:results?|findings?|discussion)",
         r"outcomes?",
         r"empirical\s+(?:results?|findings?|analysis)",
         r"main\s+(?:results?|findings?)",
         r"themes?\s+and\s+(?:categories|findings?|results?)",
         r"qualitative\s+(?:results?|findings?|analysis)",
+        r"evaluation(?:\s+results?)?",
+        r"experiments?\s+and\s+(?:results?|findings?|evaluation)",
+        r"performance(?:\s+results?)?",
     ],
     "discussion": [
         r"discussion",
@@ -187,10 +202,28 @@ def _find_all_headings(text: str) -> List[Tuple[int, str]]:
 # KEYWORD-DENSITY FALLBACK
 # ─────────────────────────────────────────────
 
-def _density_fallback(text: str, keywords: List[str], window: int = 3000) -> str:
+def _snap_to_paragraph(text: str, offset: int) -> int:
+    """
+    Snap an offset backwards to the start of its containing paragraph.
+    A paragraph boundary is two or more newlines (or start of text).
+    """
+    if offset <= 0:
+        return 0
+    # Search backwards for a blank line (\n\n or \n\r\n)
+    boundary = text.rfind("\n\n", 0, offset)
+    if boundary == -1:
+        # Try single newline as last resort
+        boundary = text.rfind("\n", 0, offset)
+    return boundary + 1 if boundary != -1 else 0
+
+
+def _density_fallback(text: str, keywords: List[str], window: int = 4000) -> str:
     """
     Slide a window over the text and return the window with the highest
     keyword hit count.  Used when section headings cannot be found.
+
+    The window start is snapped to the nearest paragraph boundary so the
+    returned text never begins mid-word or mid-sentence.
     """
     if not text:
         return ""
@@ -206,6 +239,8 @@ def _density_fallback(text: str, keywords: List[str], window: int = 3000) -> str
             best_score = score
             best_start = start
 
+    # Snap to paragraph boundary
+    best_start = _snap_to_paragraph(text, best_start)
     return text[best_start: best_start + window].strip()
 
 
