@@ -1083,6 +1083,201 @@ class PipelineRunner:
             "needs_human_extraction": needs_human_extraction,
         }
 
+    def get_full_prisma_report(self) -> Dict:
+        """Return a complete PRISMA 2020 report for publication.
+
+        Includes:
+        - Per-database record counts (source_db breakdown)
+        - All PRISMA flow counts (both screening rounds)
+        - Round-2 exclusion reasons grouped by R2-EC code with counts
+        - Formatted ASCII flowchart string ready to print / paste
+        """
+        from collections import Counter
+        from config.settings import ROUND2_EXCLUSION_CODES
+
+        p = self.get_prisma_counts()
+
+        # ── Source-database breakdown ─────────────────────────────────
+        all_db: Counter = Counter()
+        unique_db: Counter = Counter()
+        for pr in self.records.values():
+            d = pr.raw or pr.dedup
+            db = (d.source_db if d else None) or "Unknown"
+            all_db[db] += 1
+            if not (pr.dedup and pr.dedup.is_duplicate):
+                unique_db[db] += 1
+
+        # ── Round-2 exclusion reason breakdown ───────────────────────
+        r2_excl = [
+            pr for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.SECOND_FULLTEXT_SCREENING
+            and pr.final_decision == DecisionLabel.EXCLUDE
+            and pr.screened is not None
+            and pr.screened.second_fulltext_screening is not None
+        ]
+        ec_counter: Counter = Counter()
+        for pr in r2_excl:
+            r2 = pr.screened.second_fulltext_screening
+            # Human-overridden exclusion: prefer human note, fall back to agent code
+            code = None
+            if r2.human_verified and r2.human_decision == DecisionLabel.EXCLUDE:
+                # Try agent codes first (agents identified the reason)
+                code = (r2.agent1.exclusion_code if r2.agent1 else None) or \
+                       (r2.agent2.exclusion_code if r2.agent2 else None) or \
+                       "human_decision"
+            else:
+                code = (r2.agent1.exclusion_code if r2.agent1 else None) or \
+                       (r2.agent2.exclusion_code if r2.agent2 else None) or \
+                       "unknown"
+            ec_counter[code] += 1
+
+        # User-friendly label map
+        friendly = {
+            "R2-EC1": "Non-empirical / ineligible publication type",
+            "R2-EC2": "No real-world qualitative data (synthetic/simulated only)",
+            "R2-EC3": "LLM not used for qualitative analysis (no coding/thematic/content analysis)",
+            "R2-EC4": "Low-level NLP task (sentiment analysis, classification, text mining)",
+            "R2-EC5": "Non-analytic or auxiliary LLM use only (writing, chatbot, interview only)",
+            "R2-EC6": "Focus on LLM evaluation / perception / interaction, not analysis",
+            "R2-EC7": "Coding-only, no theme development or interpretive synthesis",
+            "R2-EC8": "No evaluation of LLM-generated outputs",
+            "R2-EC9": "Methodological unclearity (LLM role unclear)",
+            "R2-EC10": "Platform/tool-only study (no analytic performance evaluated)",
+            "R2-EC11": "Unclear eligibility",
+            "human_decision": "Human decision (exclusion reason noted in rationale)",
+            "unknown": "Exclusion code not recorded",
+        }
+
+        exclusion_reasons = [
+            {
+                "code": code,
+                "count": cnt,
+                "label": friendly.get(code, code),
+                "full_description": ROUND2_EXCLUSION_CODES.get(code, ""),
+            }
+            for code, cnt in sorted(ec_counter.items(), key=lambda x: -x[1])
+        ]
+
+        # ── Round-1 exclusion breakdown (title/abstract stage codes) ─
+        r1_excl = [
+            pr for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.FULLTEXT_SCREENING
+            and pr.final_decision == DecisionLabel.EXCLUDE
+            and pr.screened is not None
+            and pr.screened.fulltext_screening is not None
+        ]
+        r1_ec_counter: Counter = Counter()
+        for pr in r1_excl:
+            r1 = pr.screened.fulltext_screening
+            code = None
+            if r1.human_verified and r1.human_decision == DecisionLabel.EXCLUDE:
+                code = (r1.agent1.exclusion_code if r1.agent1 else None) or \
+                       (r1.agent2.exclusion_code if r1.agent2 else None) or \
+                       "human_decision"
+            else:
+                code = (r1.agent1.exclusion_code if r1.agent1 else None) or \
+                       (r1.agent2.exclusion_code if r1.agent2 else None) or \
+                       "unknown"
+            r1_ec_counter[code] += 1
+
+        r1_friendly = {
+            "EC-A": "Non-empirical or non-primary research",
+            "EC-B": "LLM not used for qualitative analysis",
+            "EC-C": "Code-only / low-level processing without synthesis",
+            "EC-D": "Non-qualitative or NLP-only tasks",
+            "EC-E": "Writing, assistance, or content generation only",
+            "EC-F": "Focus on user interaction/perception/evaluation of LLMs",
+            "EC-G": "Non-analytic or irrelevant LLM use cases",
+            "EC-H": "Misaligned research focus",
+            "human_decision": "Human decision",
+            "unknown": "Exclusion code not recorded",
+        }
+        r1_exclusion_reasons = [
+            {
+                "code": code,
+                "count": cnt,
+                "label": r1_friendly.get(code, code),
+            }
+            for code, cnt in sorted(r1_ec_counter.items(), key=lambda x: -x[1])
+        ]
+
+        # ── Formatted ASCII flowchart ─────────────────────────────────
+        flowchart = self._format_prisma_flowchart(p, all_db, exclusion_reasons)
+
+        return {
+            "prisma_counts": p,
+            "source_databases_all": dict(all_db),
+            "source_databases_unique": dict(unique_db),
+            "round1_total_excluded": len(r1_excl),
+            "round1_exclusion_by_reason": r1_exclusion_reasons,
+            "round2_total_excluded": len(r2_excl),
+            "round2_exclusion_by_reason": exclusion_reasons,
+            "prisma_flowchart_text": flowchart,
+        }
+
+    def _format_prisma_flowchart(self, p: Dict, db_counts: Dict, r2_reasons: list) -> str:
+        """Return a formatted ASCII PRISMA 2020 flowchart."""
+        # Database row
+        dbs = [(k, v) for k, v in sorted(db_counts.items(), key=lambda x: -x[1])]
+        db_cells = "  |  ".join(f"{k} (n={v})" for k, v in dbs)
+
+        # Round-2 exclusion list (sorted by count desc)
+        r2_excl_lines = "\n".join(
+            f"   • {r['label']} (n={r['count']})"
+            for r in r2_reasons if r['count'] > 0
+        ) or "   (none)"
+
+        ta = p.get("title_abstract_included", "?")
+        r1_passed = p.get("fulltext_r1_passed", "?")
+        final = p.get("final_included", "?")
+        r1_excl_n = p.get("fulltext_r1_excluded", "?")
+        r2_excl_n = p.get("fulltext_r2_excluded", "?")
+        r2_unc_n = p.get("fulltext_r2_uncertain", 0)
+        ft_retr = p.get("fulltext_retrieved", "?")
+        ft_need = p.get("full_text_needed", "?")
+
+        lines = [
+            "══════════════════════════════════════════════════════════",
+            "  PRISMA 2020 Flow Diagram",
+            "══════════════════════════════════════════════════════════",
+            "",
+            f"  DATABASES SEARCHED",
+            f"  {db_cells}",
+            f"  Total records identified: {p.get('identified', '?')}",
+            "",
+            f"  ↓  {p.get('duplicates_removed','?')} duplicates removed",
+            "",
+            f"  After deduplication: {p.get('after_dedup','?')} unique records",
+            "",
+            f"  ↓  {p.get('title_abstract_excluded','?')} excluded at title/abstract screening",
+            "",
+            f"  Full-text assessed for eligibility: {ta}",
+            f"  │  Retrieved: {ft_retr}",
+            f"  │  Not obtained (manual upload needed): {ft_need}",
+            "",
+            "  ─────────────────────────────────────────────────────────",
+            "  ROUND-1 FULL-TEXT SCREENING",
+            "  ─────────────────────────────────────────────────────────",
+            f"  ↓  {r1_excl_n} excluded at round-1 full-text screening",
+            "",
+            f"  Passed round-1 (sent to round-2): {r1_passed}",
+            "",
+            "  ─────────────────────────────────────────────────────────",
+            "  ROUND-2 FULL-TEXT SCREENING (refined criteria)",
+            "  ─────────────────────────────────────────────────────────",
+            f"  ↓  {r2_excl_n} excluded at round-2 full-text screening:",
+            r2_excl_lines,
+        ]
+        if r2_unc_n:
+            lines.append(f"  ↓  {r2_unc_n} resolved via human verification")
+        lines += [
+            "",
+            "  ══════════════════════════════════════════════════════",
+            f"  Studies included in final synthesis: {final}",
+            "  ══════════════════════════════════════════════════════",
+        ]
+        return "\n".join(lines)
+
     def export_evidence_table(self) -> List[Dict]:
         """Export final evidence table for included studies."""
         rows = []

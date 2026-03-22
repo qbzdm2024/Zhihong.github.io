@@ -608,6 +608,21 @@ async def get_prisma_snapshots():
     return {"snapshots": runner.get_prisma_snapshots()}
 
 
+@app.get("/api/prisma/report")
+async def get_full_prisma_report():
+    """Return complete PRISMA 2020 report with source DB breakdown,
+    round-1 and round-2 exclusion reason groupings, and formatted flowchart text."""
+    return runner.get_full_prisma_report()
+
+
+@app.get("/api/prisma/flowchart")
+async def get_prisma_flowchart():
+    """Return the formatted ASCII PRISMA flowchart as plain text."""
+    report = runner.get_full_prisma_report()
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse(report["prisma_flowchart_text"])
+
+
 # ─────────────────────────────────────────────────────
 # ROUND-2 FULL-TEXT SCREENING
 # ─────────────────────────────────────────────────────
