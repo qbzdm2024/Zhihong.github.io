@@ -179,20 +179,47 @@ _COMPILED: Dict[str, re.Pattern] = {
 }
 
 
+def _preceded_by_blank_line(text: str, match_start: int) -> bool:
+    """
+    Return True if the line containing match_start is preceded by a blank line
+    (or is at the very start of the text).  This filters out PDF line-wrap
+    artifacts where a keyword happens to land alone on a continuation line.
+    """
+    # Find start of the matched line (step back past the leading \\n if present)
+    line_start = match_start + (1 if match_start < len(text) and text[match_start] == "\n" else 0)
+
+    if line_start == 0:
+        return True  # very start of text
+
+    # Find the newline ending the previous line
+    prev_nl = text.rfind("\n", 0, line_start - 1)
+    if prev_nl == -1:
+        return True  # no prior newline → start of text
+
+    prev_line = text[prev_nl + 1 : line_start - 1]
+    return prev_line.strip() == ""
+
+
 def _find_all_headings(text: str) -> List[Tuple[int, str]]:
     """
     Scan the full text for all recognised section headings.
     Returns a sorted list of (char_offset, canonical_section_name) tuples.
     Only the first match of each canonical name is kept (deduplication).
+
+    A match is accepted only if the heading line is preceded by a blank line
+    (or the start of the text).  This rejects PDF line-wrap artefacts where a
+    heading keyword appears as the last word on a wrapped continuation line.
     """
     found: Dict[str, int] = {}  # name -> offset
 
     for name, pat in _COMPILED.items():
-        m = pat.search(text)
-        if m:
+        for m in pat.finditer(text):
+            if not _preceded_by_blank_line(text, m.start()):
+                continue  # line-wrap artefact — skip
             # Skip past the leading newline so the offset points to the heading text
             offset = m.start() + (1 if text[m.start()] == "\n" else 0)
             found[name] = offset
+            break  # keep only the first valid match
 
     # Return as (offset, name) sorted by offset
     return sorted(((pos, name) for name, pos in found.items()), key=lambda x: x[0])
