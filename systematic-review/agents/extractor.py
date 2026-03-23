@@ -83,8 +83,8 @@ def _parse_qa(raw: dict) -> QAScore:
 
 
 def _extract_single_agent(agent_id: str, model: str, title: str,
-                           fulltext: str) -> ExtractionResult:
-    """Run a single extraction agent."""
+                           fulltext: str) -> Tuple[ExtractionResult, dict]:
+    """Run a single extraction agent. Returns (result, usage)."""
     client = get_client()
     truncated = fulltext[:14000] if len(fulltext) > 14000 else fulltext
 
@@ -97,7 +97,7 @@ def _extract_single_agent(agent_id: str, model: str, title: str,
     )
 
     try:
-        raw, _ = client.chat_json(
+        raw, usage = client.chat_json(
             system_prompt=EXTRACTION_SYSTEM,
             user_prompt=user_prompt,
             model=model,
@@ -105,28 +105,28 @@ def _extract_single_agent(agent_id: str, model: str, title: str,
         )
         result = _parse_extraction(raw)
         logger.info(f"[{agent_id}] Extraction complete. Not reported: {result.not_reported_fields}")
-        return result
+        return result, usage or {}
     except Exception as e:
         logger.error(f"[{agent_id}] Extraction failed: {e}")
         return ExtractionResult(
             uncertain_fields=["ALL"],
             extraction_notes=f"Agent error: {e}"
-        )
+        ), {}
 
 
-def _qa_single_agent(agent_id: str, model: str, title: str, fulltext: str) -> QAScore:
-    """Run a single QA assessment agent."""
+def _qa_single_agent(agent_id: str, model: str, title: str, fulltext: str) -> Tuple[QAScore, dict]:
+    """Run a single QA assessment agent. Returns (score, usage)."""
     client = get_client()
     truncated = fulltext[:10000] if len(fulltext) > 10000 else fulltext
     user_prompt = QA_USER.format(title=title, fulltext=truncated)
 
     try:
-        raw, _ = client.chat_json(
+        raw, usage = client.chat_json(
             system_prompt=QA_SYSTEM,
             user_prompt=user_prompt,
             model=model,
         )
-        return _parse_qa(raw)
+        return _parse_qa(raw), usage or {}
     except Exception as e:
         logger.error(f"[{agent_id}] QA failed: {e}")
         return QAScore(
@@ -134,7 +134,7 @@ def _qa_single_agent(agent_id: str, model: str, title: str, fulltext: str) -> QA
             qa4_human_role_defined=0, qa5_validation_performed=0, qa6_results_detailed=0,
             qa7_limitations_acknowledged=0, qa8_data_adequate=0, qa9_reproducibility=0,
             qa10_ethics=0
-        )
+        ), {}
 
 
 def _compare_extractions(
@@ -233,38 +233,54 @@ def extract_and_assess(
     Full extraction + QA pipeline for one included study.
     Runs two extraction agents and two QA agents independently.
     """
+    def _add_usage(acc: dict, model: str, usage: dict) -> None:
+        """Accumulate token counts per model."""
+        if not usage:
+            return
+        entry = acc.setdefault(model, {"prompt_tokens": 0, "completion_tokens": 0})
+        entry["prompt_tokens"]     += usage.get("prompt_tokens", 0)
+        entry["completion_tokens"] += usage.get("completion_tokens", 0)
+
+    token_usage: Dict[str, Any] = {}
+
     # --- Extraction ---
-    e1 = _extract_single_agent(
+    e1, u1 = _extract_single_agent(
         agent_id=f"extract_agent1_{settings.model_extraction}",
         model=settings.model_extraction,
         title=title,
         fulltext=fulltext,
     )
     e1.study_id = study_id
+    _add_usage(token_usage, settings.model_extraction, u1)
 
-    e2 = _extract_single_agent(
+    e2, u2 = _extract_single_agent(
         agent_id=f"extract_agent2_{settings.model_agent2_extraction}",
         model=settings.model_agent2_extraction,
         title=title,
         fulltext=fulltext,
     )
     e2.study_id = study_id
+    _add_usage(token_usage, settings.model_agent2_extraction, u2)
 
     merged, disagreement_fields, needs_human = _compare_extractions(e1, e2)
 
     # --- QA Assessment ---
-    qa1 = _qa_single_agent(
+    qa1, uq1 = _qa_single_agent(
         agent_id=f"qa_agent1_{settings.model_qa_assessment}",
         model=settings.model_qa_assessment,
         title=title,
         fulltext=fulltext,
     )
-    qa2 = _qa_single_agent(
+    _add_usage(token_usage, settings.model_qa_assessment, uq1)
+
+    qa2, uq2 = _qa_single_agent(
         agent_id=f"qa_agent2_{settings.model_agent2_extraction}",
         model=settings.model_agent2_extraction,
         title=title,
         fulltext=fulltext,
     )
+    _add_usage(token_usage, settings.model_agent2_extraction, uq2)
+
     # Average QA scores
     qa_final = QAScore(
         qa1_llm_identified=round((qa1.qa1_llm_identified + qa2.qa1_llm_identified) / 2),
@@ -295,4 +311,5 @@ def extract_and_assess(
         human_verified=False,
         decision=final_decision,
         extraction_timestamp=datetime.utcnow(),
+        token_usage=token_usage,
     )

@@ -196,6 +196,7 @@ class ExtractedRecord(BaseModel):
     human_reviewer: Optional[str] = None
     extraction_timestamp: datetime = Field(default_factory=datetime.utcnow)
     decision: DecisionLabel = DecisionLabel.UNCERTAIN
+    token_usage: dict = Field(default_factory=dict)  # {model: {prompt, completion}}
 
 
 class PipelineRecord(BaseModel):
