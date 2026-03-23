@@ -129,7 +129,9 @@ _SECTION_CATALOG: Dict[str, List[str]] = {
 }
 
 # Maximum characters sent per section to the LLM (controls API cost).
-_MAX_SECTION_CHARS = 8_000
+# Raised from 8_000 → 25_000: academic Methods/Results sections routinely
+# exceed 8 k chars and were being silently truncated before reaching GPT.
+_MAX_SECTION_CHARS = 25_000
 
 # Keywords whose density signals methodology / results content (for fallback).
 _METHODS_KEYWORDS = [
