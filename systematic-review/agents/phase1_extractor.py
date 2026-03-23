@@ -251,7 +251,7 @@ def _snap_to_paragraph(text: str, offset: int) -> int:
     return boundary + 1 if boundary != -1 else 0
 
 
-def _density_fallback(text: str, keywords: List[str], window: int = 4000) -> str:
+def _density_fallback(text: str, keywords: List[str], window: int = 12_000) -> str:
     """
     Slide a window over the text and return the window with the highest
     keyword hit count.  Used when section headings cannot be found.
