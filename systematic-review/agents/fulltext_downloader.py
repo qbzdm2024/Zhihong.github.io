@@ -197,16 +197,40 @@ def _openalex_urls(doi: str) -> Tuple[Optional[str], Optional[str]]:
 # ─────────────────────────────────────────────────────────
 
 def _pmc_html_text(pmcid: str) -> Optional[str]:
-    """Fetch Europe PMC HTML full-text and convert to plain text."""
+    """Fetch Europe PMC XML full-text and convert to structured plain text.
+
+    Extracts only the <body> element from JATS/NLM XML so that article
+    metadata (journal IDs, author lists, PMC status fields) is excluded.
+    Section headings (<title>) and paragraphs (<p>) are converted to
+    blank-line-separated text so the heading detector in phase1_extractor
+    can reliably find Methods / Results headings.
+    """
     if not pmcid:
         return None
-    # Europe PMC provides XML full text for free
-    xml_url = (f"https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML")
+
+    # Europe PMC provides JATS XML full text for free
+    xml_url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
     r = _get(xml_url, accept="application/xml")
     if r and len(r.text) > 500:
-        # Strip XML tags → readable text
-        text = re.sub(r"<[^>]+>", " ", r.text)
-        text = re.sub(r"\s{2,}", " ", text).strip()
+        xml = r.text
+
+        # ── 1. Keep only the <body> block (skip <front> metadata) ──────────
+        body_m = re.search(r"<body\b[^>]*>(.*?)</body>", xml, re.DOTALL | re.IGNORECASE)
+        xml_body = body_m.group(1) if body_m else xml
+
+        # ── 2. Convert structural tags → blank lines before stripping ──────
+        # Section headings in JATS are <title>…</title> inside <sec> blocks.
+        xml_body = re.sub(r"<title\b[^>]*>", "\n\n", xml_body)
+        xml_body = re.sub(r"</title>", "\n", xml_body)
+        # Paragraph boundaries
+        xml_body = re.sub(r"</?p\b[^>]*>", "\n\n", xml_body)
+        # Section boundaries
+        xml_body = re.sub(r"</?sec\b[^>]*>", "\n\n", xml_body)
+
+        # ── 3. Strip remaining tags and normalise whitespace ────────────────
+        text = re.sub(r"<[^>]+>", " ", xml_body)
+        text = re.sub(r"[ \t]{2,}", " ", text)
+        text = re.sub(r"\n{3,}", "\n\n", text).strip()
         return text if len(text) > 200 else None
 
     # Fallback: NCBI PMC HTML
