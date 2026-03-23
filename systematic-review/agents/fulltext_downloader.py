@@ -214,24 +214,58 @@ def _pmc_html_text(pmcid: str) -> Optional[str]:
     if r and len(r.text) > 500:
         xml = r.text
 
-        # ── 1. Keep only the <body> block (skip <front> metadata) ──────────
-        body_m = re.search(r"<body\b[^>]*>(.*?)</body>", xml, re.DOTALL | re.IGNORECASE)
-        xml_body = body_m.group(1) if body_m else xml
+        # ── 1. Keep only the <body> block using XML parser ──────────────────
+        # Try lxml / ElementTree first (more reliable than regex on large docs)
+        xml_body: Optional[str] = None
+        try:
+            import xml.etree.ElementTree as ET
+            # Strip the DOCTYPE declaration if present (breaks stdlib ET)
+            xml_no_doctype = re.sub(r"<!DOCTYPE[^>]*>", "", xml, flags=re.DOTALL)
+            root = ET.fromstring(xml_no_doctype)
+            body_el = root.find(".//{http://dtd.nlm.nih.gov/publishing/2.3}body") \
+                      or root.find("body") \
+                      or root.find(".//body")
+            if body_el is not None:
+                xml_body = ET.tostring(body_el, encoding="unicode")
+        except Exception:
+            pass
 
-        # ── 2. Convert structural tags → blank lines before stripping ──────
-        # Section headings in JATS are <title>…</title> inside <sec> blocks.
-        xml_body = re.sub(r"<title\b[^>]*>", "\n\n", xml_body)
-        xml_body = re.sub(r"</title>", "\n", xml_body)
-        # Paragraph boundaries
-        xml_body = re.sub(r"</?p\b[^>]*>", "\n\n", xml_body)
-        # Section boundaries
-        xml_body = re.sub(r"</?sec\b[^>]*>", "\n\n", xml_body)
+        # Fallback: regex extraction of <body>…</body> block
+        if xml_body is None:
+            body_m = re.search(r"<body\b[^>]*>(.*?)</body>", xml, re.DOTALL | re.IGNORECASE)
+            if body_m:
+                xml_body = body_m.group(1)
 
-        # ── 3. Strip remaining tags and normalise whitespace ────────────────
-        text = re.sub(r"<[^>]+>", " ", xml_body)
-        text = re.sub(r"[ \t]{2,}", " ", text)
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()
-        return text if len(text) > 200 else None
+        # If we still have no body, refuse to save the metadata-only content
+        if not xml_body:
+            logger.warning("[PMC] No <body> found in XML for %s — skipping", pmcid)
+            xml_body = None
+            # fall through to NCBI HTML fallback below
+
+        if xml_body:
+            # ── 2. Convert structural tags → blank lines before stripping ──
+            xml_body = re.sub(r"<title\b[^>]*>", "\n\n", xml_body)
+            xml_body = re.sub(r"</title>", "\n", xml_body)
+            xml_body = re.sub(r"</?p\b[^>]*>", "\n\n", xml_body)
+            xml_body = re.sub(r"</?sec\b[^>]*>", "\n\n", xml_body)
+
+            # ── 3. Strip remaining tags and normalise whitespace ────────────
+            text = re.sub(r"<[^>]+>", " ", xml_body)
+            text = re.sub(r"[ \t]{2,}", " ", text)
+            text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+            # ── 4. Sanity-check: reject if it still looks like JATS metadata
+            sample = text[:400]
+            looks_like_metadata = (
+                bool(re.search(r"PMC\d{5,}", sample))
+                or "pmc-status-" in sample
+                or "&amp;" in sample
+                or "Writing – original draft" in sample
+                or "Writing - original draft" in sample
+            )
+            if not looks_like_metadata and len(text) > 200:
+                return text
+            logger.warning("[PMC] Extracted text still looks like metadata for %s — trying HTML fallback", pmcid)
 
     # Fallback: NCBI PMC HTML
     html_url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/{pmcid}/"
