@@ -78,6 +78,8 @@ async function loadDashboard() {
     setText('stat-r1-passed', p.fulltext_r1_passed ?? '—');
     setText('stat-r2-excluded', p.fulltext_r2_excluded ?? '—');
     setText('stat-final-included', p.final_included ?? '—');
+    setText('stat-final-extracted', p.final_extracted ?? '—');
+    setText('stat-needs-human-extraction', p.needs_human_extraction ?? '—');
     setText('stat-needs-human', p.needs_human_verification ?? '—');
 
     setBadge('badge-uncertain', p.needs_human_verification);
@@ -200,13 +202,35 @@ function renderPrismaFlow(p) {
     </div>
     `}
 
-    ${p.needs_human_verification > 0 ? `
+    ${(p.final_extracted > 0 || p.needs_human_extraction > 0) ? `
+    <div class="prisma-arrow">↓</div>
+
+    <!-- Row: Data Extraction -->
+    <div class="prisma-row">
+      <div class="prisma-box" style="border-color:#6c8eff;">
+        <div class="pbox-count" style="color:#6c8eff;">${n(p.final_extracted ?? 0)}</div>
+        <div class="pbox-label">Extraction Complete</div>
+      </div>
+      <div class="prisma-side">
+        ${(p.needs_human_extraction ?? 0) > 0
+          ? `<span style="color:var(--orange);">← ${n(p.needs_human_extraction)} pending human review<br><small>(agents disagreed on hard fields)</small></span>`
+          : `<span style="color:var(--green); font-size:11px;">✓ All agents agreed</span>`}
+      </div>
+    </div>
+    <div style="font-size:11px; color:var(--text-muted); text-align:center; margin:-4px 0 4px;">
+      extracted + pending review = ${n((p.final_extracted ?? 0) + (p.needs_human_extraction ?? 0))}
+      ${((p.final_extracted ?? 0) + (p.needs_human_extraction ?? 0)) === (p.final_included ?? 0)
+        ? `<span style="color:var(--green); font-size:11px;"> ✓ matches final included</span>`
+        : ''}
+    </div>
+    ` : ''}
+
+    ${p.needs_human_title_screening > 0 || p.needs_human_fulltext_screening > 0 || p.needs_human_round2_screening > 0 ? `
     <div class="mt-3" style="color:var(--orange); font-size:12px;">
-      ⚠ ${p.needs_human_verification} records pending human verification
+      ⚠ ${(p.needs_human_title_screening ?? 0) + (p.needs_human_fulltext_screening ?? 0) + (p.needs_human_round2_screening ?? 0)} screening records pending human verification
       (title: ${p.needs_human_title_screening ?? 0},
        round-1 FT: ${p.needs_human_fulltext_screening ?? 0},
-       round-2 FT: ${p.needs_human_round2_screening ?? 0},
-       extraction: ${p.needs_human_extraction ?? 0})
+       round-2 FT: ${p.needs_human_round2_screening ?? 0})
     </div>` : ''}
 
   </div>

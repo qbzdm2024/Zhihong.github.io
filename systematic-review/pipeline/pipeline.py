@@ -807,6 +807,19 @@ class PipelineRunner:
         study_counter = self._get_next_study_id()
         counts = {"extracted": 0, "uncertain": 0, "errors": 0}
 
+        # Resume: skip records already extracted in a previous run
+        included = [
+            pr for pr in included
+            if pr.pipeline_stage != PipelineStage.EXTRACTION or pr.extracted is None
+        ]
+        if not included and not record_id:
+            logger.info("All records already extracted — nothing to do.")
+            self.running_stage = ""
+            return counts
+
+        CHECKPOINT_EVERY = 5  # save state + CSVs after every N papers
+        processed = 0
+
         for pr in included:
             study_id = f"SR-{datetime.utcnow().year}-{study_counter:03d}"
             study_counter += 1
@@ -836,7 +849,14 @@ class PipelineRunner:
                 pr.update_stage(PipelineStage.EXTRACTION, DecisionLabel.UNCERTAIN)
                 counts["errors"] += 1
 
+            processed += 1
+            if processed % CHECKPOINT_EVERY == 0:
+                self._save_state()
+                self._save_checkpoint_csvs()
+                logger.info(f"Checkpoint at {processed} papers: {counts}")
+
         self._save_state()
+        self._save_checkpoint_csvs()
         self.stage_log["extraction"] = {**counts, "completed_at": datetime.utcnow().isoformat()}
         self.running_stage = ""
         logger.info(f"Extraction complete: {counts}")
@@ -1146,6 +1166,11 @@ class PipelineRunner:
             and pr.pipeline_stage == PipelineStage.EXTRACTION
         )
         needs_human = needs_human_title + needs_human_fulltext + needs_human_round2 + needs_human_extraction
+        final_extracted = sum(
+            1 for pr in self.records.values()
+            if pr.pipeline_stage == PipelineStage.EXTRACTION
+            and pr.final_decision == DecisionLabel.INCLUDE
+        )
 
         # Verification checks (logged for debugging)
         # fulltext_retrieved + fulltext_needed should equal title_screen_included
@@ -1175,6 +1200,8 @@ class PipelineRunner:
             "fulltext_r2_uncertain": fulltext_r2_uncertain,
             # Final
             "final_included": final_included,
+            # Extraction
+            "final_extracted": final_extracted,
             # Needs-human breakdown
             "needs_human_verification": needs_human,
             "needs_human_title_screening": needs_human_title,
@@ -1666,6 +1693,112 @@ class PipelineRunner:
                 shutil.copy2(STATE_FILE, drive_path)
             except Exception as e:
                 logger.warning(f"Drive sync failed: {e}")
+
+    def _save_checkpoint_csvs(self) -> None:
+        """Write the four extraction CSV files and sync to Drive.
+
+        Files written to <APP_DIR>/output/:
+          extraction_agent1.csv       — Agent 1 (GPT-5) raw fields
+          extraction_agent2.csv       — Agent 2 (GPT-5.4-mini) raw fields
+          extraction_merged.csv       — Merged/final result + agree flag
+          extraction_disagreements.csv — Field-level diff for every hard/soft disagreement
+        """
+        import csv as _csv
+        output_dir = os.path.join(os.path.dirname(STATE_FILE), "..", "output")
+        output_dir = os.path.normpath(output_dir)
+        os.makedirs(output_dir, exist_ok=True)
+
+        def _flat(val):
+            if isinstance(val, list):
+                return " || ".join(str(v) for v in val)
+            return val if val is not None else ""
+
+        rows_a1, rows_a2, rows_merged, rows_diff = [], [], [], []
+        HARD_FIELDS = {
+            "model_name", "workflow_structure", "analytic_task", "human_comparison",
+            "fine_tuned", "rag_used", "formal_methodology", "qualitative_approach",
+        }
+
+        for pr in self.records.values():
+            if pr.pipeline_stage != PipelineStage.EXTRACTION or pr.extracted is None:
+                continue
+            ext = pr.extracted
+            title = (pr.dedup.title if pr.dedup else None) or (pr.raw.title if pr.raw else "") or ""
+            base = {
+                "record_id": pr.record_id,
+                "study_id":  pr.study_id or ext.study_id or "",
+                "title":     title,
+            }
+
+            if ext.extraction_agent1:
+                row = {**base}
+                for k, v in ext.extraction_agent1.model_dump().items():
+                    row[k] = _flat(v)
+                rows_a1.append(row)
+
+            if ext.extraction_agent2:
+                row = {**base}
+                for k, v in ext.extraction_agent2.model_dump().items():
+                    row[k] = _flat(v)
+                rows_a2.append(row)
+
+            if ext.extraction_final:
+                row = {**base}
+                for k, v in ext.extraction_final.model_dump().items():
+                    row[k] = _flat(v)
+                row["disagreement_fields"] = " || ".join(ext.disagreement_fields)
+                row["agents_agree"]        = ext.agents_agree_extraction
+                row["human_verified"]      = ext.human_verified
+                rows_merged.append(row)
+
+            for field in ext.disagreement_fields:
+                a1_val = getattr(ext.extraction_agent1, field, None) if ext.extraction_agent1 else None
+                a2_val = getattr(ext.extraction_agent2, field, None) if ext.extraction_agent2 else None
+                mg_val = getattr(ext.extraction_final,  field, None) if ext.extraction_final  else None
+                rows_diff.append({
+                    "record_id":     pr.record_id,
+                    "title":         title[:80],
+                    "field":         field,
+                    "agent1":        _flat(a1_val),
+                    "agent2":        _flat(a2_val),
+                    "merged":        _flat(mg_val),
+                    "is_hard_field": field in HARD_FIELDS,
+                })
+
+        def _write_csv(path, rows):
+            if not rows:
+                return
+            with open(path, "w", newline="", encoding="utf-8") as f:
+                w = _csv.DictWriter(f, fieldnames=rows[0].keys(), extrasaction="ignore")
+                w.writeheader()
+                w.writerows(rows)
+
+        paths = {
+            "agent1":        os.path.join(output_dir, "extraction_agent1.csv"),
+            "agent2":        os.path.join(output_dir, "extraction_agent2.csv"),
+            "merged":        os.path.join(output_dir, "extraction_merged.csv"),
+            "disagreements": os.path.join(output_dir, "extraction_disagreements.csv"),
+        }
+        _write_csv(paths["agent1"],        rows_a1)
+        _write_csv(paths["agent2"],        rows_a2)
+        _write_csv(paths["merged"],        rows_merged)
+        _write_csv(paths["disagreements"], rows_diff)
+        logger.info(
+            f"Checkpoint CSVs saved: {len(rows_merged)} merged, "
+            f"{len(rows_diff)} disagreements → {output_dir}"
+        )
+
+        # Sync all four files to Drive if configured
+        drive_state = os.environ.get("DRIVE_STATE_FILE")
+        if drive_state:
+            drive_dir = os.path.dirname(drive_state)
+            try:
+                import shutil
+                for csv_path in paths.values():
+                    if os.path.exists(csv_path):
+                        shutil.copy2(csv_path, os.path.join(drive_dir, os.path.basename(csv_path)))
+            except Exception as e:
+                logger.warning(f"Drive CSV sync failed: {e}")
 
     def load_state(self):
         """Load records from state file."""
