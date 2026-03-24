@@ -18,6 +18,11 @@ Return JSON:
       "evidence_quote": "",
       "issue": ""
     }},
+    "analysis_stage": {{
+      "supported": true,
+      "evidence_quote": "",
+      "issue": ""
+    }},
     "analysis_process": {{
       "supported": true,
       "evidence_quote": "",

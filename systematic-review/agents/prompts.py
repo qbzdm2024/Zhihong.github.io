@@ -657,6 +657,16 @@ Return JSON:
     "temperature_or_params": "any reported generation parameters"
   }},
 
+  "analysis_stage": {{
+    "stages_involved": [
+      "list each qualitative analysis stage the LLM was used for — describe in the paper's own terms if possible",
+      "e.g. initial/open coding, focused coding, axial coding, code refinement, codebook development,",
+      "      theme generation, theme review/refinement, interpretation, member checking, etc."
+    ],
+    "stage_description": "brief narrative of which stage(s) the LLM covered and in what order",
+    "covers_full_analysis": "yes — LLM handled end-to-end / partial — LLM assisted specific stages only / not reported"
+  }},
+
   "analysis_process": {{
     "step_by_step_description": [
       "Step 1: ...",
@@ -735,6 +745,11 @@ Return JSON:
   "paper_id": "{paper_id}",
   "verification_results": {{
     "llm_usage": {{
+      "supported": true,
+      "evidence_quote": "",
+      "issue": ""
+    }},
+    "analysis_stage": {{
       "supported": true,
       "evidence_quote": "",
       "issue": ""
