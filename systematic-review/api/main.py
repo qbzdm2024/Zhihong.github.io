@@ -415,11 +415,32 @@ async def upload_pdfs_batch(files: List[UploadFile] = File(...)):
 async def register_pdfs_from_disk():
     """Scan data/pdfs/ and register every .pdf/.txt file found there.
 
-    This is the preferred bulk-upload path when files are copied directly
-    into data/pdfs/ (e.g. via Google Drive or scp).  Each file is matched
-    to a pipeline record by its stem (record_id or sanitised DOI).
+    Matching order for each file stem:
+      1. Exact record_id match
+      2. Sanitised-DOI match  (10.1016_j.foo… → original DOI)
+      3. Title similarity match (≥ 0.65 Jaccard on word tokens)
+
     Records in FULL_TEXT_NEEDED are promoted back to INCLUDE automatically.
     """
+    import unicodedata, re as _re
+
+    def _normalise(s: str) -> set:
+        """Lower-case, strip punctuation, return word-token set."""
+        s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
+        return set(_re.sub(r"[^a-z0-9 ]", " ", s.lower()).split())
+
+    def _jaccard(a: set, b: set) -> float:
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)
+
+    # Pre-build title token sets for all included records (cheap, done once)
+    title_index: list = []
+    for rec in runner.records.values():
+        d = rec.dedup or rec.raw
+        if d and d.title:
+            title_index.append((rec, _normalise(d.title)))
+
     pdf_dir = Path(settings.pdf_dir)
     if not pdf_dir.exists():
         return {"registered": 0, "unmatched": 0, "results": []}
@@ -432,9 +453,9 @@ async def register_pdfs_from_disk():
         stem = f.stem
         pr = runner.records.get(stem)
 
-        # Also try DOI reverse-lookup: "10.1016_j.foo.2024.101" → original DOI
+        # 2. DOI reverse-lookup
         if pr is None:
-            doi_candidate = stem.replace("_", "/", 1)  # restore first slash only
+            doi_candidate = stem.replace("_", "/", 1)
             for rec in runner.records.values():
                 d = rec.dedup or rec.raw
                 if d and d.doi:
@@ -443,13 +464,28 @@ async def register_pdfs_from_disk():
                         pr = rec
                         break
 
+        # 3. Title similarity fallback
+        if pr is None:
+            stem_tokens = _normalise(stem.replace("_", " ").replace("-", " "))
+            best_score, best_rec = 0.0, None
+            for rec, title_tokens in title_index:
+                score = _jaccard(stem_tokens, title_tokens)
+                if score > best_score:
+                    best_score, best_rec = score, rec
+            if best_score >= 0.65:
+                pr = best_rec
+
         if pr and pr.screened:
             pr.screened.pdf_path = str(f)
             pr.screened.fulltext_available = True
             if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED:
                 pr.final_decision = DecisionLabel.INCLUDE
             pr.updated_at = datetime.utcnow()
-            results.append({"file": f.name, "status": "registered", "record_id": pr.record_id})
+            results.append({
+                "file": f.name,
+                "status": "registered",
+                "record_id": pr.record_id,
+            })
         else:
             results.append({"file": f.name, "status": "unmatched"})
 

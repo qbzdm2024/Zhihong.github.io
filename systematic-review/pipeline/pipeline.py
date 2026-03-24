@@ -777,13 +777,12 @@ class PipelineRunner:
         """Run data extraction on confirmed included studies."""
         logger.info("=== STAGE: DATA EXTRACTION ===")
 
+        # Accept records at any pipeline stage as long as they are INCLUDE + have fulltext.
+        # This covers manually uploaded PDFs (still at TITLE_SCREENING) and papers that
+        # bypassed fulltext screening.
         included = [
             pr for pr in self.records.values()
             if pr.final_decision == DecisionLabel.INCLUDE
-            and pr.pipeline_stage in (
-                PipelineStage.FULLTEXT_SCREENING,
-                PipelineStage.SECOND_FULLTEXT_SCREENING,
-            )
             and pr.screened is not None
             and pr.screened.fulltext_available
         ]
