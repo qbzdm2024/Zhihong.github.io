@@ -17,54 +17,90 @@ from pipeline.models import (
 
 logger = logging.getLogger(__name__)
 
-# Fields where minor disagreement is tolerable (e.g., paraphrases of same content)
-SOFT_FIELDS = {"study_aim", "key_findings", "strengths_reported", "limitations_reported",
-               "human_oversight", "codebook_development", "extraction_notes"}
+# Fields where minor disagreement is tolerable (paraphrases of the same content)
+SOFT_FIELDS = {
+    "llm_usage_overview", "stage_description", "coding_process_description",
+    "theme_or_pattern_generation", "iteration_or_refinement", "human_involvement",
+    "agent_workflow", "evaluation_description", "evaluation_comparison",
+    "evaluation_qualitative", "extraction_notes",
+}
 
-# Fields where disagreement always flags human review
-HARD_FIELDS = {"model_name", "workflow_structure", "analytic_task", "human_comparison",
-               "fine_tuned", "rag_used", "formal_methodology", "qualitative_approach"}
+# Fields where disagreement flags human review
+HARD_FIELDS = {
+    "model_name", "stages_involved", "used_multiple_agents",
+    "evaluation_metrics", "evaluation_performance",
+    "covers_full_analysis", "prompting_strategy",
+}
 
 
 def _parse_extraction(raw: dict) -> ExtractionResult:
-    """Parse model JSON output into ExtractionResult, handling edge cases."""
-    # Ensure not_reported_fields and uncertain_fields are lists
-    raw["not_reported_fields"] = raw.get("not_reported_fields") or []
-    raw["uncertain_fields"] = raw.get("uncertain_fields") or []
+    """
+    Flatten nested JSON from the model into ExtractionResult fields.
+    The model returns nested objects (llm_details, analysis_stage, etc.);
+    we unpack them into top-level fields before constructing the model.
+    """
+    flat: dict = {}
 
-    # analytic_task should be a list
-    at = raw.get("analytic_task")
-    if isinstance(at, str):
-        raw["analytic_task"] = [at]
-    elif at is None:
-        raw["analytic_task"] = []
+    # Top-level scalar fields
+    flat["llm_usage_overview"]  = raw.get("llm_usage_overview")
+    flat["extraction_notes"]    = raw.get("extraction_notes")
+    flat["not_reported_fields"] = raw.get("not_reported_fields") or []
+    flat["uncertain_fields"]    = raw.get("uncertain_fields") or []
+    flat["key_phrases"]         = raw.get("key_phrases") or []
+    flat["evidence_quotes"]     = raw.get("evidence_quotes") or []
 
-    # Coerce year
-    year_raw = raw.get("year")
-    if year_raw is not None:
-        try:
-            raw["year"] = int(str(year_raw)[:4])
-        except (ValueError, TypeError):
-            raw["year"] = None
+    # analysis_stage block
+    stage = raw.get("analysis_stage") or {}
+    flat["stages_involved"]      = stage.get("stages_involved")
+    flat["stage_description"]    = stage.get("stage_description")
+    flat["covers_full_analysis"] = stage.get("covers_full_analysis")
 
-    # Coerce temperature
-    temp = raw.get("temperature")
-    if temp is not None:
-        try:
-            raw["temperature"] = float(temp)
-        except (ValueError, TypeError):
-            raw["temperature"] = None
+    # llm_details block
+    llm = raw.get("llm_details") or {}
+    flat["model_name"]           = llm.get("model_name")
+    flat["model_version"]        = llm.get("model_version")
+    flat["prompting_strategy"]   = llm.get("prompting_strategy")
+    flat["input_data_type"]      = llm.get("input_data_type")
+    flat["unit_of_analysis"]     = llm.get("unit_of_analysis")
+    flat["temperature_or_params"]= llm.get("temperature_or_params")
 
-    # reproducibility_score: clamp to 1-4
-    rs = raw.get("reproducibility_score")
-    if rs is not None:
-        try:
-            raw["reproducibility_score"] = max(1, min(4, int(rs)))
-        except (ValueError, TypeError):
-            raw["reproducibility_score"] = None
+    # analysis_process block
+    proc = raw.get("analysis_process") or {}
+    flat["step_by_step_description"]    = proc.get("step_by_step_description")
+    flat["coding_process_description"]  = proc.get("coding_process_description")
+    flat["theme_or_pattern_generation"] = proc.get("theme_or_pattern_generation")
+    flat["iteration_or_refinement"]     = proc.get("iteration_or_refinement")
+    flat["human_involvement"]           = proc.get("human_involvement")
+
+    # multi_agent_details block
+    ma = raw.get("multi_agent_details") or {}
+    flat["used_multiple_agents"] = ma.get("used_multiple_agents")
+    flat["agent_descriptions"]   = ma.get("agent_descriptions")
+    flat["agent_workflow"]       = ma.get("agent_workflow")
+
+    # evaluation block
+    ev = raw.get("evaluation") or {}
+    flat["evaluation_description"]  = ev.get("description")
+    flat["evaluation_comparison"]   = ev.get("comparison")
+    flat["evaluation_metrics"]      = ev.get("metrics")
+    flat["evaluation_performance"]  = ev.get("performance")
+    flat["evaluation_qualitative"]  = ev.get("qualitative_validation")
+
+    # study_context block
+    ctx = raw.get("study_context") or {}
+    flat["domain"]               = ctx.get("domain")
+    flat["sample_size"]          = ctx.get("sample_size")
+    flat["data_resources_or_type"] = ctx.get("data_resources_or_type")
+    flat["is_preprint_arxiv"]    = ctx.get("is_preprint_arxiv")
+
+    # Normalise "not reported" strings to None
+    _NR = {"not reported", "n/a", "na", "none", "null", ""}
+    for k, v in flat.items():
+        if isinstance(v, str) and v.strip().lower() in _NR:
+            flat[k] = None
 
     try:
-        return ExtractionResult(**{k: v for k, v in raw.items()
+        return ExtractionResult(**{k: v for k, v in flat.items()
                                    if k in ExtractionResult.model_fields})
     except Exception as e:
         logger.error(f"ExtractionResult parse error: {e}")
@@ -90,9 +126,6 @@ def _extract_single_agent(agent_id: str, model: str, title: str,
 
     user_prompt = EXTRACTION_USER.format(
         title=title,
-        authors="",
-        year="",
-        journal_venue="",
         fulltext=truncated,
     )
 

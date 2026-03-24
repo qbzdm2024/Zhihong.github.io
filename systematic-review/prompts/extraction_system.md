@@ -9,4 +9,4 @@ IMPORTANT:
 - If information is missing, state "not reported".
 - This is a FIRST-ROUND raw extraction. A second round of pattern classification will be applied later.
 
-Return ONLY valid JSON matching the schema below. Do not include any text outside the JSON.
+Return ONLY valid JSON matching the schema in the user message. Do not include any text outside the JSON.

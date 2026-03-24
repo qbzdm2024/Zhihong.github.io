@@ -115,81 +115,75 @@ class QAScore(BaseModel):
 
 
 class ExtractionResult(BaseModel):
-    """Extracted data fields from a single study."""
-    # Study characteristics
+    """
+    Raw extracted data from a single study — no forced categories.
+    A second round of pattern classification is applied later.
+    Fields mirror the extraction prompt schema (extraction_user.md).
+    """
     study_id: Optional[str] = None
-    title: Optional[str] = None
-    authors: Optional[str] = None
-    year: Optional[int] = None
-    journal_venue: Optional[str] = None
-    doi: Optional[str] = None
-    country: Optional[str] = None
-    discipline: Optional[str] = None
-    study_aim: Optional[str] = None
 
-    # Data and context
-    data_type: Optional[str] = None
-    sample_size: Optional[str] = None
-    corpus_size: Optional[str] = None
-    domain: Optional[str] = None
-    data_language: Optional[str] = None
+    # Overview
+    llm_usage_overview: Optional[str] = None
 
-    # LLM characteristics
+    # Which stage(s) of qualitative analysis the LLM was used for
+    stages_involved: Optional[List[str]] = None       # e.g. ["initial coding", "theme generation"]
+    stage_description: Optional[str] = None           # narrative of stages and order
+    covers_full_analysis: Optional[str] = None        # "end-to-end" / "partial" / "not reported"
+
+    # LLM details
     model_name: Optional[str] = None
-    model_type: Optional[str] = None  # proprietary/open-source
-    model_provider: Optional[str] = None
+    model_version: Optional[str] = None
     prompting_strategy: Optional[str] = None
-    prompt_provided: Optional[bool] = None
-    fine_tuned: Optional[bool] = None
-    rag_used: Optional[bool] = None
-    temperature: Optional[float] = None
+    input_data_type: Optional[str] = None
+    unit_of_analysis: Optional[str] = None
+    temperature_or_params: Optional[str] = None
 
-    # Qualitative analysis use
-    analytic_task: Optional[List[str]] = None
-    analysis_stage: Optional[str] = None
-    workflow_structure: Optional[str] = None
-    pipeline_type: Optional[str] = None
-    human_oversight: Optional[str] = None
+    # Analysis process
+    step_by_step_description: Optional[List[str]] = None
+    coding_process_description: Optional[str] = None
+    theme_or_pattern_generation: Optional[str] = None
+    iteration_or_refinement: Optional[str] = None
+    human_involvement: Optional[str] = None
 
-    # Methodological framework
-    qualitative_approach: Optional[str] = None
-    formal_methodology: Optional[bool] = None
-    codebook_development: Optional[str] = None
-    epistemological_stance: Optional[str] = None
+    # Multi-agent
+    used_multiple_agents: Optional[str] = None        # "yes" / "no" / "not reported"
+    agent_descriptions: Optional[List[dict]] = None   # [{agent_name_or_role, model_used, task}]
+    agent_workflow: Optional[str] = None
 
-    # Evaluation and validation
-    human_comparison: Optional[bool] = None
-    agreement_method: Optional[str] = None
-    agreement_score: Optional[str] = None
-    quantitative_metrics: Optional[str] = None
-    qualitative_validation: Optional[bool] = None
-    audit_trail: Optional[bool] = None
-    reflexivity: Optional[bool] = None
+    # Evaluation
+    evaluation_description: Optional[str] = None
+    evaluation_comparison: Optional[str] = None
+    evaluation_metrics: Optional[str] = None
+    evaluation_performance: Optional[str] = None
+    evaluation_qualitative: Optional[str] = None
 
-    # Outcomes
-    key_findings: Optional[str] = None
-    strengths_reported: Optional[str] = None
-    limitations_reported: Optional[str] = None
-    ethical_considerations: Optional[str] = None
-    reproducibility_score: Optional[int] = None  # 1–4
+    # Study context
+    domain: Optional[str] = None
+    sample_size: Optional[str] = None
+    data_resources_or_type: Optional[str] = None
+    is_preprint_arxiv: Optional[str] = None
+
+    # Verbatim evidence (for second-round classification)
+    key_phrases: Optional[List[str]] = None
+    evidence_quotes: Optional[List[str]] = None
 
     # Extraction metadata
     not_reported_fields: List[str] = Field(default_factory=list)
     uncertain_fields: List[str] = Field(default_factory=list)
     extraction_notes: Optional[str] = None
 
-    @field_validator("analytic_task", mode="before")
+    @field_validator("stages_involved", "step_by_step_description",
+                     "key_phrases", "evidence_quotes", mode="before")
     @classmethod
-    def coerce_analytic_task_to_list(cls, v):
+    def coerce_str_to_list(cls, v):
         if isinstance(v, str):
-            # split on " || " (Cell 8l format) or ", " (old GPT output format)
             sep = " || " if " || " in v else ", "
             return [item.strip() for item in v.split(sep) if item.strip()]
         return v
 
     @field_validator("not_reported_fields", "uncertain_fields", mode="before")
     @classmethod
-    def coerce_str_fields_to_list(cls, v):
+    def coerce_meta_list(cls, v):
         if isinstance(v, str):
             sep = " || " if " || " in v else ", "
             return [item.strip() for item in v.split(sep) if item.strip()]

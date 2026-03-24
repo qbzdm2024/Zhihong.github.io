@@ -360,9 +360,95 @@ RESPONSE FORMAT (strict JSON):
 
 
 # ─────────────────────────────────────────────
-# DATA EXTRACTION  (aliases — see PHASE 1 section below)
-# Edit prompts directly on GitHub in prompts/extraction_system.md etc.
+# DATA EXTRACTION
+# Loaded from prompts/extraction_system.md and prompts/extraction_user.md
+# Edit those files directly on GitHub — changes take effect on next server start.
+# Template variables in extraction_user.md: {title}, {fulltext}
 # ─────────────────────────────────────────────
+
+_EXTRACTION_SYSTEM_FALLBACK = """You are an expert in qualitative research methods and systematic reviews.
+Your task is to extract detailed, evidence-based descriptions of how large language models (LLMs) are used for qualitative analysis in a research paper.
+
+IMPORTANT:
+- Do NOT assign predefined methodological categories.
+- Do NOT force labels such as "thematic analysis" or "grounded theory" unless the paper explicitly states them.
+- Focus on describing processes, steps, and roles in your own words or using brief quotes.
+- Use evidence from the text — prefer short verbatim snippets where helpful.
+- If information is missing, state "not reported".
+- This is a FIRST-ROUND raw extraction. A second round of pattern classification will be applied later.
+
+Return ONLY valid JSON matching the schema in the user message. Do not include any text outside the JSON."""
+
+_EXTRACTION_USER_FALLBACK = """Extract detailed, evidence-based information about LLM use in qualitative analysis from the paper below.
+
+TITLE: {title}
+
+FULL TEXT:
+{fulltext}
+
+Return JSON:
+{{
+  "llm_usage_overview": "1-3 sentence summary of what the LLM was used for in the analysis",
+
+  "analysis_stage": {{
+    "stages_involved": [
+      "list each qualitative analysis stage the LLM was used for, in the paper's own terms",
+      "e.g. initial/open coding, focused coding, codebook development, theme generation, theme refinement, interpretation"
+    ],
+    "stage_description": "brief narrative of which stage(s) and in what order",
+    "covers_full_analysis": "end-to-end — LLM handled all stages / partial — LLM assisted specific stages / not reported"
+  }},
+
+  "llm_details": {{
+    "model_name": "exact model name(s) as stated, e.g. GPT-4, Claude 3, Llama 2",
+    "model_version": "version or checkpoint if reported, else not reported",
+    "prompting_strategy": "brief description — zero-shot, few-shot, chain-of-thought, custom system prompt, etc.",
+    "input_data_type": "what was fed to the LLM — interview transcripts, survey responses, field notes, etc.",
+    "unit_of_analysis": "what the LLM processed per call — full transcript, paragraph, sentence, etc.",
+    "temperature_or_params": "any reported generation parameters, else not reported"
+  }},
+
+  "analysis_process": {{
+    "step_by_step_description": ["Step 1: ...", "Step 2: ..."],
+    "coding_process_description": "how codes or categories were generated or applied",
+    "theme_or_pattern_generation": "how themes or higher-level patterns were derived, if applicable",
+    "iteration_or_refinement": "any iterative or multi-pass processes described",
+    "human_involvement": "what humans did — reviewing, correcting, validating, prompting, etc."
+  }},
+
+  "multi_agent_details": {{
+    "used_multiple_agents": "yes / no / not reported",
+    "agent_descriptions": [
+      {{"agent_name_or_role": "e.g. Coder Agent", "model_used": "model name if specified", "task": "what this agent does"}}
+    ],
+    "agent_workflow": "how agents interact or pass outputs to each other, else not reported"
+  }},
+
+  "evaluation": {{
+    "description": "brief summary of how the LLM analysis outputs were evaluated",
+    "comparison": "compared to human coders or another baseline? describe briefly, else not reported",
+    "metrics": "exact metric names — e.g. Cohen's kappa, percent agreement, F1, IRR, else not reported",
+    "performance": "actual scores — e.g. kappa=0.82, 91% agreement, else not reported",
+    "qualitative_validation": "any qualitative validation beyond numbers, else not reported"
+  }},
+
+  "study_context": {{
+    "domain": "research domain — e.g. healthcare, education, social media",
+    "sample_size": "number of participants or texts analyzed",
+    "data_resources_or_type": "description of the qualitative data corpus",
+    "is_preprint_arxiv": "yes / no / not reported"
+  }},
+
+  "key_phrases": ["short verbatim phrases characterizing the LLM role or method"],
+  "evidence_quotes": ["direct quotes from the paper supporting the extraction"],
+
+  "not_reported_fields": ["field names not found in the paper"],
+  "uncertain_fields": ["field names with weak or ambiguous evidence"],
+  "extraction_notes": "any notes about difficult or borderline extractions"
+}}"""
+
+EXTRACTION_SYSTEM = _load_prompt("extraction_system.md", _EXTRACTION_SYSTEM_FALLBACK)
+EXTRACTION_USER   = _load_prompt("extraction_user.md",   _EXTRACTION_USER_FALLBACK)
 
 
 # ─────────────────────────────────────────────
@@ -789,14 +875,10 @@ Return JSON:
 }}"""
 
 # Load from editable files (falls back to hardcoded strings if files missing)
-PHASE1_EXTRACTION_SYSTEM  = _load_prompt("extraction_system.md",   _PHASE1_EXTRACTION_SYSTEM_FALLBACK)
-PHASE1_EXTRACTION_USER    = _load_prompt("extraction_user.md",     _PHASE1_EXTRACTION_USER_FALLBACK)
+PHASE1_EXTRACTION_SYSTEM   = _load_prompt("extraction_system.md",   _PHASE1_EXTRACTION_SYSTEM_FALLBACK)
+PHASE1_EXTRACTION_USER     = _load_prompt("extraction_user.md",     _PHASE1_EXTRACTION_USER_FALLBACK)
 PHASE1_VERIFICATION_SYSTEM = _load_prompt("verification_system.md", _PHASE1_VERIFICATION_SYSTEM_FALLBACK)
 PHASE1_VERIFICATION_USER   = _load_prompt("verification_user.md",   _PHASE1_VERIFICATION_USER_FALLBACK)
-
-# Aliases for backward compatibility
-EXTRACTION_SYSTEM = PHASE1_EXTRACTION_SYSTEM
-EXTRACTION_USER   = PHASE1_EXTRACTION_USER
 
 
 ROUND2_FULLTEXT_COMPARISON_SYSTEM = """You are a meta-reviewer arbitrating two agents' SECOND-ROUND full-text screening decisions for a systematic review of LLMs in qualitative data analysis.
