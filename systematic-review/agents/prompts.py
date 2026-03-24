@@ -360,106 +360,9 @@ RESPONSE FORMAT (strict JSON):
 
 
 # ─────────────────────────────────────────────
-# DATA EXTRACTION
-# Loaded from prompts/extraction_system.md and prompts/extraction_user.md
-# Edit those files directly on GitHub to change fields or instructions.
+# DATA EXTRACTION  (aliases — see PHASE 1 section below)
+# Edit prompts directly on GitHub in prompts/extraction_system.md etc.
 # ─────────────────────────────────────────────
-
-_EXTRACTION_SYSTEM_FALLBACK = """You are an expert data extractor for a systematic review on LLMs in qualitative data analysis.
-
-Your task is to extract structured information from an included study following a standardized data extraction form.
-
-EXTRACTION RULES:
-1. Extract VERBATIM when possible for text fields
-2. If a field is not reported in the paper, set it to null and add the field name to "not_reported_fields"
-3. If you are UNCERTAIN about a field value, add the field name to "uncertain_fields" with a note
-4. NEVER infer, guess, or fabricate information
-5. For boolean fields: true/false/null (null = not mentioned)
-6. For controlled vocabulary fields: use exact options or "Other" or "Not specified"
-
-CONTROLLED VOCABULARY:
-- discipline: Healthcare / Education / HCI / Social Science / Computer Science / Other
-- domain: Healthcare / Education / HCI / Psychology / Sociology / Computer Science / Other
-- data_type: Interviews / Focus groups / Documents / Social media / Survey responses / Field notes / Mixed / Other
-- model_type: Proprietary / Open-source / Not specified
-- model_provider: OpenAI / Anthropic / Meta / Google / Microsoft / Other / Not specified
-- prompting_strategy: Zero-shot / Few-shot / Chain-of-thought / System prompt / Mixed / Other / Not specified
-- workflow_structure: Human-led (AI assists) / Human-in-the-loop / AI-led (human verifies) / Fully automated / Not specified
-- pipeline_type: Single-step / Multi-step / Multi-agent / Not specified
-- analysis_stage: Full analysis / Preliminary coding / Code verification / Theme review / Mixed / Not specified
-- reproducibility_score: 1 (None) / 2 (Partial) / 3 (Most) / 4 (Full)
-
-ANALYTIC TASKS (multi-select, use list):
-Inductive coding, Deductive coding, Codebook development, Codebook application,
-Thematic analysis, Content analysis, Grounded theory coding, Framework analysis,
-Narrative analysis, Discourse analysis, Interpretive phenomenological analysis, Other
-
-RESPONSE FORMAT (strict JSON matching ExtractionResult schema):
-{
-  "title": "...",
-  "authors": "...",
-  "year": 2024,
-  "journal_venue": "...",
-  "doi": "...",
-  "country": "...",
-  "discipline": "...",
-  "study_aim": "...",
-  "data_type": "...",
-  "sample_size": "...",
-  "corpus_size": "...",
-  "domain": "...",
-  "data_language": "...",
-  "model_name": "...",
-  "model_type": "...",
-  "model_provider": "...",
-  "prompting_strategy": "...",
-  "prompt_provided": true|false|null,
-  "fine_tuned": true|false|null,
-  "rag_used": true|false|null,
-  "temperature": null,
-  "analytic_task": ["Thematic analysis", "Inductive coding"],
-  "analysis_stage": "...",
-  "workflow_structure": "...",
-  "pipeline_type": "...",
-  "human_oversight": "...",
-  "qualitative_approach": "...",
-  "formal_methodology": true|false|null,
-  "codebook_development": "...",
-  "epistemological_stance": "...",
-  "human_comparison": true|false|null,
-  "agreement_method": "...",
-  "agreement_score": "...",
-  "quantitative_metrics": "...",
-  "qualitative_validation": true|false|null,
-  "audit_trail": true|false|null,
-  "reflexivity": true|false|null,
-  "key_findings": "...",
-  "strengths_reported": "...",
-  "limitations_reported": "...",
-  "ethical_considerations": "...",
-  "reproducibility_score": 1|2|3|4,
-  "not_reported_fields": ["field1", "field2"],
-  "uncertain_fields": ["field3"],
-  "extraction_notes": "Any notes about difficult or borderline extractions"
-}
-"""
-
-_EXTRACTION_USER_FALLBACK = """Extract structured data from this included study.
-
-TITLE: {title}
-AUTHORS: {authors}
-YEAR: {year}
-JOURNAL/VENUE: {journal_venue}
-
-FULL TEXT (or available sections):
-{fulltext}
-
-Follow all extraction rules strictly. Use null for unreported fields.
-Return ONLY valid JSON."""
-
-# Load from editable files (falls back to hardcoded strings if files missing)
-EXTRACTION_SYSTEM = _load_prompt("extraction_system.md", _EXTRACTION_SYSTEM_FALLBACK)
-EXTRACTION_USER   = _load_prompt("extraction_user.md",   _EXTRACTION_USER_FALLBACK)
 
 
 # ─────────────────────────────────────────────
@@ -710,21 +613,28 @@ Return ONLY valid JSON."""
 # PHASE 1 DATA EXTRACTION
 # Step 1: GPT-5 open extraction from Methods + Results
 # Step 2: GPT-4o-mini verification of extraction
+#
+# Edit prompts directly on GitHub:
+#   prompts/extraction_system.md  — extraction system prompt
+#   prompts/extraction_user.md    — extraction user template
+#   prompts/verification_system.md — verification system prompt
+#   prompts/verification_user.md   — verification user template
 # ─────────────────────────────────────────────
 
-PHASE1_EXTRACTION_SYSTEM = """You are an expert in qualitative research methods and systematic reviews.
+_PHASE1_EXTRACTION_SYSTEM_FALLBACK = """You are an expert in qualitative research methods and systematic reviews.
 Your task is to extract detailed, evidence-based descriptions of how large language models (LLMs) are used for qualitative analysis in a research paper.
 
 IMPORTANT:
 - Do NOT assign predefined methodological categories.
-- Do NOT force labels such as thematic analysis or grounded theory unless explicitly stated.
-- Focus on describing processes, steps, and roles.
-- Use evidence from the text.
+- Do NOT force labels such as "thematic analysis" or "grounded theory" unless the paper explicitly states them.
+- Focus on describing processes, steps, and roles in your own words or using brief quotes.
+- Use evidence from the text — prefer short verbatim snippets where helpful.
 - If information is missing, state "not reported".
+- This is a FIRST-ROUND raw extraction. A second round of pattern classification will be applied later.
 
 Return ONLY valid JSON matching the schema below. Do not include any text outside the JSON."""
 
-PHASE1_EXTRACTION_USER = """Analyze the following paper sections and extract detailed descriptions of LLM use in qualitative analysis.
+_PHASE1_EXTRACTION_USER_FALLBACK = """Analyze the following paper sections and extract detailed descriptions of LLM use in qualitative analysis.
 
 === METHODS ===
 {methods_text}
@@ -735,38 +645,67 @@ PHASE1_EXTRACTION_USER = """Analyze the following paper sections and extract det
 Return JSON:
 {{
   "paper_id": "{paper_id}",
-  "llm_usage_overview": "",
-  "analysis_process": {{
-    "step_by_step_description": [],
-    "coding_process_description": "",
-    "theme_or_pattern_generation": "",
-    "iteration_or_refinement": "",
-    "human_involvement": ""
-  }},
+
+  "llm_usage_overview": "1-3 sentence summary of what the LLM was used for in the analysis",
+
   "llm_details": {{
-    "model_name": "",
-    "prompting_strategy": "",
-    "input_data_type": "",
-    "unit_of_analysis": ""
+    "model_name": "exact model name(s) as stated in the paper, e.g. GPT-4, Claude 3, Llama 2",
+    "model_version": "version or checkpoint if reported, else not reported",
+    "prompting_strategy": "brief description of how the model was prompted — zero-shot, few-shot with examples, chain-of-thought, custom system prompt, etc.",
+    "input_data_type": "what was fed to the LLM — interview transcripts, survey responses, field notes, etc.",
+    "unit_of_analysis": "what the LLM processed per call — full transcript, paragraph, sentence, code segment, etc.",
+    "temperature_or_params": "any reported generation parameters"
   }},
+
+  "analysis_process": {{
+    "step_by_step_description": [
+      "Step 1: ...",
+      "Step 2: ..."
+    ],
+    "coding_process_description": "how codes or categories were generated or applied",
+    "theme_or_pattern_generation": "how themes or higher-level patterns were derived, if applicable",
+    "iteration_or_refinement": "any iterative or multi-pass processes described",
+    "human_involvement": "what humans did in the loop — reviewing, correcting, validating, prompting, etc."
+  }},
+
+  "multi_agent_details": {{
+    "used_multiple_agents": "yes / no / not reported",
+    "agent_descriptions": [
+      {{
+        "agent_name_or_role": "e.g. Extraction Agent, Verification Agent",
+        "model_used": "model name if different per agent",
+        "task": "brief description of what this agent does"
+      }}
+    ],
+    "agent_workflow": "brief description of how agents interact or pass outputs to each other"
+  }},
+
   "evaluation": {{
-    "description": "",
-    "comparison": "",
-    "metrics": "",
-    "performance": ""
+    "description": "brief summary of how the LLM analysis outputs were evaluated",
+    "comparison": "was it compared to human coders or another baseline? describe briefly",
+    "metrics": "exact metric names reported — e.g. Cohen's kappa, percent agreement, F1, IRR",
+    "performance": "actual scores or values reported — e.g. kappa=0.82, 91% agreement",
+    "qualitative_validation": "any qualitative or interpretive validation described beyond numbers"
   }},
+
   "study_context": {{
-    "domain": "",
-    "sample_size": "",
-    "data_resources_or_type": "",
-    "is_preprint_arxiv": ""
+    "domain": "research domain or field — e.g. healthcare, education, social media",
+    "sample_size": "number of participants or texts analyzed",
+    "data_resources_or_type": "description of the qualitative data corpus",
+    "is_preprint_arxiv": "yes / no / not reported"
   }},
-  "key_phrases": [],
-  "evidence_quotes": []
+
+  "key_phrases": [
+    "short verbatim phrases that best characterize the LLM role or method"
+  ],
+
+  "evidence_quotes": [
+    "direct quotes from the paper that best support the extraction above"
+  ]
 }}"""
 
 
-PHASE1_VERIFICATION_SYSTEM = """You are a research assistant trained in qualitative methods.
+_PHASE1_VERIFICATION_SYSTEM_FALLBACK = """You are a research assistant trained in qualitative methods.
 Your task is to verify extracted information from a research paper.
 
 IMPORTANT RULES:
@@ -780,9 +719,9 @@ Your goal is to ensure accuracy and evidence alignment.
 
 Return ONLY valid JSON matching the schema below. Do not include any text outside the JSON."""
 
-PHASE1_VERIFICATION_USER = """Verify the following extracted information against the original paper sections.
+_PHASE1_VERIFICATION_USER_FALLBACK = """You are given an extraction produced by another model. Verify it against the original paper sections.
 
-=== GPT-5 EXTRACTION ===
+=== EXTRACTION ===
 {gpt5_output}
 
 === METHODS ===
@@ -810,19 +749,39 @@ Return JSON:
       "evidence_quote": "",
       "issue": ""
     }},
+    "multi_agent_details": {{
+      "supported": true,
+      "evidence_quote": "",
+      "issue": ""
+    }},
     "evaluation": {{
       "supported": true,
       "evidence_quote": "",
       "issue": ""
     }}
   }},
-  "missing_information": [],
-  "potential_overinterpretation": [],
+  "missing_information": [
+    "information claimed in extraction but not found in text",
+    "important details not reported in the paper"
+  ],
+  "potential_overinterpretation": [
+    "cases where the extraction inferred too much beyond what is stated"
+  ],
   "confidence_assessment": {{
     "overall": "high / medium / low",
     "reason": ""
   }}
 }}"""
+
+# Load from editable files (falls back to hardcoded strings if files missing)
+PHASE1_EXTRACTION_SYSTEM  = _load_prompt("extraction_system.md",   _PHASE1_EXTRACTION_SYSTEM_FALLBACK)
+PHASE1_EXTRACTION_USER    = _load_prompt("extraction_user.md",     _PHASE1_EXTRACTION_USER_FALLBACK)
+PHASE1_VERIFICATION_SYSTEM = _load_prompt("verification_system.md", _PHASE1_VERIFICATION_SYSTEM_FALLBACK)
+PHASE1_VERIFICATION_USER   = _load_prompt("verification_user.md",   _PHASE1_VERIFICATION_USER_FALLBACK)
+
+# Aliases for backward compatibility
+EXTRACTION_SYSTEM = PHASE1_EXTRACTION_SYSTEM
+EXTRACTION_USER   = PHASE1_EXTRACTION_USER
 
 
 ROUND2_FULLTEXT_COMPARISON_SYSTEM = """You are a meta-reviewer arbitrating two agents' SECOND-ROUND full-text screening decisions for a systematic review of LLMs in qualitative data analysis.
