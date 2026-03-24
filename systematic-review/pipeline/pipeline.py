@@ -1599,35 +1599,123 @@ class PipelineRunner:
         return None
 
     def _extract_pdf_text(self, file_path: str) -> str:
-        """Extract text from a .pdf or .txt full-text file."""
+        """
+        Extract text from a .pdf or .txt full-text file.
+
+        Strategy:
+          1. Peek at the first 512 bytes to detect the true file format —
+             downloaders sometimes save HTML or XML with a .pdf extension.
+          2. HTML/XML content → parse with html.parser and strip tags.
+          3. Real PDF magic bytes (%PDF) → try PyMuPDF, then pdfminer.
+          4. If PyMuPDF returns blank (DRM / image-only PDF) → try pdfminer.
+          5. TXT files → read directly.
+        """
+        import re as _re, html as _html_mod
+
         path = Path(file_path)
+        if not path.exists():
+            logger.warning(f"[TextExtract] file not found: {file_path}")
+            return ""
 
-        # Plain-text files (HTML-extracted by downloader)
-        if path.suffix == ".txt":
+        # ── Peek at true content type ─────────────────────────────────────
+        try:
+            header = path.read_bytes()[:512]
+        except Exception:
+            return ""
+
+        is_html = (
+            header.lstrip()[:9].lower() in (b"<!doctype", b"<!DOCTYPE")
+            or header.lstrip()[:5].lower() == b"<html"
+            or b"<html" in header.lower()
+            or b"<!doctype html" in header.lower()
+        )
+        is_pdf = header.lstrip()[:4] == b"%PDF"
+
+        # ── Plain-text / already-extracted TXT ───────────────────────────
+        if path.suffix == ".txt" or (not is_pdf and not is_html):
             try:
-                return path.read_text(encoding="utf-8", errors="replace")
-            except Exception as e:
-                logger.warning(f"Could not read txt {file_path}: {e}")
-                return ""
+                raw = path.read_text(encoding="utf-8", errors="replace")
+                if len(raw.strip()) > 100:
+                    return raw
+            except Exception:
+                pass
+            # Fall through to HTML check if content was tiny
 
-        # PDF files
+        # ── HTML masquerading as PDF (failed download / redirect page) ───
+        if is_html:
+            try:
+                from html.parser import HTMLParser
+
+                class _TextExtractor(HTMLParser):
+                    def __init__(self):
+                        super().__init__()
+                        self._parts = []
+                        self._skip = False
+                    def handle_starttag(self, tag, attrs):
+                        if tag in ("script", "style", "noscript"):
+                            self._skip = True
+                    def handle_endtag(self, tag):
+                        if tag in ("script", "style", "noscript"):
+                            self._skip = False
+                    def handle_data(self, data):
+                        if not self._skip:
+                            stripped = data.strip()
+                            if stripped:
+                                self._parts.append(stripped)
+
+                raw_html = path.read_text(encoding="utf-8", errors="replace")
+                parser = _TextExtractor()
+                parser.feed(raw_html)
+                extracted = " ".join(parser._parts)
+                extracted = _re.sub(r"\s{3,}", "\n\n", extracted).strip()
+                if len(extracted) > 200:
+                    logger.info(f"[TextExtract] HTML fallback: {len(extracted)} chars from {path.name}")
+                    return extracted
+            except Exception as e:
+                logger.warning(f"[TextExtract] HTML parse failed for {path.name}: {e}")
+
+        # ── Real PDF — try PyMuPDF first ──────────────────────────────────
+        fitz_text = ""
         try:
             import fitz  # PyMuPDF
             doc = fitz.open(file_path)
-            text = ""
-            for page in doc:
-                text += page.get_text()
-            return text
+            fitz_text = "".join(page.get_text() for page in doc).strip()
+            doc.close()
         except ImportError:
             pass
+        except Exception as e:
+            logger.debug(f"[TextExtract] PyMuPDF error for {path.name}: {e}")
 
+        if len(fitz_text) > 200:
+            return fitz_text
+
+        # ── PyMuPDF returned nothing (DRM / image PDF) — try pdfminer ────
         try:
-            from pdfminer.high_level import extract_text
-            return extract_text(file_path)
+            from pdfminer.high_level import extract_text as _pm_extract
+            pm_text = (_pm_extract(file_path) or "").strip()
+            if len(pm_text) > 200:
+                logger.info(f"[TextExtract] pdfminer succeeded where PyMuPDF failed: {path.name}")
+                return pm_text
         except ImportError:
             pass
+        except Exception as e:
+            logger.debug(f"[TextExtract] pdfminer error for {path.name}: {e}")
 
-        logger.warning(f"No PDF extraction library available for {file_path}")
+        # ── Last resort: read raw bytes as latin-1 text ───────────────────
+        try:
+            raw = path.read_bytes().decode("latin-1", errors="replace")
+            # Keep only printable ASCII runs (strip binary junk)
+            printable = _re.sub(r"[^\x20-\x7e\n\t]", " ", raw)
+            printable = _re.sub(r"[ \t]{4,}", " ", printable)
+            printable = _re.sub(r"\n{4,}", "\n\n", printable).strip()
+            if len(printable) > 500:
+                logger.info(f"[TextExtract] raw-bytes fallback: {len(printable)} chars from {path.name}")
+                return printable
+        except Exception:
+            pass
+
+        logger.warning(f"[TextExtract] all methods failed for {path.name} "
+                        f"(is_pdf={is_pdf}, is_html={is_html}, size={path.stat().st_size})")
         return ""
 
     def _get_next_study_id(self) -> int:
