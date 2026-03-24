@@ -1,7 +1,25 @@
 """
 All LLM prompts used in the systematic review pipeline.
 Prompts are versioned and documented for reproducibility.
+
+Extraction prompts are loaded from editable files in the prompts/ directory:
+  prompts/extraction_system.md  — system prompt (edit on GitHub to change fields)
+  prompts/extraction_user.md    — user prompt template ({title}, {fulltext}, etc.)
+
+All other prompts remain inline below.
 """
+
+import os as _os
+import pathlib as _pathlib
+
+def _load_prompt(filename: str, fallback: str) -> str:
+    """Load a prompt from prompts/<filename>, falling back to the hardcoded string."""
+    prompts_dir = _pathlib.Path(__file__).parent.parent / "prompts"
+    path = prompts_dir / filename
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return fallback
 
 # ─────────────────────────────────────────────
 # TITLE/ABSTRACT SCREENING
@@ -343,9 +361,11 @@ RESPONSE FORMAT (strict JSON):
 
 # ─────────────────────────────────────────────
 # DATA EXTRACTION
+# Loaded from prompts/extraction_system.md and prompts/extraction_user.md
+# Edit those files directly on GitHub to change fields or instructions.
 # ─────────────────────────────────────────────
 
-EXTRACTION_SYSTEM = """You are an expert data extractor for a systematic review on LLMs in qualitative data analysis.
+_EXTRACTION_SYSTEM_FALLBACK = """You are an expert data extractor for a systematic review on LLMs in qualitative data analysis.
 
 Your task is to extract structured information from an included study following a standardized data extraction form.
 
@@ -424,7 +444,7 @@ RESPONSE FORMAT (strict JSON matching ExtractionResult schema):
 }
 """
 
-EXTRACTION_USER = """Extract structured data from this included study.
+_EXTRACTION_USER_FALLBACK = """Extract structured data from this included study.
 
 TITLE: {title}
 AUTHORS: {authors}
@@ -436,6 +456,10 @@ FULL TEXT (or available sections):
 
 Follow all extraction rules strictly. Use null for unreported fields.
 Return ONLY valid JSON."""
+
+# Load from editable files (falls back to hardcoded strings if files missing)
+EXTRACTION_SYSTEM = _load_prompt("extraction_system.md", _EXTRACTION_SYSTEM_FALLBACK)
+EXTRACTION_USER   = _load_prompt("extraction_user.md",   _EXTRACTION_USER_FALLBACK)
 
 
 # ─────────────────────────────────────────────
