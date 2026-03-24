@@ -178,6 +178,23 @@ class ExtractionResult(BaseModel):
     uncertain_fields: List[str] = Field(default_factory=list)
     extraction_notes: Optional[str] = None
 
+    @field_validator("analytic_task", mode="before")
+    @classmethod
+    def coerce_analytic_task_to_list(cls, v):
+        if isinstance(v, str):
+            # split on " || " (Cell 8l format) or ", " (old GPT output format)
+            sep = " || " if " || " in v else ", "
+            return [item.strip() for item in v.split(sep) if item.strip()]
+        return v
+
+    @field_validator("not_reported_fields", "uncertain_fields", mode="before")
+    @classmethod
+    def coerce_str_fields_to_list(cls, v):
+        if isinstance(v, str):
+            sep = " || " if " || " in v else ", "
+            return [item.strip() for item in v.split(sep) if item.strip()]
+        return v
+
     @field_validator("extraction_notes", mode="before")
     @classmethod
     def coerce_notes_to_str(cls, v):
