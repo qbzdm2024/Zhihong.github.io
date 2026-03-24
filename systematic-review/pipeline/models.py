@@ -2,7 +2,7 @@
 Pydantic data models for all pipeline stages.
 These models enforce structure and enable full traceability.
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Literal
 from datetime import datetime
 from enum import Enum
@@ -177,6 +177,13 @@ class ExtractionResult(BaseModel):
     not_reported_fields: List[str] = Field(default_factory=list)
     uncertain_fields: List[str] = Field(default_factory=list)
     extraction_notes: Optional[str] = None
+
+    @field_validator("extraction_notes", mode="before")
+    @classmethod
+    def coerce_notes_to_str(cls, v):
+        if isinstance(v, list):
+            return "; ".join(str(item) for item in v)
+        return v
 
 
 class ExtractedRecord(BaseModel):
