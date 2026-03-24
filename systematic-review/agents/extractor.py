@@ -118,11 +118,80 @@ def _parse_qa(raw: dict) -> QAScore:
     return QAScore(**qa_fields)
 
 
+def _select_content_window(fulltext: str, window: int = 40_000) -> str:
+    """
+    Choose the most informative window of text to pass to the LLM.
+
+    Clean text (TXT / HTML) → take the first `window` chars directly; it
+    starts at the abstract/introduction and is already prose.
+
+    Raw-bytes PDF fallback text (1M+ chars of latin-1 decoded binary) →
+    the first few thousand chars are PDF structure (header, xref, catalog).
+    Strategy: find the first paragraph-like block of readable prose and
+    return `window` chars from that point.  This skips %PDF header junk and
+    delivers actual paper content to the LLM.
+    """
+    import re as _re
+
+    if not fulltext:
+        return ""
+
+    # If text is short enough, return it as-is
+    if len(fulltext) <= window:
+        return fulltext
+
+    # Detect raw-bytes PDF content: starts with "%PDF" or has very low
+    # word density in the first 500 chars (lots of PDF keywords / binary)
+    head = fulltext[:500]
+    is_raw_pdf = (
+        head.startswith("%PDF")
+        or head.startswith(" %PDF")
+        or "endobj" in head
+        or "xref" in head[:200]
+    )
+
+    if not is_raw_pdf:
+        # Clean prose — start from the beginning
+        return fulltext[:window]
+
+    # Raw-bytes PDF: scan forward to find the first substantial prose block.
+    # A "prose block" is 3+ consecutive lines that look like sentences
+    # (contain mostly lowercase letters and spaces, no "/" PDF keywords).
+    _PDF_KW = _re.compile(r"/(Type|Page|Font|XObject|Catalog|Resources|MediaBox"
+                          r"|ProcSet|Contents|Annots|Rotate|Filter|Length"
+                          r"|FlateDecode|DCTDecode|Width|Height|BitsPerComponent)")
+    _PROSE  = _re.compile(r"[a-z]{3,}")   # runs of 3+ lowercase letters = prose
+
+    lines  = fulltext.split("\n")
+    prose_start = 0
+    streak = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            streak = 0
+            continue
+        has_prose   = bool(_PROSE.search(stripped))
+        has_pdf_kw  = bool(_PDF_KW.search(stripped))
+        is_short    = len(stripped) < 4
+        if has_prose and not has_pdf_kw and not is_short:
+            streak += 1
+        else:
+            streak = 0
+        if streak >= 3:
+            # Found three consecutive prose-like lines — start here
+            prose_start = max(0, i - 2)
+            break
+
+    # Reconstruct text from prose_start
+    content = "\n".join(lines[prose_start:])
+    return content[:window]
+
+
 def _extract_single_agent(agent_id: str, model: str, title: str,
                            fulltext: str) -> Tuple[ExtractionResult, dict]:
     """Run a single extraction agent. Returns (result, usage)."""
     client = get_client()
-    truncated = fulltext[:14000] if len(fulltext) > 14000 else fulltext
+    truncated = _select_content_window(fulltext, window=40_000)
 
     user_prompt = EXTRACTION_USER.format(
         title=title,
@@ -150,7 +219,7 @@ def _extract_single_agent(agent_id: str, model: str, title: str,
 def _qa_single_agent(agent_id: str, model: str, title: str, fulltext: str) -> Tuple[QAScore, dict]:
     """Run a single QA assessment agent. Returns (score, usage)."""
     client = get_client()
-    truncated = fulltext[:10000] if len(fulltext) > 10000 else fulltext
+    truncated = _select_content_window(fulltext, window=20_000)
     user_prompt = QA_USER.format(title=title, fulltext=truncated)
 
     try:
