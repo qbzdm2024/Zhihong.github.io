@@ -66,6 +66,7 @@ class PipelineRunRequest(BaseModel):
     stage: str  # "import", "dedup", "title_screening", "fulltext_screening", "extraction"
     limit: Optional[int] = None
     force: Optional[bool] = False
+    record_id: Optional[str] = None  # target a specific record (used for pilot extraction)
 
 
 @app.post("/api/pipeline/run")
@@ -88,7 +89,7 @@ async def run_pipeline_stage(request: PipelineRunRequest, background_tasks: Back
         "fulltext_download": lambda: runner.run_fulltext_download(request.limit),
         "fulltext_screening": lambda: runner.run_fulltext_screening(request.limit),
         "second_fulltext_screening": lambda: runner.run_second_fulltext_screening(request.limit),
-        "extraction": lambda: runner.run_extraction(request.limit),
+        "extraction": lambda: runner.run_extraction(request.limit, request.record_id),
     }
 
     if request.stage == "reset_screening":

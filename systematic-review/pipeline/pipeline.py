@@ -773,7 +773,7 @@ class PipelineRunner:
     # STAGE 5: DATA EXTRACTION
     # ──────────────────────────────────────────────────
 
-    def run_extraction(self, limit: Optional[int] = None) -> Dict:
+    def run_extraction(self, limit: Optional[int] = None, record_id: Optional[str] = None) -> Dict:
         """Run data extraction on confirmed included studies."""
         logger.info("=== STAGE: DATA EXTRACTION ===")
 
@@ -788,7 +788,20 @@ class PipelineRunner:
             and pr.screened.fulltext_available
         ]
 
-        if limit:
+        # If a specific record_id is requested, filter to just that one
+        if record_id:
+            included = [pr for pr in included if pr.record_id == record_id]
+            if not included:
+                # Also allow re-extracting already-extracted records
+                included = [
+                    pr for pr in self.records.values()
+                    if pr.record_id == record_id
+                    and pr.final_decision == DecisionLabel.INCLUDE
+                    and pr.screened is not None
+                    and pr.screened.fulltext_available
+                ]
+
+        if limit and not record_id:
             included = included[:limit]
 
         study_counter = self._get_next_study_id()
