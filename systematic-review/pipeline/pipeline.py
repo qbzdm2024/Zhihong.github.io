@@ -826,7 +826,13 @@ class PipelineRunner:
 
             try:
                 pdf_path = pr.screened.pdf_path
-                fulltext = self._extract_pdf_text(pdf_path) if pdf_path else ""
+                # Use pre-saved fulltext cache if available (written by Cell 8h-save)
+                _cached = Path(settings.data_dir) / "fulltexts" / f"{pr.record_id}.txt"
+                if _cached.exists():
+                    fulltext = _cached.read_text(encoding="utf-8", errors="replace")
+                    logger.info(f"[Extract] cached fulltext {pr.record_id[:8]} ({len(fulltext):,} chars)")
+                else:
+                    fulltext = self._extract_pdf_text(pdf_path) if pdf_path else ""
 
                 extracted = extract_and_assess(
                     record_id=pr.record_id,
