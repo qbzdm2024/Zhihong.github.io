@@ -476,11 +476,18 @@ async def register_pdfs_from_disk():
                 pr = best_rec
 
         if pr and pr.screened:
-            pr.screened.pdf_path = str(f)
-            pr.screened.fulltext_available = True
-            if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED:
-                pr.final_decision = DecisionLabel.INCLUDE
-            pr.updated_at = datetime.utcnow()
+            # Prefer PDF over TXT: never overwrite a .pdf path with a .txt path
+            existing = pr.screened.pdf_path or ""
+            is_downgrade = (
+                existing.lower().endswith(".pdf")
+                and f.suffix.lower() == ".txt"
+            )
+            if not is_downgrade:
+                pr.screened.pdf_path = str(f)
+                pr.screened.fulltext_available = True
+                if pr.final_decision == DecisionLabel.FULL_TEXT_NEEDED:
+                    pr.final_decision = DecisionLabel.INCLUDE
+                pr.updated_at = datetime.utcnow()
             results.append({
                 "file": f.name,
                 "status": "registered",
