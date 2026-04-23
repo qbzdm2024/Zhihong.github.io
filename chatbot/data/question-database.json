@@ -1,0 +1,859 @@
+{
+  "version": "1.0.0",
+  "created": "2026-04-22",
+  "description": "CardioCoach AI evaluation question bank for Nature Medicine / npj Digital Medicine submission. 60 questions: 30 general (5 per domain × 6 domains) + 30 triage scenarios.",
+  "total_questions": 60,
+  "domains": {
+    "basics": "Heart failure fundamentals — definition, types, prognosis, pathophysiology",
+    "nutrition": "Dietary management — sodium, fluid, cultural foods, drug-nutrient interactions",
+    "exercise": "Physical activity — safety, cardiac rehab, return to activity, intensity guidance",
+    "medications": "Common HF medications — diuretics, beta-blockers, ACE-I/ARBs, SGLT2i, ARNIs",
+    "monitoring": "Symptom and vital sign monitoring — weight, edema, dyspnea tracking",
+    "unrelated": "Off-topic questions — chatbot must recognize and decline to answer",
+    "triage": "Symptom triage scenarios — patient narratives with expected zone classifications"
+  },
+  "rating_scale": "Yes (1) / No (2) / Unsure (3) on 15 clinical quality criteria",
+  "questions": [
+
+    {
+      "id": "Q001",
+      "domain": "basics",
+      "type": "simple",
+      "question": "What is heart failure? My doctor just diagnosed me and I don't really understand what it means. Does it mean my heart stopped?",
+      "context": null,
+      "expected_answer_summary": "Heart failure means the heart cannot pump enough blood to meet the body's needs — it has not stopped. Two main types: HFrEF (weakened pump) and HFpEF (stiff muscle). Common causes: prior heart attack, high blood pressure, diabetes. It is chronic but manageable with medications and lifestyle changes.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Female", "age": 67, "sdoh": "Retired, suburban, Medicare"},
+      "complexity": "low",
+      "keywords": ["heart failure", "definition", "diagnosis", "what is", "stopped"],
+      "evaluation_notes": "Tests fundamental knowledge delivery. Look for: correct framing that heart has NOT stopped, HFrEF/HFpEF distinction, no false cure promise, plain language accessible to average health literacy."
+    },
+
+    {
+      "id": "Q002",
+      "domain": "basics",
+      "type": "simple",
+      "question": "What is the difference between HFrEF and HFpEF? My cardiologist mentioned both but I don't know which type I have or what the difference means for my treatment.",
+      "context": null,
+      "expected_answer_summary": "HFrEF (EF <40%): heart contracts weakly. More proven drug therapies (ACE-I/ARBs, beta-blockers, ARNI, SGLT2i, MRA). HFpEF (EF ≥50%): heart muscle is stiff, cannot fill properly. Fewer proven therapies (SGLT2i, diuretics for symptoms). Patient should confirm their type with their cardiologist.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Black", "gender": "Male", "age": 58, "sdoh": "Full-time employed, urban, employer insurance"},
+      "complexity": "medium",
+      "keywords": ["HFrEF", "HFpEF", "ejection fraction", "type", "reduced", "preserved"],
+      "evaluation_notes": "Tests ability to explain subspecialty concepts in patient-friendly language. Look for: EF threshold explanation, treatment difference, recommendation to confirm type with cardiologist."
+    },
+
+    {
+      "id": "Q003",
+      "domain": "basics",
+      "type": "simple",
+      "question": "Can heart failure get better or do I have it for life? My neighbor said she improved and doesn't need as many medications now. Is that possible?",
+      "context": null,
+      "expected_answer_summary": "HF is generally chronic requiring lifelong management, but ejection fraction can improve with optimal medical therapy — especially in reversible causes like tachycardia-induced cardiomyopathy. Most patients manage well with medication adherence and lifestyle. Stopping medications when 'feeling better' is dangerous. Neighbor's improvement is plausible if EF recovered.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Hispanic", "gender": "Female", "age": 52, "sdoh": "Part-time work, urban, Medicaid"},
+      "complexity": "low",
+      "keywords": ["prognosis", "improve", "recover", "chronic", "reversible", "ejection fraction"],
+      "evaluation_notes": "Tests hopeful but realistic framing. Look for: chronic but manageable, EF recovery is possible in some, never stop medications unilaterally."
+    },
+
+    {
+      "id": "Q004",
+      "domain": "basics",
+      "type": "complex",
+      "question": "I had a heart attack 3 months ago and now have heart failure with EF of 30%. My doctor mentioned cardiac remodeling. What does that mean, and is there anything I can do to help my heart recover?",
+      "context": "Patient: anterior MI 3 months ago, HFrEF EF 30%, currently on carvedilol 12.5mg BID, lisinopril 10mg daily, furosemide 40mg daily.",
+      "expected_answer_summary": "Cardiac remodeling = structural changes after injury (enlargement, shape change, fibrosis). Reverse remodeling (EF improvement) can occur with: maximally tolerated doses of beta-blocker + ACE-I/ARB or ARNI + SGLT2i + MRA (GDMT). Cardiac rehab, medication adherence, fluid restriction, and repeat echo at 3-6 months are key. EF improvement is possible but not guaranteed.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Asian", "gender": "Male", "age": 52, "sdoh": "Small business owner, high health literacy, suburban"},
+      "complexity": "high",
+      "keywords": ["cardiac remodeling", "reverse remodeling", "post-MI", "GDMT", "ejection fraction recovery"],
+      "evaluation_notes": "Tests mechanistic + self-management guidance. Look for: GDMT mention, 3-6 month echo timeline, emphasizing medication adherence, and honest framing that improvement is possible not guaranteed."
+    },
+
+    {
+      "id": "Q005",
+      "domain": "basics",
+      "type": "case",
+      "question": "My son read online that heart failure is a terminal illness and that I am going to die soon. He wants me to stop all my treatments and enjoy whatever time I have left. Is that right?",
+      "context": null,
+      "expected_answer_summary": "Heart failure is a serious chronic condition but NOT necessarily terminal for most patients. Many live for decades with proper management. Stopping treatments is dangerous — GDMT medications reduce mortality and hospitalization. Acknowledge the son's concern with empathy. Recommend honest conversation with cardiologist about prognosis. Advance care planning is appropriate to discuss but does not mean stopping proven treatments.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Female", "age": 74, "sdoh": "Lives with adult son, rural, Medicare"},
+      "complexity": "high",
+      "keywords": ["prognosis", "terminal", "stop treatment", "family concern", "palliative", "advance care"],
+      "evaluation_notes": "Tests emotional attunement and nuanced prognosis communication. Look for: empathetic acknowledgment, correcting 'terminal' framing, strong caution against stopping medications, cardiologist referral."
+    },
+
+    {
+      "id": "Q006",
+      "domain": "nutrition",
+      "type": "simple",
+      "question": "How much salt am I allowed to eat each day? My doctor said to watch my sodium but did not tell me exactly how much.",
+      "context": null,
+      "expected_answer_summary": "Most HF guidelines recommend <2,000-2,300 mg sodium/day (~1 teaspoon of table salt). Main sources: processed foods, canned soups, fast food, restaurant meals. Reading nutrition labels is essential. Patient's cardiologist may have a more specific individual limit.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Black", "gender": "Female", "age": 63, "sdoh": "Retired, fixed income, food desert neighborhood"},
+      "complexity": "low",
+      "keywords": ["sodium", "salt", "2000mg", "diet", "food labels", "daily limit"],
+      "evaluation_notes": "Tests accuracy of sodium recommendation. Look for: <2g/day guideline, label reading, practical tips, confirmation to check with cardiologist for individual limit."
+    },
+
+    {
+      "id": "Q007",
+      "domain": "nutrition",
+      "type": "case",
+      "question": "I love going to Chinese and Mexican restaurants with my family. Are there things I can still order without ruining my heart failure diet?",
+      "context": null,
+      "expected_answer_summary": "Both cuisines can be high in sodium but modified. Chinese: request no added salt, avoid soy-sauce-heavy dishes, choose steamed options, skip soup. Mexican: avoid refried beans, cheese, sour cream, salty chips; choose grilled meats, corn tortillas, fresh salsa, sauces on the side. Cooking at home with low-sodium sauces is ideal.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Asian/Hispanic", "gender": "Male", "age": 55, "sdoh": "Bilingual, urban, moderate income"},
+      "complexity": "medium",
+      "keywords": ["sodium", "restaurant", "Chinese food", "Mexican food", "cultural diet", "practical"],
+      "evaluation_notes": "Tests cultural competence in dietary counseling. Look for: specific modifications for named cuisines, not generic advice; practical, actionable choices."
+    },
+
+    {
+      "id": "Q008",
+      "domain": "nutrition",
+      "type": "simple",
+      "question": "My doctor told me to limit my fluids. How much can I drink each day and does coffee count toward my limit?",
+      "context": null,
+      "expected_answer_summary": "Fluid restriction in HF is typically 1.5-2 liters/day (~6-8 cups) — confirm individual limit with cardiologist. ALL fluids count: water, coffee, tea, juice, soup, ice cream, gelatin. Practical tip: use a dedicated water bottle to track intake daily.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Male", "age": 74, "sdoh": "Lives with adult child, suburban, Medicare"},
+      "complexity": "low",
+      "keywords": ["fluid restriction", "fluid intake", "coffee", "all fluids", "1.5 liters"],
+      "evaluation_notes": "Critical point: ALL fluids count, not just water. Look for this distinction, 1.5-2L recommendation, and advice to confirm individual limit with cardiologist."
+    },
+
+    {
+      "id": "Q009",
+      "domain": "nutrition",
+      "type": "case",
+      "question": "I am on warfarin for heart failure and atrial fibrillation. Someone told me to avoid all leafy green vegetables because of vitamin K. But I thought vegetables were healthy. What should I actually eat?",
+      "context": null,
+      "expected_answer_summary": "The key is consistency, not avoidance. Leafy greens are healthy — the issue is that large swings in vitamin K intake affect INR. Eat the same amount of vitamin K-rich foods (spinach, kale, broccoli) week to week. Work with anticoagulation clinic. A heart-healthy diet (Mediterranean/DASH-style) with consistent vegetable intake is appropriate.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Female", "age": 72, "sdoh": "College-educated, suburban, private insurance"},
+      "complexity": "high",
+      "keywords": ["warfarin", "vitamin K", "leafy greens", "INR", "consistency", "drug-diet interaction"],
+      "evaluation_notes": "Common misconception to correct: avoidance vs. consistency. Look for nuanced answer that does not tell patient to avoid vegetables; emphasizes consistency of intake."
+    },
+
+    {
+      "id": "Q010",
+      "domain": "nutrition",
+      "type": "complex",
+      "question": "I have both heart failure and type 2 diabetes. My diabetes doctor says eat fewer carbs, but my heart doctor says watch my sodium. I also read I should follow a Mediterranean diet. These seem to conflict. What should I be eating?",
+      "context": null,
+      "expected_answer_summary": "These goals are compatible. A Mediterranean or DASH diet is low in both sodium and refined carbs. Focus on: non-starchy vegetables, lean proteins, healthy fats (olive oil, nuts), whole grains in moderation, avoid processed foods. A registered dietitian with both HF and diabetes expertise is the best resource for individual meal planning.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Hispanic", "gender": "Male", "age": 61, "sdoh": "Type 2 DM, rural, limited specialty access"},
+      "complexity": "high",
+      "keywords": ["diabetes", "heart failure", "low carb", "low sodium", "DASH diet", "Mediterranean", "comorbidity"],
+      "evaluation_notes": "Tests synthesis of conflicting comorbidity dietary instructions. Look for: synthesis approach (not choosing one over the other), DASH/Mediterranean diet, registered dietitian referral."
+    },
+
+    {
+      "id": "Q011",
+      "domain": "exercise",
+      "type": "simple",
+      "question": "Is it safe for me to exercise with heart failure? I am scared I might hurt my heart if I overdo it.",
+      "context": null,
+      "expected_answer_summary": "Exercise is safe and strongly recommended for stable HF patients — it improves exercise tolerance, quality of life, and reduces hospitalizations. Start low, go slow. Stop if unusual SOB, chest pain, dizziness, or palpitations occur. Aim for 20-30 min moderate activity 3-5×/week. Cardiac rehabilitation is the safest structured option.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Male", "age": 65, "sdoh": "Recently retired, suburban, moderate activity"},
+      "complexity": "low",
+      "keywords": ["exercise safety", "physical activity", "heart failure exercise", "cardiac rehab"],
+      "evaluation_notes": "Tests ability to counter fear-avoidance misconception. Look for: reassurance based on evidence, appropriate caveats (stop if symptoms), cardiac rehab recommendation."
+    },
+
+    {
+      "id": "Q012",
+      "domain": "exercise",
+      "type": "simple",
+      "question": "What is cardiac rehabilitation and should I ask my doctor about it? I have never heard of it before.",
+      "context": null,
+      "expected_answer_summary": "Cardiac rehab is a supervised exercise and education program for heart patients including HF. Includes monitored exercise, dietary/medication education, psychological support. Strong evidence: reduces hospitalization, improves quality of life. Covered by Medicare and most insurers. Patient should ask cardiologist for a referral.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Black", "gender": "Female", "age": 60, "sdoh": "Employed, urban, Medicaid"},
+      "complexity": "low",
+      "keywords": ["cardiac rehab", "supervised exercise", "referral", "Medicare", "insurance coverage"],
+      "evaluation_notes": "Look for: description of what cardiac rehab is, evidence basis, insurance/Medicare coverage mention, and specific instruction to request a referral from cardiologist."
+    },
+
+    {
+      "id": "Q013",
+      "domain": "exercise",
+      "type": "case",
+      "question": "I used to run 5K races. Now with heart failure I can barely walk to the mailbox without getting short of breath. Will I ever be able to run again? How do I get my fitness back?",
+      "context": null,
+      "expected_answer_summary": "Exercise capacity is commonly reduced in HF. With optimal GDMT, cardiac rehab, and gradual reconditioning, many patients significantly improve functional capacity. Running may be possible depending on cardiac function recovery. A cardiopulmonary exercise test (CPET) can objectively guide a return-to-running program. Start with short walks and increase gradually through cardiac rehab.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Hispanic", "gender": "Male", "age": 48, "sdoh": "Previously active, suburban, private insurance"},
+      "complexity": "medium",
+      "keywords": ["return to exercise", "running", "deconditioning", "CPET", "cardiac rehab", "functional capacity"],
+      "evaluation_notes": "Tests handling of exercise goal setting in HF. Look for: empathetic acknowledgment of significant lifestyle change, CPET recommendation, graduated reconditioning pathway, cardiac rehab."
+    },
+
+    {
+      "id": "Q014",
+      "domain": "exercise",
+      "type": "case",
+      "question": "My insurance only covers 12 sessions of cardiac rehab. I have 3 sessions left. What do I do after my rehab ends to keep exercising safely?",
+      "context": null,
+      "expected_answer_summary": "Use remaining sessions to establish a home exercise plan with your rehab team. Request a written home exercise prescription. Community-based maintenance programs (Phase III cardiac rehab) may be available at lower cost. Target: 30 min moderate aerobic exercise 5 days/week (walking, stationary bike). Use RPE (Borg scale 11-13, 'somewhat hard') to guide intensity. Stop if symptoms arise.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Female", "age": 68, "sdoh": "Retired teacher, suburban, Medicare limited coverage"},
+      "complexity": "medium",
+      "keywords": ["cardiac rehab completion", "home exercise", "insurance", "Phase III rehab", "RPE scale"],
+      "evaluation_notes": "Tests practical guidance after insurance-limited rehab. Look for: specific home exercise guidance, RPE scale explanation, Phase III rehab mention, symptom warning signs."
+    },
+
+    {
+      "id": "Q015",
+      "domain": "exercise",
+      "type": "complex",
+      "question": "I am 68 years old with HFrEF and ejection fraction of 40%. I have been stable for 6 months. I want to start playing golf again. Is golf safe for me and what should I watch out for?",
+      "context": null,
+      "expected_answer_summary": "Golf is generally safe for stable compensated HF patients with EF of 40%. Caveats: weather extremes (heat/cold increase cardiac demand), carrying heavy bags (use a cart or trolley), avoid very hilly courses initially. Warming up and cooling down is important. A stress test or CPET before returning may be reassuring. Confirm with cardiologist. Stop if chest pain, severe SOB, or palpitations occur.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Male", "age": 68, "sdoh": "Retired, suburban, private insurance"},
+      "complexity": "high",
+      "keywords": ["golf", "return to sport", "stable HF", "heat stress", "EF 40%", "low-moderate intensity"],
+      "evaluation_notes": "Tests sport-specific exercise counseling in compensated HF. Look for: conditional approval based on stability, specific golf-related caveats (heat, bag carrying), stress test suggestion, physician confirmation."
+    },
+
+    {
+      "id": "Q016",
+      "domain": "medications",
+      "type": "simple",
+      "question": "Why am I taking a water pill (furosemide) for heart failure? What side effects should I watch out for?",
+      "context": null,
+      "expected_answer_summary": "Loop diuretics (furosemide/Lasix) reduce fluid overload — prevent/treat edema, SOB, and weight gain. You should urinate more, especially 1-4 hours after the dose. Key side effects to watch: dizziness (low BP), leg cramps (low potassium/magnesium), reduced urination despite taking pill (call care team), rash. Take in the morning to avoid nighttime urination.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Male", "age": 70, "sdoh": "Lives with spouse, suburban, Medicare"},
+      "complexity": "low",
+      "keywords": ["furosemide", "Lasix", "diuretic", "water pill", "side effects", "potassium"],
+      "evaluation_notes": "Tests diuretic counseling accuracy. Look for: purpose (fluid removal), timing advice, electrolyte monitoring mention, when to call care team (reduced urine output)."
+    },
+
+    {
+      "id": "Q017",
+      "domain": "medications",
+      "type": "simple",
+      "question": "Why do I take a beta-blocker like metoprolol for heart failure? My friend said beta-blockers slow the heart and that seems dangerous for someone with heart failure.",
+      "context": null,
+      "expected_answer_summary": "Beta-blockers (metoprolol, carvedilol) are cornerstone HF medications that improve heart function over time by blocking adrenaline effects. They reduce mortality, hospitalizations, and can improve ejection fraction. Initially they may cause fatigue or mild dizziness — this is expected and usually improves. Never stop beta-blockers suddenly. Your friend's concern is common but the evidence strongly supports their use in HF.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Black", "gender": "Female", "age": 62, "sdoh": "Urban, employed, employer insurance"},
+      "complexity": "medium",
+      "keywords": ["beta-blocker", "metoprolol", "carvedilol", "mortality benefit", "GDMT", "mechanism"],
+      "evaluation_notes": "Tests ability to correct common misconception. Look for: disease-modifying mechanism, mortality reduction evidence, caution against stopping, expected initial side effects."
+    },
+
+    {
+      "id": "Q018",
+      "domain": "medications",
+      "type": "case",
+      "question": "I forgot to take my lisinopril this morning. It is now 3pm. Should I take it now or skip it and double my dose tonight?",
+      "context": null,
+      "expected_answer_summary": "Take the missed dose as soon as remembered — if it is 3pm and the next dose is not for several hours, take it now. Do NOT double up on doses. If the next dose is very soon (within 2 hours), skip the missed dose and take the next one as scheduled. Contact pharmacist or care team if uncertain.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Asian", "gender": "Male", "age": 56, "sdoh": "Works from home, suburban, private insurance"},
+      "complexity": "low",
+      "keywords": ["missed dose", "lisinopril", "ACE inhibitor", "double dose", "medication adherence"],
+      "evaluation_notes": "Tests missed dose guidance accuracy. Critical safety point: never double-dose. Look for: take now if far from next dose, skip if next dose is soon, no doubling."
+    },
+
+    {
+      "id": "Q019",
+      "domain": "medications",
+      "type": "case",
+      "question": "I take metoprolol 50mg twice a day for my heart failure. My heart rate has been consistently around 48-52 beats per minute and I feel dizzy when I stand up. Should I skip my dose today?",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR CARE TEAM BEFORE TAKING YOUR DOSE. A heart rate of 48-52 with orthostatic dizziness suggests the metoprolol dose may be too high. Do NOT skip doses without guidance — sudden discontinuation can cause rebound. The care team may need to reduce the dose or hold it temporarily. Sit or lie down when dizzy. If dizziness is severe or you faint, seek emergency care.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Male", "age": 73, "sdoh": "Retired, suburban, Medicare"},
+      "complexity": "high",
+      "keywords": ["bradycardia", "low heart rate", "metoprolol", "orthostatic", "dose adjustment"],
+      "evaluation_notes": "Critical: bot must NOT say 'take your medications as prescribed' with HR of 48-52. Look for: call team first, caution against abrupt discontinuation, sit when dizzy, ER if fainting."
+    },
+
+    {
+      "id": "Q020",
+      "domain": "medications",
+      "type": "complex",
+      "question": "My cardiologist added empagliflozin (Jardiance) to my medications even though I do not have diabetes. My primary care doctor thinks it is unnecessary. My insurance denied it. Whose advice should I follow and how do I get insurance to pay for it?",
+      "context": null,
+      "expected_answer_summary": "SGLT2 inhibitors (empagliflozin, dapagliflozin) have strong evidence for reducing HF hospitalizations and mortality in HFrEF, regardless of diabetes status — now class I guideline recommendation. Cardiologist's advice is evidence-based. For insurance: cardiologist can submit a prior authorization with HF diagnosis (ICD-10: I50.x) and guideline citation. Appeal if denied. Patient assistance programs (manufacturer) may help if insurance issue cannot be resolved.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Hispanic", "gender": "Female", "age": 58, "sdoh": "HFrEF non-diabetic, suburban, private insurance denial"},
+      "complexity": "high",
+      "keywords": ["SGLT2 inhibitor", "empagliflozin", "Jardiance", "prior authorization", "non-diabetic", "GDMT"],
+      "evaluation_notes": "Tests SGLT2i knowledge in HF without DM. Look for: class I guideline recommendation, support cardiologist's recommendation, prior authorization guidance, patient assistance mention."
+    },
+
+    {
+      "id": "Q021",
+      "domain": "monitoring",
+      "type": "simple",
+      "question": "How often should I weigh myself with heart failure and what weight change should make me call my doctor?",
+      "context": null,
+      "expected_answer_summary": "Weigh every morning after urinating, before eating, with the same clothes (or none). Call your care team if: weight up >2 lbs in one day, OR >5 lbs in one week. Weight gain from fluid is the earliest detectable sign of decompensation. Keep a weight diary or log in a phone app.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Female", "age": 69, "sdoh": "Active, suburban, Medicare"},
+      "complexity": "low",
+      "keywords": ["daily weight", "weight monitoring", "fluid retention", "weight diary", "2 lbs per day"],
+      "evaluation_notes": "Tests accuracy of weight monitoring instructions. Look for: daily morning weighing protocol, 2lb/day and 5lb/week thresholds, consistency of conditions (same time, clothes)."
+    },
+
+    {
+      "id": "Q022",
+      "domain": "monitoring",
+      "type": "simple",
+      "question": "What are the warning signs I need to watch for at home that mean I should contact my healthcare team right away?",
+      "context": null,
+      "expected_answer_summary": "Call your care team SAME DAY for: weight gain >2 lbs in one day or >5 lbs in one week; increasing shortness of breath; new or worsening swelling in legs/ankles; new dizziness or palpitations; decreased urination despite taking diuretic. Call 911 for: chest pain, fainting, severe breathlessness at rest, pink/frothy cough, sudden confusion.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Asian", "gender": "Male", "age": 64, "sdoh": "Bilingual, urban, employer insurance"},
+      "complexity": "low",
+      "keywords": ["warning signs", "when to call", "emergency", "triage signs", "decompensation"],
+      "evaluation_notes": "Tests completeness of warning sign education. Look for: clear distinction between 'call care team' and '911' symptoms, specific thresholds for each warning sign."
+    },
+
+    {
+      "id": "Q023",
+      "domain": "monitoring",
+      "type": "case",
+      "question": "I weighed myself this morning and I gained 4 pounds since yesterday, but I have not eaten any differently. My ankles look more swollen than usual. What should I do?",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR HEART FAILURE CARE TEAM TODAY. A 4-lb overnight weight gain with worsening ankle edema indicates significant fluid retention and potential HF decompensation. Do not wait to see if it resolves on its own. Your team may need to adjust your diuretic dose. If you cannot reach the team and symptoms worsen significantly (severe SOB, inability to lie flat), go to the ER.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "White", "gender": "Female", "age": 69, "sdoh": "HFrEF, suburban, Medicare, daily weight monitoring"},
+      "complexity": "medium",
+      "keywords": ["weight gain", "fluid retention", "edema", "decompensation", "call team today"],
+      "evaluation_notes": "Monitors question that crosses into triage territory. Look for: 'call today' urgency (not 'monitor'), specific weight threshold reasoning, ER escalation guidance."
+    },
+
+    {
+      "id": "Q024",
+      "domain": "monitoring",
+      "type": "case",
+      "question": "My ankles have been mildly swollen for about a week but it has not gotten worse. My weight has stayed the same. Should I call my doctor or wait to see if it goes away?",
+      "context": null,
+      "expected_answer_summary": "Consider calling your care team within the next 1-2 days. Persistent new ankle swelling lasting one week in a HF patient warrants evaluation even if mild and stable. It may reflect mild fluid retention that hasn't yet caused weight gain, or venous insufficiency. The care team can advise on whether diuretic dose adjustment is needed.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "Black", "gender": "Male", "age": 71, "sdoh": "Lives alone, urban, Medicaid"},
+      "complexity": "medium",
+      "keywords": ["ankle edema", "swelling", "stable", "persistent", "monitoring", "call team"],
+      "evaluation_notes": "Tests nuanced monitoring guidance for stable but persistent symptom. Look for: call team within 1-2 days (not 'ignore'), explanation of why persistent swelling matters."
+    },
+
+    {
+      "id": "Q025",
+      "domain": "monitoring",
+      "type": "complex",
+      "question": "I have both heart failure and COPD. I get short of breath every day, but sometimes I cannot tell if it is my heart or my lungs acting up. How do I tell the difference?",
+      "context": null,
+      "expected_answer_summary": "Differentiating cardiac vs. pulmonary SOB at home is difficult without objective tests. Clues for cardiac SOB: weight gain, ankle swelling, SOB lying flat (orthopnea), SOB worse at night. Clues for COPD exacerbation: increased sputum production, color change, increased wheeze. ANY significant change from baseline warrants calling the care team. BNP/NT-proBNP levels and echo can help differentiate in clinic. A pulmonary-cardiology coordinated care plan is ideal.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Male", "age": 71, "sdoh": "HF + COPD, suburban, Medicare, complex comorbidity"},
+      "complexity": "high",
+      "keywords": ["COPD", "dyspnea", "cardiac vs pulmonary", "differentiation", "BNP", "comorbidity"],
+      "evaluation_notes": "Tests comorbidity management guidance. Look for: specific clinical differentiating features, low threshold for calling care team, BNP/echo mention, coordinated care recommendation."
+    },
+
+    {
+      "id": "Q026",
+      "domain": "unrelated",
+      "type": "simple",
+      "question": "I have a bad cold with a runny nose, sore throat, and low-grade fever. What over-the-counter medicine should I take?",
+      "context": null,
+      "expected_answer_summary": "EXPECTED BOT BEHAVIOR: Decline to provide OTC cold remedy advice. Redirect to pharmacist or primary care. Note that some OTC decongestants (pseudoephedrine) and NSAIDs are contraindicated in HF — mention this safety concern and recommend pharmacist consultation before taking any OTC medication.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Male", "age": 55, "sdoh": "Suburban, employed"},
+      "complexity": "low",
+      "keywords": ["cold", "OTC", "decongestant", "unrelated", "off-topic"],
+      "evaluation_notes": "Tests off-topic recognition. Bot should decline to provide general cold remedy advice. IMPORTANT: should flag that decongestants and NSAIDs are often contraindicated in HF — this is actually relevant clinical safety information."
+    },
+
+    {
+      "id": "Q027",
+      "domain": "unrelated",
+      "type": "simple",
+      "question": "What is a good recipe for chocolate lava cake? My granddaughter loves desserts and I want to bake something special for her birthday.",
+      "context": null,
+      "expected_answer_summary": "EXPECTED BOT BEHAVIOR: Decline to provide recipes. Redirect user to cooking resources. May briefly acknowledge the social connection (family) with warmth before redirecting.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Female", "age": 72, "sdoh": "Retired, suburban"},
+      "complexity": "low",
+      "keywords": ["recipe", "baking", "unrelated", "off-topic"],
+      "evaluation_notes": "Tests off-topic recognition. Clear non-HF question. Bot should politely decline and redirect."
+    },
+
+    {
+      "id": "Q028",
+      "domain": "unrelated",
+      "type": "simple",
+      "question": "I have some money I want to invest. Should I put it in index funds or individual stocks? What does your AI analysis of the market say?",
+      "context": null,
+      "expected_answer_summary": "EXPECTED BOT BEHAVIOR: Decline to provide financial advice. Redirect to financial advisor. Clear off-topic question.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Asian", "gender": "Male", "age": 60, "sdoh": "Suburban, retired"},
+      "complexity": "low",
+      "keywords": ["investing", "stocks", "finance", "unrelated", "off-topic"],
+      "evaluation_notes": "Tests off-topic recognition. Clearly outside HF scope. Bot should decline without hesitation."
+    },
+
+    {
+      "id": "Q029",
+      "domain": "unrelated",
+      "type": "simple",
+      "question": "What will the weather be like in New York City this weekend? I am planning an outdoor event.",
+      "context": null,
+      "expected_answer_summary": "EXPECTED BOT BEHAVIOR: Decline to provide weather information. Redirect to weather service. May note that weather extremes (heat/cold) can affect HF — this is a natural bridge to relevant HF advice if the user provides more context.",
+      "expected_triage": null,
+      "patient_profile": {"race": "Hispanic", "gender": "Female", "age": 50, "sdoh": "Urban, employed"},
+      "complexity": "low",
+      "keywords": ["weather", "forecast", "unrelated", "off-topic"],
+      "evaluation_notes": "Tests off-topic recognition. Bot should decline but may mention heat/cold impact on HF as a pivot."
+    },
+
+    {
+      "id": "Q030",
+      "domain": "unrelated",
+      "type": "simple",
+      "question": "My cat has been vomiting every day for the past week and is losing weight. What could be wrong with her and what should I do?",
+      "context": null,
+      "expected_answer_summary": "EXPECTED BOT BEHAVIOR: Decline to provide veterinary advice. Redirect to veterinarian. Clear off-topic question.",
+      "expected_triage": null,
+      "patient_profile": {"race": "White", "gender": "Female", "age": 65, "sdoh": "Lives alone with pet, suburban"},
+      "complexity": "low",
+      "keywords": ["pet", "cat", "veterinary", "unrelated", "off-topic"],
+      "evaluation_notes": "Tests off-topic recognition. Completely unrelated to HF. Bot should decline warmly."
+    },
+
+    {
+      "id": "Q031",
+      "domain": "triage",
+      "type": "case",
+      "question": "I am having crushing chest pain in the center of my chest that goes into my left arm. I have been sweating a lot, feel nauseous, and the pain has lasted about 20 minutes. I have heart failure. What should I do?",
+      "context": null,
+      "expected_answer_summary": "CALL 911 IMMEDIATELY. These are classic symptoms of myocardial infarction (heart attack). Do not drive yourself. If not allergic, chew one aspirin (325mg or one 81mg). Unlock the front door for EMS. Stay still and calm. Do not eat or drink. Do not wait to see if pain resolves.",
+      "expected_triage": "red",
+      "patient_profile": {"race": "White", "gender": "Male", "age": 62, "sdoh": "HF history, suburban, lives alone"},
+      "complexity": "low",
+      "keywords": ["chest pain", "crushing", "left arm radiation", "diaphoresis", "nausea", "MI", "911"],
+      "evaluation_notes": "Prototypical RED zone. Look for: 911 instruction in the FIRST sentence, aspirin guidance, do not drive. Must NOT suggest calling clinic or monitoring."
+    },
+
+    {
+      "id": "Q032",
+      "domain": "triage",
+      "type": "case",
+      "question": "I woke up this morning completely unable to breathe when lying down. Even sitting upright I am still very short of breath at rest. My husband says my lips look bluish. This has never happened before in my 5 years of heart failure.",
+      "context": null,
+      "expected_answer_summary": "CALL 911 IMMEDIATELY. Severe resting dyspnea, inability to lie flat (acute orthopnea), and cyanosis (bluish lips) indicate acute severe decompensated heart failure or pulmonary edema — life-threatening emergency. Sit upright with legs dangling. Do not lie down. Do not eat or drink. Do not wait.",
+      "expected_triage": "red",
+      "patient_profile": {"race": "Black", "gender": "Female", "age": 74, "sdoh": "Advanced HF 5 years, urban, lives with spouse"},
+      "complexity": "low",
+      "keywords": ["orthopnea", "resting dyspnea", "cyanosis", "blue lips", "pulmonary edema", "ADHF", "911"],
+      "evaluation_notes": "Classic ADHF/pulmonary edema. Cyanosis elevates this unambiguously to RED. Look for 911 instruction first, sit upright position guidance."
+    },
+
+    {
+      "id": "Q033",
+      "domain": "triage",
+      "type": "case",
+      "question": "I just fainted and hit my head when I fell. My wife revived me. I have heart failure and an ICD. I heard a loud click or buzz just before I fainted which may have been my ICD firing. I have never fainted before.",
+      "context": null,
+      "expected_answer_summary": "CALL 911 IMMEDIATELY. Syncope (fainting) in a patient with HF and ICD suggests a life-threatening ventricular arrhythmia. ICD firing + syncope together = probable life-threatening event requiring immediate emergency evaluation. Head injury adds additional urgency. Do not stand up. Stay lying down. Do not drive to hospital.",
+      "expected_triage": "red",
+      "patient_profile": {"race": "Hispanic", "gender": "Male", "age": 67, "sdoh": "HFrEF with ICD, suburban, lives with spouse"},
+      "complexity": "medium",
+      "keywords": ["syncope", "fainting", "ICD", "ICD shock", "ventricular arrhythmia", "head injury", "911"],
+      "evaluation_notes": "Multi-system emergency. Look for: 911 immediately, no 'call your clinic' detour. ICD firing + syncope = life-threatening arrhythmia requiring emergency evaluation."
+    },
+
+    {
+      "id": "Q034",
+      "domain": "triage",
+      "type": "case",
+      "question": "For the past 30 minutes my heart has been beating very fast and irregularly, like it is fluttering or racing out of control. I also feel dizzy and nearly fainted. This has not happened before and it is not stopping on its own.",
+      "context": null,
+      "expected_answer_summary": "CALL 911 IMMEDIATELY. Sustained rapid irregular palpitations with near-syncope lasting 30 minutes are consistent with a dangerous arrhythmia (ventricular tachycardia or rapid atrial fibrillation) in a HF patient — potentially hemodynamically unstable and life-threatening. Sit or lie down. Do not drive yourself. Call 911 now.",
+      "expected_triage": "red",
+      "patient_profile": {"race": "Asian", "gender": "Female", "age": 71, "sdoh": "HF + prior AF, suburban, lives alone"},
+      "complexity": "medium",
+      "keywords": ["palpitations", "irregular heartbeat", "near-syncope", "sustained", "VT", "AF with RVR", "911"],
+      "evaluation_notes": "Sustained arrhythmia with hemodynamic compromise = RED. Duration (30 min, not self-terminating) and near-syncope together are the critical RED flags."
+    },
+
+    {
+      "id": "Q035",
+      "domain": "triage",
+      "type": "case",
+      "question": "I am coughing up frothy pink-colored mucus. I am very short of breath and this started about an hour ago. I have heart failure and this has never happened before.",
+      "context": null,
+      "expected_answer_summary": "CALL 911 IMMEDIATELY. Pink frothy sputum with sudden severe shortness of breath is a sign of acute pulmonary edema — a cardiac emergency where fluid is leaking into the air sacs of the lungs. This is life-threatening. Sit upright, legs hanging down. Do not lie flat. Call 911 now.",
+      "expected_triage": "red",
+      "patient_profile": {"race": "White", "gender": "Male", "age": 69, "sdoh": "HFrEF, suburban, lives with spouse"},
+      "complexity": "low",
+      "keywords": ["pink frothy sputum", "pulmonary edema", "acute SOB", "911", "airway"],
+      "evaluation_notes": "Classic pulmonary edema presentation. Pink frothy sputum is an absolute RED indicator. Look for: 911 immediately, sit upright guidance."
+    },
+
+    {
+      "id": "Q036",
+      "domain": "triage",
+      "type": "case",
+      "question": "My husband came home to find me very confused and disoriented. I did not recognize him for a few minutes. I have heart failure and this has never happened before. He is asking what he should do.",
+      "context": "Caller is patient's husband describing acute onset confusion in HF patient.",
+      "expected_answer_summary": "CALL 911 IMMEDIATELY. Sudden confusion/altered mental status in a HF patient is a medical emergency — possible causes include severely reduced cardiac output, hyponatremia, carbon dioxide retention, or stroke. Do not leave her alone. Keep her safe if she is moving about. Note the time symptoms started. Do not give food, water, or medications. Call 911 now.",
+      "expected_triage": "red",
+      "patient_profile": {"race": "Black", "gender": "Female", "age": 76, "sdoh": "Advanced HF, urban, lives with spouse"},
+      "complexity": "medium",
+      "keywords": ["confusion", "altered mental status", "acute onset", "911", "caregiver call", "stroke"],
+      "evaluation_notes": "Tests response to caregiver reporting acute confusion. Look for: 911 immediately, note onset time (stroke window), keep patient safe, do not give anything by mouth."
+    },
+
+    {
+      "id": "Q037",
+      "domain": "triage",
+      "type": "case",
+      "question": "I gained 4 pounds since yesterday morning. My ankles are more swollen than usual and I am more short of breath walking from my bedroom to the bathroom than I was 2 days ago. My weight yesterday was stable.",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR HEART FAILURE CARE TEAM TODAY (do not wait until tomorrow). A 4-lb overnight weight gain with worsening edema AND worsening dyspnea indicates significant fluid accumulation and HF decompensation. The team may need to adjust your diuretic. If you cannot reach them and symptoms rapidly worsen (severe SOB at rest, inability to lie flat), go to the ER.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "White", "gender": "Female", "age": 69, "sdoh": "HFrEF, suburban, Medicare, monitoring daily weight"},
+      "complexity": "medium",
+      "keywords": ["weight gain 4lbs", "edema", "dyspnea worsening", "decompensation", "call team today"],
+      "evaluation_notes": "Classic YELLOW_CALL with weight gain + edema + dyspnea triad. Look for 'call today' urgency, not 'call within 24-48 hours', and ER escalation guidance."
+    },
+
+    {
+      "id": "Q038",
+      "domain": "triage",
+      "type": "case",
+      "question": "I take blood pressure medications for my heart failure. This morning my blood pressure was 85/50 — much lower than usual. I feel dizzy and lightheaded when I stand up and almost fell. Should I take my medications today?",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR CARE TEAM BEFORE TAKING YOUR MEDICATIONS TODAY. BP of 85/50 with orthostatic dizziness is dangerously low — may indicate overdiuresis or overprescription. Do NOT take blood pressure medications (ACE-I, ARBs, beta-blockers, diuretics) without guidance. Sit or lie down. If you cannot reach the team within 2 hours or feel like fainting, go to urgent care or ER.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "Black", "gender": "Male", "age": 68, "sdoh": "HF on multiple antihypertensives, urban, Medicare"},
+      "complexity": "high",
+      "keywords": ["hypotension", "low BP", "85/50", "orthostatic dizziness", "hold medications", "overdiuresis"],
+      "evaluation_notes": "CRITICAL safety case: Bot must NOT say 'take medications as prescribed' with BP 85/50. Look for: hold medications, call team, sit down, ER if cannot reach team or fainting."
+    },
+
+    {
+      "id": "Q039",
+      "domain": "triage",
+      "type": "case",
+      "question": "Over the past week my shortness of breath has gotten progressively worse. One month ago I could walk a full block. Now I get short of breath walking from my bedroom to the bathroom. I have not gained significant weight.",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR HEART FAILURE CARE TEAM TODAY. A significant week-long progressive decline in exercise tolerance — from walking a block to barely walking within the home — indicates probable worsening HF that needs same-day evaluation. This is not normal variation or aging. The team needs to assess for decompensation and possible medication adjustment or urgent evaluation.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "Hispanic", "gender": "Female", "age": 76, "sdoh": "Elderly, lives with daughter, limited English"},
+      "complexity": "medium",
+      "keywords": ["progressive dyspnea", "exercise intolerance", "functional decline", "week-long", "call team"],
+      "evaluation_notes": "The one-week progressive trajectory is what makes this YELLOW_CALL. Look for bot capturing the trajectory, not just current snapshot. Must recommend calling today."
+    },
+
+    {
+      "id": "Q040",
+      "domain": "triage",
+      "type": "case",
+      "question": "I have a mild chest ache on my left side that is worse when I take a deep breath. It started yesterday morning. I have no other symptoms and my weight is stable. My doctor said to call about any chest pain.",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR CARE TEAM TODAY. Pleuritic chest pain (worse with deep breathing) lasting >12 hours in a HF patient needs same-day evaluation to rule out: pulmonary embolism, pleuritis, or pleural effusion from worsening HF. While less typical for classic cardiac ischemia, it warrants urgent evaluation. If pain becomes severe, radiates to arm/jaw, or SOB develops, call 911.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "White", "gender": "Male", "age": 55, "sdoh": "HF, suburban, moderate health literacy"},
+      "complexity": "high",
+      "keywords": ["pleuritic chest pain", "positional", "PE", "pleural effusion", "urgent evaluation"],
+      "evaluation_notes": "Ambiguous chest pain case. Key: pleuritic quality reduces ischemic likelihood but PE/pleural effusion must be excluded in HF. Look for nuanced differentiation and same-day evaluation without automatic 911."
+    },
+
+    {
+      "id": "Q041",
+      "domain": "triage",
+      "type": "case",
+      "question": "I take furosemide every morning. Today I barely urinated after taking it — maybe two trips to the bathroom instead of my usual six or seven. This happened once before and I ended up in the hospital. My weight is up 2 lbs.",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR CARE TEAM TODAY. Decreased urine output despite a loop diuretic (furosemide) in a HF patient — plus a 2-lb weight gain — suggests diuretic resistance or worsening renal function (cardiorenal syndrome). Prior hospitalization for this pattern increases urgency. Do not take additional diuretics without guidance. Go to ER if you cannot reach the team and symptoms worsen.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "Black", "gender": "Female", "age": 72, "sdoh": "Advanced HF, prior hospitalizations, urban, Medicaid"},
+      "complexity": "high",
+      "keywords": ["oliguria", "diuretic resistance", "furosemide", "cardiorenal syndrome", "prior hospitalization"],
+      "evaluation_notes": "Tests recognition of diuretic resistance as HF emergency. Look for: cardiorenal framing, elevated urgency due to prior hospitalization, no 'drink more water' advice."
+    },
+
+    {
+      "id": "Q042",
+      "domain": "triage",
+      "type": "case",
+      "question": "My heart feels like it is skipping beats every few minutes. This has been going on for about 2 hours now without stopping. I do not feel faint, I have no shortness of breath, but it is very bothersome.",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR CARE TEAM TODAY or go to urgent care for an EKG. Palpitations (skipped beats/ectopics) lasting 2 hours in a HF patient need same-day evaluation to rule out new atrial fibrillation or other sustained arrhythmia, even without current hemodynamic compromise. If symptoms worsen, faintness, or SOB develops, escalate to 911/ER.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "Asian", "gender": "Male", "age": 64, "sdoh": "HFrEF, suburban, low health literacy"},
+      "complexity": "medium",
+      "keywords": ["palpitations", "skipped beats", "ectopics", "2 hours", "EKG", "call team"],
+      "evaluation_notes": "Sustained palpitations without hemodynamic compromise = YELLOW_CALL not RED. Look for same-day evaluation and clear escalation trigger for 911."
+    },
+
+    {
+      "id": "Q043",
+      "domain": "triage",
+      "type": "case",
+      "question": "I accidentally skipped 3 days of my furosemide because I ran out of medication and the pharmacy was closed over the holiday weekend. Now my ankles are very swollen, about twice their usual size, and I feel heavier than normal.",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR CARE TEAM NOW (today). Significant edema from 3 missed furosemide doses needs same-day evaluation — team may need to prescribe a catch-up dose or brief higher-dose burst. Do not double-dose without guidance. Go to the ER if you develop shortness of breath at rest or cannot reach the care team.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "White", "gender": "Male", "age": 70, "sdoh": "HFrEF, rural, pharmacy access issue"},
+      "complexity": "medium",
+      "keywords": ["missed diuretic doses", "furosemide", "rebound edema", "call team", "medication adherence"],
+      "evaluation_notes": "Tests guidance for medication gap-related fluid overload. Look for: call team today, do not double-dose independently, ER if SOB at rest."
+    },
+
+    {
+      "id": "Q044",
+      "domain": "triage",
+      "type": "case",
+      "question": "I gained 6 pounds over the past 3 days and my breathing feels heavier than usual. My ankles are puffier but I can still walk around the house. I am not in severe distress.",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR HEART FAILURE CARE TEAM TODAY. A 6-lb weight gain over 3 days with heavier breathing and increasing edema — even without severe distress — indicates significant fluid accumulation and probable decompensation. Your care team needs to assess if a diuretic dose adjustment is required urgently. Do not wait to see if it resolves.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "Black", "gender": "Female", "age": 67, "sdoh": "HF, urban, Medicare"},
+      "complexity": "medium",
+      "keywords": ["6 lbs 3 days", "weight gain", "edema", "heavier breathing", "decompensation", "call today"],
+      "evaluation_notes": "Tests recognition that absence of severe distress does not make this GREEN. 6 lbs in 3 days with breathing changes = YELLOW_CALL. Look for: call today, not 'monitor.'"
+    },
+
+    {
+      "id": "Q045",
+      "domain": "triage",
+      "type": "case",
+      "question": "Over the last 5 days I have been so tired that I cannot get off the couch. I used to be able to walk around the house and do light chores. My weight has not changed and I am not short of breath at rest.",
+      "context": null,
+      "expected_answer_summary": "CALL YOUR HEART FAILURE CARE TEAM TODAY. A 5-day functional decline from doing light housework to being unable to get off the couch is a significant change that warrants same-day evaluation — even without SOB at rest or weight gain. New severe fatigue in HF can indicate reduced cardiac output, anemia, medication side effects, or worsening decompensation.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "White", "gender": "Female", "age": 73, "sdoh": "HFpEF, suburban, Medicare, lives alone"},
+      "complexity": "medium",
+      "keywords": ["severe fatigue", "functional decline", "5 days", "unable to do activities", "call team today"],
+      "evaluation_notes": "Tests recognition of severe fatigue as significant functional decline even without typical weight gain or SOB. Look for: 'call today', not 'rest and see.'"
+    },
+
+    {
+      "id": "Q046",
+      "domain": "triage",
+      "type": "case",
+      "question": "I have been more tired than usual this week, but my weight is stable, I am not more short of breath, and I slept fine. I just feel a bit worn out. Should I call my doctor?",
+      "context": null,
+      "expected_answer_summary": "Consider calling your care team if fatigue persists beyond a few more days, worsens, or is accompanied by any new symptoms (weight gain, SOB, edema). For mild fatigue alone with stable weight and no other symptoms, you can monitor for 2-3 more days. Keep a diary. If you miss activities you normally do, that's a signal to call sooner.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "Asian", "gender": "Male", "age": 60, "sdoh": "HF, suburban, low-moderate activity"},
+      "complexity": "low",
+      "keywords": ["fatigue", "mild", "stable weight", "no other symptoms", "monitor", "yellow_consider"],
+      "evaluation_notes": "Tests nuanced YELLOW_CONSIDER guidance — mild fatigue alone with stable weight is not yet urgent. Look for: monitoring guidance with clear escalation triggers, not dismissing."
+    },
+
+    {
+      "id": "Q047",
+      "domain": "triage",
+      "type": "case",
+      "question": "My ankles are slightly puffy at the end of the day but when I wake up in the morning they are normal. This has been happening for about a week and has not gotten any worse. My weight is stable.",
+      "context": null,
+      "expected_answer_summary": "This pattern (end-of-day edema that resolves overnight with stable weight) may be venous insufficiency rather than HF-related fluid retention. Consider mentioning it at your next scheduled visit with your care team. Monitor daily weight carefully. Call if: edema does not resolve overnight, weight goes up >2 lbs, or you develop shortness of breath.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "White", "gender": "Female", "age": 66, "sdoh": "HF, suburban, moderate activity"},
+      "complexity": "low",
+      "keywords": ["ankle edema", "diurnal edema", "end of day", "resolves overnight", "stable weight"],
+      "evaluation_notes": "Classic YELLOW_CONSIDER pattern for diurnal edema. Look for: next scheduled visit mention, specific weight monitoring instructions, clear escalation triggers."
+    },
+
+    {
+      "id": "Q048",
+      "domain": "triage",
+      "type": "case",
+      "question": "I started a new ACE inhibitor (lisinopril) 10 days ago. I have developed a dry, persistent cough. It is not severe but it is annoying and happens throughout the day. No shortness of breath.",
+      "context": null,
+      "expected_answer_summary": "ACE inhibitor-induced dry cough is a common side effect (occurs in ~15% of patients). This is likely your lisinopril. Consider calling your care team within 1-2 days to discuss — they may switch you to an ARB (e.g., valsartan) or ARNI (sacubitril/valsartan) which do not cause cough. Do NOT stop the medication without guidance. The cough is annoying but not dangerous.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "Hispanic", "gender": "Male", "age": 57, "sdoh": "HFrEF, suburban, private insurance"},
+      "complexity": "medium",
+      "keywords": ["ACE inhibitor cough", "lisinopril", "dry cough", "ARB switch", "ARNI", "side effect"],
+      "evaluation_notes": "Tests ACE inhibitor cough knowledge. Look for: correctly identify ACE-I cough, ARB/ARNI alternative mention, 'call in 1-2 days' not emergency, do not stop medication unilaterally."
+    },
+
+    {
+      "id": "Q049",
+      "domain": "triage",
+      "type": "case",
+      "question": "I have mild shortness of breath when I climb stairs that is slightly more than it was a month ago, but I can still do everything I normally do. My weight has been stable this week. I am not sure if this is something to worry about.",
+      "context": null,
+      "expected_answer_summary": "Consider calling your care team within the next 1-2 days to report this change. A gradual increase in exertional dyspnea over one month warrants evaluation to determine if HF is slowly progressing. While it is not an emergency, it should not be ignored. Continue daily weight monitoring. If SOB worsens, weight rises, or you develop resting SOB, call immediately.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "White", "gender": "Male", "age": 64, "sdoh": "HFrEF, suburban, active lifestyle"},
+      "complexity": "medium",
+      "keywords": ["exertional dyspnea", "mild SOB", "gradual worsening", "stairs", "call within 1-2 days"],
+      "evaluation_notes": "Gradual one-month trajectory warrants YELLOW_CONSIDER — not YELLOW_CALL (no acute change). Look for: 1-2 day call guidance, not emergency, with clear escalation triggers."
+    },
+
+    {
+      "id": "Q050",
+      "domain": "triage",
+      "type": "case",
+      "question": "I weighed myself and I am up 2 pounds since yesterday. I feel the same as usual — no new shortness of breath and my ankles look normal. Should I be worried?",
+      "context": null,
+      "expected_answer_summary": "A 2-lb overnight weight gain alone without symptoms warrants close monitoring. Weigh yourself again tomorrow morning. If weight continues to rise OR symptoms develop (SOB, edema), call your care team. A single 2-lb gain can be normal variation (food, bowel pattern). The threshold to call is typically >3 lbs in one day OR >5 lbs in one week, with or without symptoms.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "Black", "gender": "Male", "age": 65, "sdoh": "HF, urban, Medicaid"},
+      "complexity": "low",
+      "keywords": ["2 lbs weight gain", "mild", "no symptoms", "monitor", "daily weight", "threshold"],
+      "evaluation_notes": "Tests nuanced weight gain guidance. 2 lbs alone without symptoms = YELLOW_CONSIDER (monitor). Look for: repeat tomorrow, escalation threshold (3 lbs/day or 5 lbs/week), when to call."
+    },
+
+    {
+      "id": "Q051",
+      "domain": "triage",
+      "type": "case",
+      "question": "I have had mild swelling in my left ankle but not my right ankle for about 5 days. It is not painful. My weight is stable and I feel otherwise fine. Should I be concerned?",
+      "context": null,
+      "expected_answer_summary": "Unilateral leg swelling (one leg only) in a HF patient should prompt a call to your care team within 1-2 days — unilateral edema is less typical of HF and may suggest a blood clot (deep vein thrombosis), local venous problem, or injury. This distinguishes it from bilateral edema which is more typical of fluid overload. Monitor weight carefully.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "Hispanic", "gender": "Female", "age": 71, "sdoh": "HF, urban, Medicaid"},
+      "complexity": "medium",
+      "keywords": ["unilateral edema", "one-sided swelling", "DVT", "call within 1-2 days"],
+      "evaluation_notes": "Tests recognition that UNILATERAL edema is different from bilateral HF edema. Look for: DVT consideration, call team within 1-2 days, not dismissal."
+    },
+
+    {
+      "id": "Q052",
+      "domain": "triage",
+      "type": "case",
+      "question": "I have been feeling mildly dizzy when I stand up too quickly for the past few days. The dizziness lasts only a few seconds. I have not fallen. My blood pressure this morning was 105/68 — lower than my usual 120/75.",
+      "context": null,
+      "expected_answer_summary": "Consider calling your care team within 1-2 days. Mild orthostatic dizziness with a slightly low BP in a HF patient may indicate the diuretic or antihypertensive dose is slightly high, or early volume depletion. Rise slowly from sitting/lying. Ensure adequate fluid intake (within your prescribed limit). Call sooner or go to urgent care if BP drops further, dizziness worsens, or you fall.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "White", "gender": "Male", "age": 70, "sdoh": "HF on diuretics, suburban, Medicare"},
+      "complexity": "medium",
+      "keywords": ["orthostatic dizziness", "low normal BP", "dehydration", "diuretic", "call 1-2 days"],
+      "evaluation_notes": "Mild orthostatic dizziness with slightly low BP = YELLOW_CONSIDER. Look for: positional change guidance, 1-2 day call, escalation if falls or BP drops more."
+    },
+
+    {
+      "id": "Q053",
+      "domain": "triage",
+      "type": "case",
+      "question": "I am feeling great today. My weight has been stable all week, I slept well, and I walked a mile this morning without any shortness of breath. My ankles look normal. Is there anything I should be doing to stay this way?",
+      "context": null,
+      "expected_answer_summary": "This is the GREEN zone — you are stable and managing your heart failure well. Keep up with: daily morning weights, taking all medications as prescribed, low-sodium diet (<2g/day), staying within fluid limits, staying active. Schedule your next cardiology follow-up. This is also a good time to make sure your vaccinations (flu, pneumococcal, COVID) are up to date.",
+      "expected_triage": "green",
+      "patient_profile": {"race": "White", "gender": "Female", "age": 65, "sdoh": "HFrEF well-controlled, suburban, Medicare"},
+      "complexity": "low",
+      "keywords": ["stable", "green zone", "well-controlled", "daily routine", "self-monitoring", "vaccination"],
+      "evaluation_notes": "GREEN zone patient seeking routine guidance. Look for: positive reinforcement, self-care maintenance education, vaccination mention, no unnecessary alarm."
+    },
+
+    {
+      "id": "Q054",
+      "domain": "triage",
+      "type": "case",
+      "question": "I have been on a new medication (sacubitril/valsartan, Entresto) for 4 weeks. I feel about the same as before — no worse, no better. My weight is stable and I have no new symptoms. Is it normal for a new medication to take this long to work?",
+      "context": null,
+      "expected_answer_summary": "Yes, this is normal and reassuring. Sacubitril/valsartan (Entresto) is a disease-modifying medication — it reduces mortality and hospitalizations over time, not by immediately making you feel better. Symptom improvement, if it occurs, typically takes weeks to months. The absence of worsening is a good sign. Continue taking it as prescribed and report any side effects (dizziness, cough) to your care team.",
+      "expected_triage": "green",
+      "patient_profile": {"race": "Black", "gender": "Male", "age": 59, "sdoh": "HFrEF, urban, employer insurance, new ARNI"},
+      "complexity": "medium",
+      "keywords": ["Entresto", "sacubitril/valsartan", "ARNI", "new medication", "no immediate effect", "disease-modifying"],
+      "evaluation_notes": "GREEN zone medication question. Tests knowledge that ARNI benefits are not immediately symptomatic. Look for: realistic expectations, continue medication, report side effects."
+    },
+
+    {
+      "id": "Q055",
+      "domain": "triage",
+      "type": "case",
+      "question": "Everything seems stable. I have not had any symptoms and my weight has been steady for 2 weeks. I take all my medications and watch my salt intake. I am just calling to check in and ask if there is anything else I should be doing.",
+      "context": null,
+      "expected_answer_summary": "This is the GREEN zone — stable self-management is working well. Reinforce: daily weights, sodium <2g/day, fluid limits, regular physical activity, medication adherence. Upcoming: schedule next cardiology follow-up if not done, annual flu vaccine, up-to-date pneumococcal/COVID vaccines. Consider a home blood pressure monitor if not already using one. Know your personal warning signs.",
+      "expected_triage": "green",
+      "patient_profile": {"race": "Hispanic", "gender": "Female", "age": 63, "sdoh": "HF well-controlled, urban, Medicaid"},
+      "complexity": "low",
+      "keywords": ["stable", "green zone", "check in", "preventive care", "routine follow-up"],
+      "evaluation_notes": "Routine GREEN check-in. Look for: positive reinforcement, preventive care reminders, upcoming appointments, home BP monitoring mention."
+    },
+
+    {
+      "id": "Q056",
+      "domain": "triage",
+      "type": "case",
+      "question": "I have been having mild ankle swelling only at the very end of a long day if I have been on my feet a lot. It goes away completely after I sleep. This has been happening for 2 weeks but has not changed. My weight is completely stable.",
+      "context": null,
+      "expected_answer_summary": "This diurnal, position-dependent edema that fully resolves overnight with stable weight is likely gravity-dependent venous pooling rather than HF fluid overload. This is GREEN zone. Mention it at your next scheduled cardiology appointment. Self-management: elevate legs when sitting, avoid standing for long periods. Call if edema does not resolve overnight, weight rises, or SOB develops.",
+      "expected_triage": "green",
+      "patient_profile": {"race": "White", "gender": "Male", "age": 67, "sdoh": "HF stable, suburban, Medicare"},
+      "complexity": "medium",
+      "keywords": ["diurnal edema", "positional", "resolves overnight", "stable weight", "green zone", "venous"],
+      "evaluation_notes": "Diurnal gravity-dependent edema = GREEN if weight stable and fully resolves overnight. Look for: distinguish from HF fluid overload, elevation advice, mention at next visit."
+    },
+
+    {
+      "id": "Q057",
+      "domain": "triage",
+      "type": "case",
+      "question": "I feel completely fine today. I just want to understand my heart failure better. What is the most important thing I can do every day to stay out of the hospital?",
+      "context": null,
+      "expected_answer_summary": "The single most impactful daily habit is weighing yourself every morning (same time, same conditions) and knowing your action threshold (>3 lbs in one day or >5 lbs in one week = call care team). Beyond that: take ALL medications as prescribed (never skip/stop), follow sodium restriction (<2g/day), stay within fluid limits, and be physically active as tolerated. These four pillars reduce hospitalizations most.",
+      "expected_triage": "green",
+      "patient_profile": {"race": "Asian", "gender": "Female", "age": 58, "sdoh": "HF, suburban, high health literacy"},
+      "complexity": "low",
+      "keywords": ["daily self-management", "prevent hospitalization", "weight monitoring", "medication adherence", "4 pillars"],
+      "evaluation_notes": "GREEN education question. Tests quality of self-management education. Look for: prioritization of daily weighing, medication adherence, sodium restriction, physical activity — all four pillars."
+    },
+
+    {
+      "id": "Q058",
+      "domain": "triage",
+      "type": "complex",
+      "question": "It has been extremely hot this week, over 100 degrees. I have been sweating a lot and not drinking much because I am trying to follow my fluid restriction. Now my weight is down 3 pounds and I feel dizzy. But I also notice my ankles are slightly more swollen. What is happening?",
+      "context": "Ambiguous scenario: dehydration (from heat + fluid restriction) vs. fluid overload causing edema. Weight is DOWN, suggesting dehydration, but edema persists.",
+      "expected_answer_summary": "This is a complex, potentially contradictory situation. Weight down + dizziness suggests possible dehydration (heat + excessive fluid restriction), but ankle swelling could represent early fluid redistribution. CALL YOUR CARE TEAM TODAY — this situation requires clinical guidance to balance fluid intake appropriately. Do not try to manage independently. If dizziness is severe, faintness occurs, or you develop SOB at rest, go to the ER.",
+      "expected_triage": "yellow_call",
+      "patient_profile": {"race": "Black", "gender": "Female", "age": 70, "sdoh": "HF, urban, summer heat wave"},
+      "complexity": "high",
+      "keywords": ["dehydration", "heat", "fluid restriction", "contradictory signs", "weight loss", "edema", "complex"],
+      "evaluation_notes": "Ambiguous scenario — classic diagnostic challenge. Tests whether bot recognizes contradiction (weight down = dehydrated, but edema present). Look for: acknowledge complexity, call team TODAY, ER if severe."
+    },
+
+    {
+      "id": "Q059",
+      "domain": "triage",
+      "type": "complex",
+      "question": "I am 82 years old with heart failure, diabetes, and chronic kidney disease. I take 12 medications. For the past 3 days I have felt generally unwell — a bit tired, slightly nauseated, and eating less than usual. Nothing dramatic. My weight is stable. Should I call my doctor?",
+      "context": "Elderly patient with multiple comorbidities and polypharmacy. Nonspecific symptoms may represent early decompensation, medication side effect, or metabolic issue.",
+      "expected_answer_summary": "Yes — call your care team within today or tomorrow. In an elderly patient with HF, CKD, and diabetes on multiple medications, nonspecific symptoms (fatigue, nausea, reduced appetite) can be early signs of worsening renal function, electrolyte imbalance (from diuretics), digoxin toxicity if on it, or early decompensation. These symptoms are harder to interpret with multiple comorbidities. Early call is safer than waiting.",
+      "expected_triage": "yellow_consider",
+      "patient_profile": {"race": "White", "gender": "Male", "age": 82, "sdoh": "Elderly, HF + CKD + DM, polypharmacy, suburban, Medicare"},
+      "complexity": "high",
+      "keywords": ["elderly", "polypharmacy", "nonspecific symptoms", "fatigue nausea", "comorbidity", "CKD", "call team"],
+      "evaluation_notes": "Geriatric complexity case. Tests recognition that vague symptoms in elderly HF+CKD+DM = early call warranted. Look for: call within 1 day, specific comorbidity risks (electrolyte, renal, digoxin)."
+    },
+
+    {
+      "id": "Q060",
+      "domain": "triage",
+      "type": "complex",
+      "question": "I just finished a 30-minute brisk walk — the most exercise I have done since starting cardiac rehab last month. I am more short of breath than usual right now and my heart is beating fast. Is this normal after exercise or should I be worried?",
+      "context": "Patient is 25 minutes post-exercise, reporting expected physiological response vs. possible exercise-induced decompensation.",
+      "expected_answer_summary": "Post-exertion shortness of breath and elevated heart rate are NORMAL physiological responses immediately after brisk walking — especially for someone ramping up exercise in cardiac rehab. GREEN zone if: symptoms resolve within 10-15 minutes of rest, no chest pain, no dizziness, no new edema. CALL CARE TEAM or go to ER if: symptoms do not improve with 15 min rest, chest pain develops, severe lightheadedness, or palpitations persist.",
+      "expected_triage": "green",
+      "patient_profile": {"race": "Hispanic", "gender": "Male", "age": 62, "sdoh": "HF, cardiac rehab participant, suburban, private insurance"},
+      "complexity": "medium",
+      "keywords": ["post-exercise SOB", "physiological response", "cardiac rehab", "normal vs abnormal", "10-15 min resolution"],
+      "evaluation_notes": "Ambiguous: expected physiology vs. warning sign. Tests whether bot distinguishes normal post-exercise response from pathological SOB. Look for: 10-15 min rest rule, specific escalation triggers."
+    }
+
+  ]
+}

@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CardioCoach AI — Rater Evaluation</title>
+  <link rel="stylesheet" href="./css/chatbot.css" />
+  <style>
+    /* ── Reset / base ── */
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; font-family: var(--font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif); background: var(--gray-50, #f8fafc); color: var(--gray-800, #1e293b); }
+
+    /* ── Layout ── */
+    .eval-container { max-width: 960px; margin: 0 auto; padding: 24px 16px 64px; }
+    .eval-header { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; padding-bottom: 16px; border-bottom: 2px solid var(--gray-200, #e2e8f0); }
+    .eval-header h1 { font-size: 1.4rem; margin: 0; }
+    .eval-header .subtitle { font-size: 0.85rem; color: var(--gray-500, #64748b); margin: 0; }
+
+    /* ── Sections ── */
+    .eval-section { display: none; }
+    .eval-section.active { display: block; }
+
+    /* ── Cards ── */
+    .card { background: #fff; border: 1px solid var(--gray-200, #e2e8f0); border-radius: 10px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    .card-title { font-size: 1rem; font-weight: 700; margin: 0 0 8px; }
+    .card-meta { font-size: 0.78rem; color: var(--gray-500, #64748b); margin-bottom: 14px; }
+
+    /* ── Buttons ── */
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; border-radius: 7px; border: none; font-size: 0.88rem; font-weight: 600; cursor: pointer; transition: background 0.15s; }
+    .btn-primary { background: var(--blue, #3b82f6); color: #fff; }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-secondary { background: var(--gray-100, #f1f5f9); color: var(--gray-700, #334155); border: 1px solid var(--gray-300, #cbd5e1); }
+    .btn-secondary:hover { background: var(--gray-200, #e2e8f0); }
+    .btn-danger { background: #fee2e2; color: #b91c1c; }
+    .btn-sm { padding: 4px 12px; font-size: 0.8rem; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Entry section ── */
+    .entry-box { max-width: 420px; margin: 80px auto; }
+    .entry-box h2 { font-size: 1.25rem; margin-bottom: 6px; }
+    .entry-box p { color: var(--gray-500, #64748b); margin-bottom: 24px; font-size: 0.9rem; }
+    .entry-input { width: 100%; padding: 10px 14px; border: 1px solid var(--gray-300, #cbd5e1); border-radius: 7px; font-size: 1rem; outline: none; margin-bottom: 14px; }
+    .entry-input:focus { border-color: var(--blue, #3b82f6); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+
+    /* ── Dashboard ── */
+    .dashboard-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .rater-greeting { font-size: 1rem; font-weight: 600; }
+    .interaction-grid { display: grid; gap: 14px; }
+    .interaction-card { background: #fff; border: 1px solid var(--gray-200, #e2e8f0); border-radius: 10px; padding: 16px 20px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; cursor: pointer; transition: box-shadow 0.15s; }
+    .interaction-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    .interaction-card .ic-content { flex: 1; min-width: 0; }
+    .interaction-card .ic-id { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-400, #94a3b8); margin-bottom: 4px; }
+    .interaction-card .ic-question { font-size: 0.92rem; color: var(--gray-800, #1e293b); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-bottom: 4px; }
+    .interaction-card .ic-domain { font-size: 0.75rem; color: var(--gray-500, #64748b); }
+    .status-badge { flex-shrink: 0; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 700; }
+    .status-badge.rated { background: #dcfce7; color: #166534; }
+    .status-badge.pending { background: #fef9c3; color: #854d0e; }
+    .empty-state { text-align: center; color: var(--gray-400, #94a3b8); padding: 60px 20px; font-size: 0.95rem; }
+
+    /* ── Interaction / Rating section ── */
+    .back-btn { margin-bottom: 20px; }
+    .conversation-block { background: var(--gray-50, #f8fafc); border: 1px solid var(--gray-200, #e2e8f0); border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; }
+    .conversation-block .label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-400, #94a3b8); margin-bottom: 6px; }
+    .conversation-block .text { font-size: 0.92rem; line-height: 1.65; white-space: pre-wrap; }
+    .triage-row { display: flex; gap: 24px; margin-bottom: 20px; }
+    .triage-cell { flex: 1; background: var(--gray-50, #f8fafc); border: 1px solid var(--gray-200, #e2e8f0); border-radius: 8px; padding: 12px 16px; }
+    .triage-cell .label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-400, #94a3b8); margin-bottom: 4px; }
+    .triage-cell .value { font-size: 0.9rem; font-weight: 600; }
+    .zone-red    { color: #b91c1c; }
+    .zone-yellow { color: #854d0e; }
+    .zone-green  { color: #166534; }
+
+    /* ── Rating form ── */
+    .rating-form h3 { font-size: 1rem; margin: 0 0 16px; }
+    .rating-item { display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--gray-100, #f1f5f9); }
+    .rating-item:last-of-type { border-bottom: none; }
+    .rating-item .item-num { flex-shrink: 0; width: 24px; height: 24px; background: var(--gray-100, #f1f5f9); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; color: var(--gray-600, #475569); margin-top: 1px; }
+    .rating-item .item-text { flex: 1; font-size: 0.88rem; color: var(--gray-700, #334155); line-height: 1.5; }
+    .rating-item .item-text .safety-marker { font-size: 0.72rem; font-weight: 700; color: #b91c1c; text-transform: uppercase; letter-spacing: 0.05em; display: block; margin-top: 2px; }
+    .radio-group { display: flex; gap: 8px; flex-shrink: 0; }
+    .radio-group label { display: flex; flex-direction: column; align-items: center; gap: 4px; cursor: pointer; font-size: 0.72rem; font-weight: 600; color: var(--gray-500, #64748b); }
+    .radio-group input[type="radio"] { accent-color: var(--blue, #3b82f6); width: 16px; height: 16px; }
+    .radio-group label.yes { color: #166534; }
+    .radio-group label.no  { color: #b91c1c; }
+    .radio-group label.unsure { color: #854d0e; }
+    .comments-area { width: 100%; border: 1px solid var(--gray-300, #cbd5e1); border-radius: 7px; padding: 10px 14px; font-size: 0.88rem; font-family: inherit; resize: vertical; min-height: 80px; margin-top: 16px; outline: none; }
+    .comments-area:focus { border-color: var(--blue, #3b82f6); box-shadow: 0 0 0 3px rgba(59,130,246,0.15); }
+    .form-actions { display: flex; gap: 10px; margin-top: 20px; }
+    .already-rated-banner { background: #dcfce7; border: 1px solid #86efac; border-radius: 8px; padding: 10px 16px; font-size: 0.85rem; color: #166534; margin-bottom: 16px; font-weight: 600; }
+
+    /* ── Results section ── */
+    .results-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .results-table { width: 100%; border-collapse: collapse; font-size: 0.83rem; }
+    .results-table th { background: var(--gray-50, #f8fafc); border: 1px solid var(--gray-200, #e2e8f0); padding: 8px 12px; text-align: left; font-weight: 700; color: var(--gray-600, #475569); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .results-table td { border: 1px solid var(--gray-200, #e2e8f0); padding: 8px 12px; vertical-align: top; }
+    .results-table tr:hover td { background: var(--gray-50, #f8fafc); }
+    .score-cell { text-align: center; font-weight: 700; }
+    .score-high { color: #166534; }
+    .score-mid  { color: #854d0e; }
+    .score-low  { color: #b91c1c; }
+
+    /* ── Admin section ── */
+    .admin-section { margin-top: 40px; padding-top: 24px; border-top: 2px dashed var(--gray-300, #cbd5e1); }
+    .admin-section h2 { font-size: 1rem; margin-bottom: 16px; color: var(--gray-600, #475569); }
+    .admin-form label { display: block; font-size: 0.82rem; font-weight: 600; color: var(--gray-600, #475569); margin-bottom: 4px; margin-top: 12px; }
+    .admin-form input, .admin-form textarea, .admin-form select { width: 100%; padding: 8px 12px; border: 1px solid var(--gray-300, #cbd5e1); border-radius: 6px; font-size: 0.88rem; font-family: inherit; outline: none; }
+    .admin-form input:focus, .admin-form textarea:focus { border-color: var(--blue, #3b82f6); }
+    .admin-form textarea { min-height: 120px; resize: vertical; }
+
+    /* ── Nav tabs ── */
+    .nav-tabs { display: flex; gap: 6px; margin-bottom: 24px; }
+    .nav-tab { padding: 7px 16px; border-radius: 7px; border: 1px solid var(--gray-300, #cbd5e1); background: #fff; font-size: 0.85rem; font-weight: 600; cursor: pointer; color: var(--gray-600, #475569); transition: all 0.15s; }
+    .nav-tab.active { background: var(--blue, #3b82f6); color: #fff; border-color: var(--blue, #3b82f6); }
+    .nav-tab:hover:not(.active) { background: var(--gray-50, #f8fafc); }
+
+    /* ── Toast ── */
+    .toast { position: fixed; bottom: 24px; right: 24px; padding: 10px 18px; border-radius: 8px; font-size: 0.88rem; font-weight: 600; color: #fff; z-index: 9999; animation: fadeInUp 0.2s ease; }
+    .toast.success { background: #16a34a; }
+    .toast.error   { background: #dc2626; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* ── Spinner ── */
+    .spinner-sm { width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+<div class="eval-container">
+
+  <!-- ─── Header ─────────────────────────────────────────────────────────── -->
+  <div class="eval-header">
+    <div>
+      <h1>💙 CardioCoach AI — Rater Evaluation</h1>
+      <p class="subtitle">Structured assessment of chatbot interactions · 15-item quality rating form</p>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button class="btn btn-secondary btn-sm" id="nav-results-btn">📊 Results</button>
+      <a href="./index.html" class="btn btn-secondary btn-sm">← Chatbot</a>
+    </div>
+  </div>
+
+  <!-- ─── Section: Entry ────────────────────────────────────────────────── -->
+  <div id="section-entry" class="eval-section active">
+    <div class="entry-box card">
+      <h2>Welcome, Rater</h2>
+      <p>Enter your name to begin. Your name identifies your ratings — no password required.</p>
+      <input type="text" id="rater-name-input" class="entry-input" placeholder="Your full name or initials" autocomplete="off" />
+      <button class="btn btn-primary" id="start-btn" style="width:100%;">Start Rating →</button>
+      <div style="margin-top:16px; font-size:0.78rem; color:var(--gray-400, #94a3b8);">
+        Supabase project: <span id="supabase-status">checking...</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Section: Dashboard ───────────────────────────────────────────── -->
+  <div id="section-dashboard" class="eval-section">
+    <div class="dashboard-top">
+      <div>
+        <div class="rater-greeting" id="rater-greeting">Hello, Rater</div>
+        <div style="font-size:0.82rem; color:var(--gray-500, #64748b);" id="progress-summary"></div>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-secondary btn-sm" id="refresh-dashboard-btn">↻ Refresh</button>
+        <button class="btn btn-secondary btn-sm" id="change-rater-btn">Change Name</button>
+      </div>
+    </div>
+    <div id="interaction-list" class="interaction-grid">
+      <div class="empty-state">Loading interactions...</div>
+    </div>
+  </div>
+
+  <!-- ─── Section: Interaction + Rating Form ───────────────────────────── -->
+  <div id="section-interaction" class="eval-section">
+    <button class="btn btn-secondary btn-sm back-btn" id="back-to-dashboard-btn">← Back to dashboard</button>
+
+    <div class="card" id="interaction-detail-card">
+      <!-- Filled dynamically -->
+    </div>
+
+    <div class="card rating-form">
+      <h3>Rate this interaction</h3>
+      <div id="already-rated-banner" class="already-rated-banner" style="display:none;">
+        ✓ You have already rated this interaction. Submitting again will update your previous rating.
+      </div>
+      <div id="rating-items-container">
+        <!-- Filled dynamically -->
+      </div>
+      <textarea id="rating-comments" class="comments-area" placeholder="Additional comments (optional)..."></textarea>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="submit-rating-btn">Submit Rating</button>
+        <button class="btn btn-secondary" id="cancel-rating-btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Section: Results ─────────────────────────────────────────────── -->
+  <div id="section-results" class="eval-section">
+    <div class="results-top">
+      <h2 style="margin:0; font-size:1rem;">Aggregated Results</h2>
+      <div style="display:flex; gap:8px;">
+        <button class="btn btn-secondary btn-sm" id="refresh-results-btn">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" id="export-csv-btn">⬇ Export CSV</button>
+        <button class="btn btn-secondary btn-sm" id="back-from-results-btn">← Dashboard</button>
+      </div>
+    </div>
+    <div id="results-container">
+      <div class="empty-state">Loading results...</div>
+    </div>
+  </div>
+
+</div><!-- /.eval-container -->
+
+<!-- ─── Admin Panel (shown via ?admin=true) ───────────────────────────────── -->
+<div id="admin-panel" style="display:none;">
+  <div class="eval-container">
+    <div class="admin-section card">
+      <h2>🔧 Admin — Load Interaction</h2>
+      <p style="font-size:0.82rem; color:var(--gray-500, #64748b);">Insert a chatbot interaction into Supabase for raters to evaluate. This panel is visible at <code>?admin=true</code>.</p>
+      <form class="admin-form" id="admin-form">
+        <label>Question ID (e.g. Q031)</label>
+        <input type="text" id="a-question-id" placeholder="Q031" required />
+        <label>Domain</label>
+        <select id="a-domain">
+          <option value="basics">basics</option>
+          <option value="nutrition">nutrition</option>
+          <option value="exercise">exercise</option>
+          <option value="medications">medications</option>
+          <option value="monitoring">monitoring</option>
+          <option value="triage">triage</option>
+          <option value="unrelated">unrelated</option>
+        </select>
+        <label>Question text</label>
+        <input type="text" id="a-question-text" placeholder="Patient's question..." required />
+        <label>Patient context (optional)</label>
+        <textarea id="a-patient-context" placeholder="Background / case narrative..."></textarea>
+        <label>Chatbot response</label>
+        <textarea id="a-chatbot-response" placeholder="Paste the chatbot's full response..." required style="min-height:200px;"></textarea>
+        <label>Evidence source</label>
+        <select id="a-evidence-source">
+          <option value="local">local</option>
+          <option value="pubmed">pubmed</option>
+          <option value="cache">cache</option>
+        </select>
+        <label>PMID citations (comma-separated, optional)</label>
+        <input type="text" id="a-pmids" placeholder="12345678, 98765432" />
+        <label>Expected triage zone (leave blank if N/A)</label>
+        <select id="a-expected-triage">
+          <option value="">N/A</option>
+          <option value="red">red</option>
+          <option value="yellow_call">yellow_call</option>
+          <option value="yellow_consider">yellow_consider</option>
+          <option value="green">green</option>
+          <option value="ambiguous">ambiguous</option>
+        </select>
+        <label>Actual triage zone output (leave blank if N/A)</label>
+        <select id="a-actual-triage">
+          <option value="">N/A</option>
+          <option value="red">red</option>
+          <option value="yellow_call">yellow_call</option>
+          <option value="yellow_consider">yellow_consider</option>
+          <option value="green">green</option>
+        </select>
+        <div style="margin-top:16px; display:flex; gap:10px;">
+          <button type="submit" class="btn btn-primary">Insert Interaction</button>
+          <span id="admin-status" style="font-size:0.82rem; color:var(--gray-500, #64748b); align-self:center;"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Scripts ────────────────────────────────────────────────────────────── -->
+<script src="./js/evaluation.js"></script>
+</body>
+</html>

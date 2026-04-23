@@ -985,3 +985,24 @@ textarea.settings-input {
 }
 .collapsible-content { font-size: 12px; color: var(--gray-600); margin-top: 6px; line-height: 1.5; }
 .collapsible-content.hidden { display: none; }
+
+/* ─── Evidence Source Badges ────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.badge-live-evidence {
+  background: #e8f5e9;
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
+}
+.badge-cached-evidence {
+  background: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #90caf9;
+}

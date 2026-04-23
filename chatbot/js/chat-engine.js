@@ -9,9 +9,23 @@ class ChatEngine {
     this.kb = knowledgeBase;
     this.triage = triageEngine;
     this.apiKey = "";
-    this.model = "gpt-4o-mini"; // Default: fast and cost-efficient
+    this.model = "gpt-5.4-mini"; // Default: GPT-5.4 Mini — fast and cost-efficient
     this.conversationHistory = [];
     this.maxHistoryTurns = 10;
+
+    // Living evidence state (set during initialize())
+    this.livingEvidence = null;
+    // Tracks which source was used for the last response: 'local' | 'pubmed' | 'cache'
+    this._lastEvidenceSource = "local";
+  }
+
+  /**
+   * Initialize the LivingEvidenceEngine after the API key is loaded.
+   * Call this after loadApiKey().
+   */
+  initLivingEvidence() {
+    const ncbiKey = localStorage.getItem("hf_ncbi_api_key") || null;
+    this.livingEvidence = new LivingEvidenceEngine({ chatEngine: this, ncbiApiKey: ncbiKey });
   }
 
   setApiKey(key) {
@@ -33,8 +47,22 @@ class ChatEngine {
     return this.apiKey;
   }
 
+  setNcbiApiKey(key) {
+    const trimmed = key.trim();
+    localStorage.setItem("hf_ncbi_api_key", trimmed);
+    // Reinitialise living evidence engine with new key
+    if (this.livingEvidence) {
+      this.livingEvidence.ncbiApiKey = trimmed || null;
+    }
+  }
+
   setModel(model) {
     this.model = model;
+  }
+
+  /** Returns the evidence source used for the last chat() call */
+  getLastEvidenceSource() {
+    return this._lastEvidenceSource;
   }
 
   clearHistory() {
@@ -185,7 +213,30 @@ Do NOT provide a triage zone. Provide concise, evidence-based educational inform
     }
 
     const retrievedChunks = this.kb.retrieve(userMessage, 6);
-    const context = this.kb.buildContext(retrievedChunks);
+    const bestScore = this.kb.getBestScore(retrievedChunks);
+    let context = this.kb.buildContext(retrievedChunks);
+    let leResult = null;
+
+    // Living evidence fallback: if local KB relevance is low and the query is
+    // not purely off-topic (intent detection guards the off-topic case upstream)
+    if (bestScore < (window.TFIDF_THRESHOLD || 3.0) && this.livingEvidence && !options.skipLivingEvidence) {
+      try {
+        leResult = await this.livingEvidence.query(userMessage);
+        if (leResult.usedLivingEvidence && leResult.response) {
+          // Prepend living evidence context to any local context found
+          const localCtx = retrievedChunks.length > 0 ? "\n\n" + context : "";
+          context = `## Recent Research Evidence (PubMed)\n${leResult.response}${localCtx}`;
+          this._lastEvidenceSource = leResult.fromCache ? "cache" : "pubmed";
+        } else {
+          this._lastEvidenceSource = "local";
+        }
+      } catch (e) {
+        console.warn("[ChatEngine] Living evidence query failed:", e.message);
+        this._lastEvidenceSource = "local";
+      }
+    } else {
+      this._lastEvidenceSource = "local";
+    }
 
     const systemPrompt = this.buildSystemPrompt(
       context,
@@ -226,7 +277,14 @@ Do NOT provide a triage zone. Provide concise, evidence-based educational inform
       }
     });
 
-    return { content: assistantMessage, sources: usedSources, retrievedChunks, usage: data.usage };
+    return {
+      content: assistantMessage,
+      sources: usedSources,
+      retrievedChunks,
+      usage: data.usage,
+      evidenceSource: this._lastEvidenceSource,
+      pmids: leResult?.pmids || []
+    };
   }
 
   /**

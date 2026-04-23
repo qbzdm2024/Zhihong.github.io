@@ -4,6 +4,12 @@
  * Supports dynamic addition/removal of knowledge sources.
  */
 
+// Minimum TF-IDF score for local KB results to be considered adequate.
+// If the best chunk score is below this threshold, the LivingEvidenceEngine
+// will attempt a real-time PubMed search as a fallback.
+const TFIDF_THRESHOLD = 3.0;
+window.TFIDF_THRESHOLD = TFIDF_THRESHOLD;
+
 class KnowledgeBase {
   constructor() {
     this.chunks = [];
@@ -172,7 +178,7 @@ class KnowledgeBase {
    * Uses TF-IDF-style keyword matching.
    * @param {string} query
    * @param {number} topK - Number of top results
-   * @returns {Array} ranked chunks with scores
+   * @returns {Array} ranked chunks with scores (each chunk has a .score property)
    */
   retrieve(query, topK = 5) {
     const enabledSourceIds = new Set(
@@ -195,6 +201,16 @@ class KnowledgeBase {
       score: item.score,
       source: this.sources.find((s) => s.id === item.chunk.sourceId)
     }));
+  }
+
+  /**
+   * Returns the best (highest) TF-IDF score from a retrieve() result.
+   * Used by ChatEngine to decide whether to fall back to PubMed.
+   * @param {Array} retrievedChunks - result of retrieve()
+   * @returns {number}
+   */
+  getBestScore(retrievedChunks) {
+    return retrievedChunks.length > 0 ? (retrievedChunks[0].score || 0) : 0;
   }
 
   /**

@@ -25,6 +25,7 @@ class App {
     await this.kb.initialize();
     this.chatEngine = new ChatEngine(this.kb, this.triageEngine);
     this.chatEngine.loadApiKey();
+    this.chatEngine.initLivingEvidence();
 
     this._bindEvents();
     this._renderSources();
@@ -110,7 +111,11 @@ class App {
   }
 
   // Returns the created message element so callers can append triage cards
-  _addMessage(role, content, sources = []) {
+  // @param {string} role - 'user' | 'assistant'
+  // @param {string} content
+  // @param {Array} sources
+  // @param {string|null} evidenceSource - 'local' | 'pubmed' | 'cache' (assistant only)
+  _addMessage(role, content, sources = [], evidenceSource = null) {
     const container = document.getElementById("chat-messages");
     const msgDiv = document.createElement("div");
     msgDiv.className = `message ${role}`;
@@ -130,6 +135,21 @@ class App {
       bubble.textContent = content;
     }
     bodyDiv.appendChild(bubble);
+
+    // Evidence source badge (assistant messages only)
+    if (role === "assistant" && evidenceSource && evidenceSource !== "local") {
+      const badge = document.createElement("span");
+      if (evidenceSource === "pubmed") {
+        badge.className = "badge badge-live-evidence";
+        badge.title = "This response includes real-time evidence retrieved from PubMed";
+        badge.textContent = "⚗ Live Evidence";
+      } else if (evidenceSource === "cache") {
+        badge.className = "badge badge-cached-evidence";
+        badge.title = "This response includes recently cached PubMed evidence (retrieved within 24 hours)";
+        badge.textContent = "⚗ Cached Evidence";
+      }
+      bubble.appendChild(badge);
+    }
 
     // Source chips
     if (sources && sources.length > 0) {
@@ -583,6 +603,24 @@ class App {
       if (e.key === "Enter") { e.preventDefault(); saveKey(e.target.value); apiInput.blur(); }
     });
 
+    // NCBI API key
+    const ncbiInput = document.getElementById("ncbi-key-input");
+    if (ncbiInput) {
+      const saveNcbiKey = (value) => {
+        const key = value.trim();
+        this.chatEngine.setNcbiApiKey(key);
+        if (key) this._showToast("NCBI key saved", "success");
+      };
+      ncbiInput.addEventListener("blur",  (e) => saveNcbiKey(e.target.value));
+      ncbiInput.addEventListener("paste", (e) => { setTimeout(() => saveNcbiKey(ncbiInput.value), 0); });
+      ncbiInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); saveNcbiKey(e.target.value); ncbiInput.blur(); }
+      });
+      // Pre-fill if saved
+      const savedNcbi = localStorage.getItem("hf_ncbi_api_key");
+      if (savedNcbi) ncbiInput.value = savedNcbi;
+    }
+
     // Model select
     document.getElementById("model-select").addEventListener("change", (e) => {
       this.chatEngine.setModel(e.target.value);
@@ -760,7 +798,7 @@ class App {
         // Educational response + triage card
         const chatResult = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources);
+        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources, chatResult.evidenceSource);
         await this._runAutoTriage(combinedText, detectedSymptoms, extractedAnswers, msgEl);
         this.triageFollowUpState = null;
         return;
@@ -781,7 +819,7 @@ class App {
         // Educational response first, then AI triage
         const chatResult = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources);
+        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources, chatResult.evidenceSource);
 
         this._setLoading(true, "Running AI independent triage...");
         let aiIndResult;
@@ -833,7 +871,7 @@ class App {
         // Educational response first
         const chatResult = await this.chatEngine.chat(message, { triageMode: false });
         this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources);
+        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources, chatResult.evidenceSource);
 
         this._setLoading(true, "Running AI independent triage...");
         let aiIndResult;
@@ -883,7 +921,7 @@ class App {
             followUpQuestions: neededFollowUps
           });
           this._removeTypingIndicator();
-          this._addMessage("assistant", result.content, result.sources);
+          this._addMessage("assistant", result.content, result.sources, result.evidenceSource);
           return;
         }
 
@@ -898,7 +936,7 @@ class App {
         }
         const result = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", result.content, result.sources);
+        const msgEl = this._addMessage("assistant", result.content, result.sources, result.evidenceSource);
         await this._runAutoTriage(message, detectedSymptoms, extractedAnswers, msgEl);
         return;
       }
@@ -913,7 +951,7 @@ class App {
         cardiacNonTriage
       });
       this._removeTypingIndicator();
-      this._addMessage("assistant", result.content, result.sources);
+      this._addMessage("assistant", result.content, result.sources, result.evidenceSource);
 
     } catch (err) {
       this._removeTypingIndicator();
