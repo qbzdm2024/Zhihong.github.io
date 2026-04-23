@@ -1,6 +1,6 @@
 {
-  "version": "1.1",
-  "lastUpdated": "2026-04-22",
+  "version": "1.2",
+  "lastUpdated": "2026-04-23",
   "sources": [
     {
       "id": "cornell_homecare",
@@ -55,7 +55,7 @@
       "name": "2021 ESC Guidelines for the Diagnosis and Treatment of Acute and Chronic Heart Failure",
       "url": "https://doi.org/10.1093/eurheartj/ehab368",
       "type": "clinical_guideline",
-      "description": "European Society of Cardiology 2021 heart failure guidelines",
+      "description": "ESC 2021 HF Guidelines: diuretics, monitoring, comorbidities, acute decompensation",
       "enabled": true
     },
     {
@@ -63,7 +63,7 @@
       "name": "HFSA 2023 Heart Failure Guideline Update",
       "url": "https://www.jheart.com/article/S1071-9164(23)00050-8/fulltext",
       "type": "clinical_guideline",
-      "description": "Heart Failure Society of America 2023 guideline update",
+      "description": "HFSA 2023 Update: GDMT, HFpEF, sodium/fluid, transitions of care",
       "enabled": true
     }
   ],
@@ -73,7 +73,15 @@
       "sourceId": "aha_hf_warning",
       "title": "What is Heart Failure?",
       "category": "basics",
-      "keywords": ["heart failure", "definition", "what is", "basics", "ejection fraction", "HFrEF", "HFpEF"],
+      "keywords": [
+        "heart failure",
+        "definition",
+        "what is",
+        "basics",
+        "ejection fraction",
+        "HFrEF",
+        "HFpEF"
+      ],
       "content": "Heart failure means the heart is not pumping as well as it should. It does not mean the heart has stopped working. Instead, the heart cannot pump enough blood to meet the body's needs. Heart failure can affect the left side, right side, or both sides of the heart. There are two main types: Heart failure with reduced ejection fraction (HFrEF), where the heart muscle is weakened and cannot squeeze properly; and Heart failure with preserved ejection fraction (HFpEF), where the heart muscle is stiff and cannot fill with blood properly. Common causes include coronary artery disease, high blood pressure, diabetes, and previous heart attacks."
     },
     {
@@ -81,7 +89,15 @@
       "sourceId": "aha_hf_warning",
       "title": "Heart Failure Stages",
       "category": "basics",
-      "keywords": ["stages", "NYHA", "class", "severity", "progression", "ACC stages", "A B C D"],
+      "keywords": [
+        "stages",
+        "NYHA",
+        "class",
+        "severity",
+        "progression",
+        "ACC stages",
+        "A B C D"
+      ],
       "content": "Heart failure is classified by the ACC/AHA into four stages (A–D) and by the New York Heart Association (NYHA) into four functional classes. Stage A: At risk for heart failure, no structural disease or symptoms. Stage B: Structural heart disease but no symptoms. Stage C: Structural heart disease with current or prior symptoms. Stage D: Advanced heart failure with symptoms at rest requiring specialized interventions. NYHA Class I: No symptoms with ordinary activity. Class II: Mild symptoms with moderate exertion. Class III: Marked limitation — symptoms with minimal exertion. Class IV: Symptoms at rest or with any activity."
     },
     {
@@ -89,7 +105,18 @@
       "sourceId": "aha_hf_warning",
       "title": "Common Symptoms of Heart Failure",
       "category": "symptoms",
-      "keywords": ["symptoms", "shortness of breath", "dyspnea", "swelling", "edema", "fatigue", "tired", "weight gain", "cough", "confusion"],
+      "keywords": [
+        "symptoms",
+        "shortness of breath",
+        "dyspnea",
+        "swelling",
+        "edema",
+        "fatigue",
+        "tired",
+        "weight gain",
+        "cough",
+        "confusion"
+      ],
       "content": "Common symptoms of heart failure include: Shortness of breath (dyspnea) — especially during activity, at rest, or when lying flat (orthopnea). Persistent coughing or wheezing, sometimes producing pink or white mucus. Buildup of excess fluid in the body (edema) — swelling in the legs, ankles, feet, or abdomen. Tiredness or fatigue — feeling exhausted or weak, especially during physical activities. Lack of appetite or nausea — the digestive system gets less blood, causing digestive discomfort. Confusion or impaired thinking — reduced blood flow to the brain. Increased heart rate — the heart beats faster to compensate for reduced function. Sudden weight gain from fluid retention (more than 2–3 pounds in one day or 5 pounds in one week)."
     },
     {
@@ -97,7 +124,13 @@
       "sourceId": "cornell_homecare",
       "title": "When Symptoms Mean You Need Help",
       "category": "symptoms",
-      "keywords": ["worsening symptoms", "new symptoms", "when to call", "getting worse", "alert signs"],
+      "keywords": [
+        "worsening symptoms",
+        "new symptoms",
+        "when to call",
+        "getting worse",
+        "alert signs"
+      ],
       "content": "It is important to know the difference between stable and changing symptoms. Stable symptoms are ones you have had for a long time and are not getting worse. Changing or new symptoms need attention. Watch for: sudden or significant increase in breathlessness, new chest pain or pressure, swelling that is new or much worse than usual, rapid unexplained weight gain, dizziness or lightheadedness (especially when standing), new or unusual fatigue that limits your usual activities, and feeling confused or more forgetful than usual. Track your symptoms daily and report changes to your care team."
     },
     {
@@ -105,7 +138,14 @@
       "sourceId": "cornell_homecare",
       "title": "Daily Weight Monitoring",
       "category": "monitoring",
-      "keywords": ["weight", "daily weight", "weigh yourself", "fluid retention", "weight gain", "scale"],
+      "keywords": [
+        "weight",
+        "daily weight",
+        "weigh yourself",
+        "fluid retention",
+        "weight gain",
+        "scale"
+      ],
       "content": "Weighing yourself every day is one of the most important things you can do to manage heart failure. Weigh yourself every morning after you use the bathroom and before you eat or drink anything. Wear the same clothes each time, or no clothes. Use the same scale. Record your weight each day. A weight gain of 2 pounds in one day or 5 pounds in one week may mean you are retaining fluid. This is a yellow-zone warning and you should contact your care team. A gain of 4 pounds in one day is a red-zone emergency — contact your care team immediately or seek emergency care."
     },
     {
@@ -113,7 +153,15 @@
       "sourceId": "cornell_homecare",
       "title": "Blood Pressure and Heart Rate Monitoring",
       "category": "monitoring",
-      "keywords": ["blood pressure", "heart rate", "pulse", "monitoring", "vitals", "BP", "HR"],
+      "keywords": [
+        "blood pressure",
+        "heart rate",
+        "pulse",
+        "monitoring",
+        "vitals",
+        "BP",
+        "HR"
+      ],
       "content": "Monitor your blood pressure and heart rate regularly as directed by your care team. Normal blood pressure is generally below 120/80 mmHg. Your care team will give you a target range. If your blood pressure is consistently above 140/90 or below 90/60, contact your care team. Monitor your heart rate. A resting heart rate above 100 beats per minute (tachycardia) or below 60 beats per minute (bradycardia), especially with symptoms, should be reported. An irregular heartbeat (feeling your heart flutter, skip, or race) should always be reported to your care team."
     },
     {
@@ -121,7 +169,16 @@
       "sourceId": "acc_aha_2022",
       "title": "Sodium (Salt) Restriction",
       "category": "diet",
-      "keywords": ["sodium", "salt", "diet", "restrict", "food", "low sodium", "2300 mg", "salty foods"],
+      "keywords": [
+        "sodium",
+        "salt",
+        "diet",
+        "restrict",
+        "food",
+        "low sodium",
+        "2300 mg",
+        "salty foods"
+      ],
       "content": "The 2022 AHA/ACC/HFSA guidelines recommend limiting sodium intake to less than 2,300 mg per day to reduce fluid congestion in heart failure. High sodium intake causes the body to retain water, increasing fluid buildup and worsening heart failure symptoms. Tips for reducing sodium: avoid adding salt to food at the table or during cooking; read food labels and choose products with less than 600mg sodium per serving; avoid processed, canned, and fast foods which are high in sodium; use herbs and spices instead of salt for flavoring; choose fresh or frozen vegetables without added salt; be aware that restaurant meals are typically very high in sodium."
     },
     {
@@ -129,7 +186,15 @@
       "sourceId": "cornell_homecare",
       "title": "Fluid Management",
       "category": "diet",
-      "keywords": ["fluids", "water", "fluid restriction", "drinks", "liquid", "how much to drink", "dehydration"],
+      "keywords": [
+        "fluids",
+        "water",
+        "fluid restriction",
+        "drinks",
+        "liquid",
+        "how much to drink",
+        "dehydration"
+      ],
       "content": "Many people with heart failure need to limit how much fluid they drink. Your care team will tell you how much fluid you are allowed per day, typically 1.5 to 2 liters (6–8 cups). All liquids count: water, juice, milk, soup, coffee, tea, ice cream, gelatin. Tips: use smaller cups to make your fluid allowance last longer; suck on ice chips if you feel thirsty; rinse your mouth with water without swallowing; keep track of your fluid intake. Overloading on fluids causes congestion and worsening shortness of breath. However, do not restrict fluids more than your care team recommends as this can cause dehydration and kidney problems."
     },
     {
@@ -137,7 +202,16 @@
       "sourceId": "aha_hf_living",
       "title": "Heart-Healthy Diet for Heart Failure",
       "category": "diet",
-      "keywords": ["diet", "nutrition", "potassium", "healthy eating", "Mediterranean", "DASH", "alcohol", "food choices"],
+      "keywords": [
+        "diet",
+        "nutrition",
+        "potassium",
+        "healthy eating",
+        "Mediterranean",
+        "DASH",
+        "alcohol",
+        "food choices"
+      ],
       "content": "A heart-healthy diet is essential for managing heart failure. Eat plenty of fruits and vegetables. Choose whole grains over refined grains. Include lean proteins: fish, poultry, beans, and nuts. Limit saturated fats, trans fats, and cholesterol. Avoid or minimize alcohol — it can weaken the heart muscle and interfere with medications. Some medications (like ACE inhibitors or ARBs) may affect potassium levels — follow your care team's advice about potassium-containing foods like bananas and oranges. The DASH diet (Dietary Approaches to Stop Hypertension) and Mediterranean diet patterns are often recommended for heart health."
     },
     {
@@ -145,7 +219,15 @@
       "sourceId": "acc_aha_2022",
       "title": "Exercise and Physical Activity",
       "category": "exercise",
-      "keywords": ["exercise", "activity", "physical activity", "walk", "cardiac rehab", "fitness", "movement"],
+      "keywords": [
+        "exercise",
+        "activity",
+        "physical activity",
+        "walk",
+        "cardiac rehab",
+        "fitness",
+        "movement"
+      ],
       "content": "Regular physical activity is strongly recommended for heart failure patients who are stable (Class I recommendation in 2022 AHA/ACC/HFSA guidelines). Exercise improves heart function, reduces symptoms, and improves quality of life. Cardiac rehabilitation programs are also beneficial (Class IIa). Start slowly and gradually increase activity. Walking is one of the best exercises. Aim for at least 30 minutes of moderate activity most days, if tolerated. Stop and rest if you experience chest pain, severe shortness of breath, dizziness, or extreme fatigue. Do not exercise on days when you feel significantly worse than usual. Always consult your care team before starting an exercise program."
     },
     {
@@ -153,7 +235,14 @@
       "sourceId": "cornell_homecare",
       "title": "Safe Exercise Guidelines",
       "category": "exercise",
-      "keywords": ["safe exercise", "exercise warning signs", "when to stop", "talk test", "exertion", "breathing during exercise"],
+      "keywords": [
+        "safe exercise",
+        "exercise warning signs",
+        "when to stop",
+        "talk test",
+        "exertion",
+        "breathing during exercise"
+      ],
       "content": "Use the 'talk test' to gauge exercise intensity: if you can speak in short sentences while exercising, you are at an appropriate level. If you are too out of breath to talk, slow down. Warning signs to stop exercising immediately: chest pain or pressure, severe shortness of breath, palpitations (fluttering in your chest), dizziness or lightheadedness, severe fatigue. Avoid exercise in extreme heat or cold. Rest for at least 1–2 hours after meals before exercising. Stay well-hydrated within your fluid limits. Keep an exercise log and share it with your care team. Remember: some shortness of breath during moderate activity is normal, but it should not be severe."
     },
     {
@@ -161,7 +250,17 @@
       "sourceId": "acc_aha_2022",
       "title": "Heart Failure Medications",
       "category": "medications",
-      "keywords": ["medications", "medicine", "pills", "ACE inhibitor", "beta blocker", "diuretic", "ARNI", "SGLT2", "drugs"],
+      "keywords": [
+        "medications",
+        "medicine",
+        "pills",
+        "ACE inhibitor",
+        "beta blocker",
+        "diuretic",
+        "ARNI",
+        "SGLT2",
+        "drugs"
+      ],
       "content": "Common heart failure medications include: Diuretics (water pills) — help remove excess fluid; Beta-blockers — slow heart rate and reduce the heart's workload; ACE inhibitors or ARBs — relax blood vessels and reduce blood pressure; ARNI (Sacubitril/Valsartan, Entresto) — combination therapy that reduces hospitalizations and mortality; SGLT2 inhibitors (e.g., dapagliflozin, empagliflozin) — newer medications with proven benefits in heart failure, recommended in the 2022 guidelines; Aldosterone antagonists — reduce fluid retention; Digoxin — helps the heart beat stronger. Never stop taking heart failure medications without consulting your care team, even if you feel better."
     },
     {
@@ -169,7 +268,14 @@
       "sourceId": "cornell_homecare",
       "title": "Medication Adherence Tips",
       "category": "medications",
-      "keywords": ["medication adherence", "taking medications", "missed dose", "side effects", "pill organizer", "medication reminder"],
+      "keywords": [
+        "medication adherence",
+        "taking medications",
+        "missed dose",
+        "side effects",
+        "pill organizer",
+        "medication reminder"
+      ],
       "content": "Taking your medications as prescribed is critical. Tips for medication adherence: use a pill organizer; set daily alarms as reminders; keep a medication list with you at all times; pick up refills before you run out; never skip doses, even on days you feel well; report side effects to your care team — do not stop medications on your own; know the names, doses, and purposes of all your medications. If you miss a dose, take it as soon as you remember, unless it is almost time for your next dose — in that case, skip the missed dose. Do not double up."
     },
     {
@@ -177,7 +283,14 @@
       "sourceId": "cornell_traffictool",
       "title": "Green Zone: Stable and Doing Well",
       "category": "triage",
-      "keywords": ["green zone", "stable", "doing well", "normal", "no symptoms", "okay"],
+      "keywords": [
+        "green zone",
+        "stable",
+        "doing well",
+        "normal",
+        "no symptoms",
+        "okay"
+      ],
       "content": "GREEN ZONE — You are stable. Your weight is within your usual range (no weight gain more than 2 lbs/day or 5 lbs/week). You have no new or worsening symptoms. You can do your usual activities without significant difficulty. You have no new swelling in your legs, ankles, or feet. You are breathing comfortably at rest and with your usual activities. You have good energy. Action: Continue your usual medications, diet, fluid limits, and daily monitoring. Keep your follow-up appointments. Stay active within your exercise plan."
     },
     {
@@ -185,7 +298,15 @@
       "sourceId": "cornell_traffictool",
       "title": "Yellow Zone: Warning — Contact Your Care Team",
       "category": "triage",
-      "keywords": ["yellow zone", "warning", "contact doctor", "contact nurse", "worsening", "concerning symptoms", "call care team"],
+      "keywords": [
+        "yellow zone",
+        "warning",
+        "contact doctor",
+        "contact nurse",
+        "worsening",
+        "concerning symptoms",
+        "call care team"
+      ],
       "content": "YELLOW ZONE — You have concerning symptoms that need attention within 24 hours. Contact your care team (nurse or doctor) if you notice ANY of the following: Weight gain of 2–3 pounds in one day or 5 pounds in one week. New or increased swelling in your legs, ankles, feet, or abdomen. Shortness of breath that is new or worse with mild activity (e.g., walking around the house). Increased need to use extra pillows to sleep, or waking up at night breathless. New dizziness or lightheadedness, especially when standing. New or persistent dry cough. Feeling more tired than usual, limiting normal activities. Increased heart rate or irregular heartbeat. Decreased urine output. Do NOT wait to see if symptoms get better on their own. Call your care team."
     },
     {
@@ -193,7 +314,16 @@
       "sourceId": "cornell_traffictool",
       "title": "Red Zone: Emergency — Call 911",
       "category": "triage",
-      "keywords": ["red zone", "emergency", "call 911", "severe", "critical", "immediate", "life threatening", "ambulance"],
+      "keywords": [
+        "red zone",
+        "emergency",
+        "call 911",
+        "severe",
+        "critical",
+        "immediate",
+        "life threatening",
+        "ambulance"
+      ],
       "content": "RED ZONE — EMERGENCY. Call 911 immediately or have someone take you to the emergency room if you experience ANY of the following: Severe shortness of breath at rest or inability to breathe normally. Chest pain, chest pressure, or chest tightness. Coughing up pink or foamy mucus. Sudden confusion or change in mental status. Fainting or loss of consciousness (passing out). Rapid or irregular heartbeat with dizziness or faintness. Weight gain of 4 or more pounds in one day. Sudden severe weakness or inability to move arms or legs. Signs of stroke: facial drooping, arm weakness, speech difficulty. DO NOT DRIVE YOURSELF. Call 911 immediately."
     },
     {
@@ -201,7 +331,13 @@
       "sourceId": "cornell_traffictool",
       "title": "Weight-Based Triage Rules",
       "category": "triage",
-      "keywords": ["weight triage", "weight rules", "weight gain", "fluid weight", "pounds kilograms"],
+      "keywords": [
+        "weight triage",
+        "weight rules",
+        "weight gain",
+        "fluid weight",
+        "pounds kilograms"
+      ],
       "content": "Weight monitoring thresholds for triage: GREEN ZONE: Weight is at or near your baseline. Weight gain less than 2 lbs (0.9 kg) from yesterday, or less than 3 lbs (1.4 kg) from your dry weight this week. YELLOW ZONE: Weight gain of 2–3 lbs (0.9–1.4 kg) in one day, OR 3–5 lbs (1.4–2.3 kg) over one week compared to your usual weight. Contact your care team. RED ZONE: Weight gain of 4 or more lbs (1.8 kg) in one day, OR more than 5 lbs (2.3 kg) in one week with worsening symptoms. Call 911 or seek emergency care. Reference (research validation): A 1 kg gain in one day = yellow zone; 2.5 kg gain in one week = red zone, as validated in the 2024 Traffic Light RCT (IJNS)."
     },
     {
@@ -209,7 +345,14 @@
       "sourceId": "cornell_traffictool",
       "title": "Shortness of Breath Triage Rules",
       "category": "triage",
-      "keywords": ["shortness of breath", "dyspnea", "breathless", "breathing", "SOB triage", "breathlessness scale"],
+      "keywords": [
+        "shortness of breath",
+        "dyspnea",
+        "breathless",
+        "breathing",
+        "SOB triage",
+        "breathlessness scale"
+      ],
       "content": "Shortness of breath (SOB) triage using the 0–10 visual analog scale: GREEN ZONE (0–3, none to mild): No new or worsening shortness of breath. You can breathe comfortably at rest and with usual activities. YELLOW ZONE (4–6, moderate): New or worsening shortness of breath with mild or moderate activity. You may need to stop and rest more often. Waking up at night because of breathlessness (orthopnea). Contact your care team within 24 hours. RED ZONE (7–10, severe): Severe shortness of breath at rest or while sitting still. You are struggling to breathe even without activity. Breathing does not improve with rest. CALL 911 IMMEDIATELY."
     },
     {
@@ -217,7 +360,14 @@
       "sourceId": "acc_aha_2022",
       "title": "Heart Failure Self-Care Principles",
       "category": "self_care",
-      "keywords": ["self care", "self management", "daily habits", "heart failure management", "adherence", "lifestyle"],
+      "keywords": [
+        "self care",
+        "self management",
+        "daily habits",
+        "heart failure management",
+        "adherence",
+        "lifestyle"
+      ],
       "content": "Heart failure self-care involves three key behaviors: (1) Maintenance — taking medications as prescribed, following a low-sodium diet, monitoring weight and symptoms daily, attending follow-up appointments, getting vaccinations (flu, pneumonia, COVID-19). (2) Monitoring — checking weight every day, recognizing changes in symptoms, tracking breathing and swelling. (3) Management — knowing when and how to respond to symptom changes, following the traffic light action plan, contacting your care team when in the yellow zone, calling 911 when in the red zone. Multidisciplinary team support significantly improves outcomes (ACC/AHA/HFSA 2022, Class I recommendation)."
     },
     {
@@ -225,7 +375,16 @@
       "sourceId": "aha_hf_living",
       "title": "Lifestyle Changes for Heart Failure",
       "category": "self_care",
-      "keywords": ["lifestyle", "smoking", "alcohol", "sleep", "stress", "depression", "anxiety", "quality of life"],
+      "keywords": [
+        "lifestyle",
+        "smoking",
+        "alcohol",
+        "sleep",
+        "stress",
+        "depression",
+        "anxiety",
+        "quality of life"
+      ],
       "content": "Important lifestyle changes for heart failure management include: Stop smoking — smoking worsens heart failure and interferes with medications; Limit or avoid alcohol — alcohol is toxic to the heart muscle; Manage stress — stress raises blood pressure and increases heart rate; Get adequate sleep — treat sleep apnea if present (sleep-disordered breathing worsens heart failure); Maintain a healthy weight — obesity increases the heart's workload; Monitor for depression — depression is common in heart failure and affects adherence to treatment; depression screening is recommended (ACC/AHA 2022, Class IIa); Stay socially connected — social isolation is associated with worse outcomes; Plan for emergencies — know your action plan."
     },
     {
@@ -233,7 +392,15 @@
       "sourceId": "cornell_homecare",
       "title": "Follow-up Care and When to Call",
       "category": "self_care",
-      "keywords": ["follow up", "appointments", "care team", "doctor visits", "contact", "phone numbers", "check in"],
+      "keywords": [
+        "follow up",
+        "appointments",
+        "care team",
+        "doctor visits",
+        "contact",
+        "phone numbers",
+        "check in"
+      ],
       "content": "Regular follow-up is essential in heart failure management. After a hospitalization, a follow-up visit within 7–14 days is strongly recommended. Call your care team (do not wait for your next appointment) if you: experience any yellow-zone symptoms; have questions about your medications; notice a change in your usual symptoms; feel confused about your care plan. Keep important phone numbers handy: your care team's office number, after-hours nurse line, and 911. Bring a written medication list, your weight log, and a symptom diary to every appointment. Consider asking a family member or caregiver to attend appointments with you."
     },
     {
@@ -241,7 +408,16 @@
       "sourceId": "acc_aha_2022",
       "title": "Heart Failure Devices (ICD, CRT, LVAD)",
       "category": "advanced",
-      "keywords": ["ICD", "defibrillator", "CRT", "pacemaker", "LVAD", "devices", "implantable", "advanced therapy"],
+      "keywords": [
+        "ICD",
+        "defibrillator",
+        "CRT",
+        "pacemaker",
+        "LVAD",
+        "devices",
+        "implantable",
+        "advanced therapy"
+      ],
       "content": "Some heart failure patients have implanted devices: Implantable Cardioverter-Defibrillator (ICD) — delivers a shock to restore normal heart rhythm if a dangerous arrhythmia occurs. Cardiac Resynchronization Therapy (CRT) — coordinates the contractions of the heart's ventricles to improve pumping efficiency. Left Ventricular Assist Device (LVAD) — a mechanical pump that helps the heart pump blood; used in advanced (Stage D) heart failure. If you have a device: carry your device identification card at all times; keep follow-up appointments for device checks; know the warning signs that your device has fired or is malfunctioning; inform all healthcare providers that you have a device. (ACC/AHA/HFSA 2022 guidelines)"
     },
     {
@@ -249,7 +425,18 @@
       "sourceId": "acc_aha_2022",
       "title": "SGLT2 Inhibitors in Heart Failure",
       "category": "medications",
-      "keywords": ["SGLT2 inhibitor", "empagliflozin", "dapagliflozin", "Jardiance", "Farxiga", "SGLT2", "diabetes", "non-diabetic", "HFrEF", "HFpEF"],
+      "keywords": [
+        "SGLT2 inhibitor",
+        "empagliflozin",
+        "dapagliflozin",
+        "Jardiance",
+        "Farxiga",
+        "SGLT2",
+        "diabetes",
+        "non-diabetic",
+        "HFrEF",
+        "HFpEF"
+      ],
       "content": "SGLT2 inhibitors (sodium-glucose cotransporter-2 inhibitors) are now Class I recommended medications for heart failure patients with reduced ejection fraction (HFrEF), regardless of whether they have diabetes. Empagliflozin (Jardiance) and dapagliflozin (Farxiga) both have strong clinical trial evidence (EMPEROR-Reduced, DAPA-HF) showing significant reductions in cardiovascular death, HF hospitalizations, and symptom burden. For HFpEF patients, empagliflozin (EMPEROR-Preserved) and dapagliflozin (DELIVER) trials also showed benefit. SGLT2 inhibitors work by promoting sodium and glucose excretion through the kidneys, reducing cardiac filling pressures, and providing direct cardiac protective effects. Common side effects include genital yeast infections and urinary tract infections. These medications should NOT be taken if kidney function is severely reduced (eGFR <20 mL/min). If your cardiologist prescribed an SGLT2 inhibitor without diabetes, this is evidence-based and guideline-recommended."
     },
     {
@@ -257,7 +444,17 @@
       "sourceId": "acc_aha_2022",
       "title": "ARNI Therapy (Sacubitril/Valsartan — Entresto)",
       "category": "medications",
-      "keywords": ["ARNI", "Entresto", "sacubitril", "valsartan", "neprilysin inhibitor", "PARADIGM-HF", "HFrEF", "upgrade", "switch"],
+      "keywords": [
+        "ARNI",
+        "Entresto",
+        "sacubitril",
+        "valsartan",
+        "neprilysin inhibitor",
+        "PARADIGM-HF",
+        "HFrEF",
+        "upgrade",
+        "switch"
+      ],
       "content": "Sacubitril/valsartan (Entresto) is an ARNI (angiotensin receptor-neprilysin inhibitor) that combines an ARB with a neprilysin inhibitor. It is a Class I recommendation for HFrEF patients who can tolerate an ACE inhibitor or ARB. The PARADIGM-HF trial showed a 20% reduction in cardiovascular death and HF hospitalization compared to enalapril. Entresto does NOT cause cough (unlike ACE inhibitors). Important: if switching from an ACE inhibitor to Entresto, there must be a 36-hour 'washout' period to avoid a serious reaction called angioedema. Symptoms of benefit (improved energy, less fluid retention) may take weeks to months to notice. Entresto is a disease-modifying medication — it slows disease progression rather than just relieving symptoms. Side effects: low blood pressure (especially initially), elevated potassium, kidney function changes. Report severe dizziness to your care team."
     },
     {
@@ -265,7 +462,17 @@
       "sourceId": "acc_aha_2022",
       "title": "Beta-Blockers in Heart Failure — Why They Help",
       "category": "medications",
-      "keywords": ["beta blocker", "metoprolol", "carvedilol", "bisoprolol", "slow heart rate", "mortality", "mechanism", "fatigue", "initiation"],
+      "keywords": [
+        "beta blocker",
+        "metoprolol",
+        "carvedilol",
+        "bisoprolol",
+        "slow heart rate",
+        "mortality",
+        "mechanism",
+        "fatigue",
+        "initiation"
+      ],
       "content": "Beta-blockers (carvedilol, metoprolol succinate, bisoprolol) are cornerstone medications for HFrEF, recommended as Class I therapy. They work by blocking the effects of adrenaline (catecholamines) on the heart, which over time reduces cardiac remodeling and improves heart function. Clinical trials (MERIT-HF, COPERNICUS) show 35% reduction in mortality. A common misconception is that beta-blockers are harmful in heart failure because they slow the heart — in fact, the slowed heart rate and reduced workload allow the heart to recover over months of therapy. When first started or dose-increased, beta-blockers may temporarily cause fatigue, dizziness, or worsening HF symptoms — this usually resolves within a few weeks. Never stop beta-blockers abruptly — sudden discontinuation can trigger dangerous arrhythmias and worsening HF. Contact your care team if heart rate drops below 50 or you feel significantly worse."
     },
     {
@@ -273,7 +480,17 @@
       "sourceId": "aha_hf_living",
       "title": "ACE Inhibitor Cough — Causes and Solutions",
       "category": "medications",
-      "keywords": ["ACE inhibitor", "cough", "lisinopril", "enalapril", "ramipril", "side effect", "dry cough", "ARB switch", "ARNI"],
+      "keywords": [
+        "ACE inhibitor",
+        "cough",
+        "lisinopril",
+        "enalapril",
+        "ramipril",
+        "side effect",
+        "dry cough",
+        "ARB switch",
+        "ARNI"
+      ],
       "content": "A persistent dry cough is one of the most common side effects of ACE inhibitors (lisinopril, enalapril, ramipril, captopril). It occurs in approximately 10-15% of patients due to accumulation of bradykinin in the lungs. The cough is typically dry, tickling, and does not produce mucus. It is NOT a sign of worsening heart failure. If the cough is bothersome, your care team can switch you to an ARB (angiotensin receptor blocker, such as valsartan, losartan, or candesartan) — ARBs provide similar heart-protective benefits without causing cough. Another option is upgrading to Entresto (sacubitril/valsartan), which also does not cause cough and has superior mortality benefit. Do NOT stop your ACE inhibitor without speaking to your care team first."
     },
     {
@@ -281,7 +498,17 @@
       "sourceId": "acc_aha_2022",
       "title": "Diuretics — Types, Use, and Monitoring",
       "category": "medications",
-      "keywords": ["diuretic", "furosemide", "Lasix", "torsemide", "bumetanide", "spironolactone", "potassium", "electrolytes", "water pill"],
+      "keywords": [
+        "diuretic",
+        "furosemide",
+        "Lasix",
+        "torsemide",
+        "bumetanide",
+        "spironolactone",
+        "potassium",
+        "electrolytes",
+        "water pill"
+      ],
       "content": "Diuretics are essential for managing fluid overload in heart failure. Loop diuretics (furosemide/Lasix, torsemide, bumetanide) are the most commonly used and most powerful — they promote sodium and water excretion through the kidneys. Key monitoring: your care team will check your kidney function (creatinine) and electrolytes (potassium, sodium, magnesium) regularly because diuretics can cause electrolyte imbalances. Signs of too little diuretic effect: weight gain, worsening swelling and shortness of breath. Signs of too much diuretic (overdiuresis): muscle cramps, dizziness when standing, dry mouth, decreased urination, weakness. Spironolactone/eplerenone (potassium-sparing diuretics/MRAs) are different — they protect against dangerous low potassium and have proven mortality benefits in HFrEF. Important: diuretics should be taken in the morning to avoid disrupting sleep with nighttime urination."
     },
     {
@@ -289,7 +516,16 @@
       "sourceId": "acc_aha_2022",
       "title": "Potassium and Heart Failure Medications",
       "category": "medications",
-      "keywords": ["potassium", "hypokalemia", "hyperkalemia", "electrolytes", "spironolactone", "ACE inhibitor", "potassium rich foods", "banana"],
+      "keywords": [
+        "potassium",
+        "hypokalemia",
+        "hyperkalemia",
+        "electrolytes",
+        "spironolactone",
+        "ACE inhibitor",
+        "potassium rich foods",
+        "banana"
+      ],
       "content": "Potassium balance is critical in heart failure. Loop diuretics can lower potassium (hypokalemia — dangerous risk for arrhythmias). Signs of low potassium: muscle cramps, weakness, irregular heartbeat. ACE inhibitors, ARBs, and potassium-sparing diuretics (spironolactone, eplerenone) raise potassium (hyperkalemia — especially in patients with kidney disease). Signs of high potassium: muscle weakness, irregular heartbeat, tingling. Your care team will regularly check your potassium levels and adjust medications and diet accordingly. Do not take potassium supplements or potassium-containing salt substitutes without specific guidance from your care team. Dietary potassium (bananas, oranges, potatoes) should be discussed with your care team — the recommendation varies based on your medications and kidney function."
     },
     {
@@ -297,7 +533,16 @@
       "sourceId": "cornell_traffictool",
       "title": "Palpitations and Arrhythmia in Heart Failure",
       "category": "triage",
-      "keywords": ["palpitations", "irregular heartbeat", "arrhythmia", "atrial fibrillation", "flutter", "racing heart", "ICD shock", "VT"],
+      "keywords": [
+        "palpitations",
+        "irregular heartbeat",
+        "arrhythmia",
+        "atrial fibrillation",
+        "flutter",
+        "racing heart",
+        "ICD shock",
+        "VT"
+      ],
       "content": "Palpitations (feeling your heart flutter, pound, skip, or race) are common in heart failure and require prompt evaluation. Contact your care team TODAY for: new persistent palpitations lasting more than 30 minutes; a new irregular heartbeat that you have not had before; palpitations accompanied by mild dizziness but no fainting. Call 911 IMMEDIATELY for: palpitations with severe dizziness or near-fainting; palpitations with loss of consciousness; suspected ICD shock (you feel a jolt or buzz followed by the palpitations stopping); rapid sustained racing heartbeat that does not slow on its own. Atrial fibrillation (AF) is the most common arrhythmia in heart failure — a new irregular fast heartbeat may represent new AF requiring same-day evaluation for rate control and anticoagulation assessment."
     },
     {
@@ -305,7 +550,15 @@
       "sourceId": "acc_aha_2022",
       "title": "Low Blood Pressure (Hypotension) in Heart Failure",
       "category": "triage",
-      "keywords": ["hypotension", "low blood pressure", "dizziness", "lightheaded", "orthostatic hypotension", "overdiuresis", "hold medications"],
+      "keywords": [
+        "hypotension",
+        "low blood pressure",
+        "dizziness",
+        "lightheaded",
+        "orthostatic hypotension",
+        "overdiuresis",
+        "hold medications"
+      ],
       "content": "Low blood pressure in heart failure requires careful management. Blood pressure <90/60 mmHg with symptoms (dizziness, weakness, near-fainting) is concerning. Causes: diuretics removing too much fluid (overdiuresis); too-high doses of beta-blockers, ACE inhibitors, or ARBs; poor cardiac output from worsening HF. What to do: Sit or lie down immediately to prevent falls. Call your care team the same day — do not take your blood pressure medications until you speak with them, as they may need to hold or reduce a dose. Go to the ER if: blood pressure continues to drop, you cannot reach the care team within 2 hours, or you faint. Orthostatic hypotension (dizziness only when standing up) is common — rise slowly from lying to sitting, then sitting to standing. Hold the edge of the bed or a railing. Stay well hydrated within your fluid limits."
     },
     {
@@ -313,7 +566,16 @@
       "sourceId": "cornell_traffictool",
       "title": "Edema (Swelling) Triage — Feet, Ankles, Legs",
       "category": "triage",
-      "keywords": ["edema", "swelling", "ankle swelling", "leg swelling", "pitting edema", "new swelling", "worsening swelling", "bilateral"],
+      "keywords": [
+        "edema",
+        "swelling",
+        "ankle swelling",
+        "leg swelling",
+        "pitting edema",
+        "new swelling",
+        "worsening swelling",
+        "bilateral"
+      ],
       "content": "Swelling (edema) from fluid retention is a key sign in heart failure triage. GREEN ZONE: Stable, mild swelling that you have always had and is not worsening; swelling that resolves overnight with leg elevation. YELLOW ZONE (Contact care team within 24 hours): New swelling in legs, ankles, or feet not present before; swelling that is significantly worse than usual; abdominal swelling or fullness (ascites); rings, shoes, or clothing becoming tighter. Unilateral (one-sided) swelling may suggest a blood clot (DVT) rather than HF fluid retention — requires same-day evaluation. RED ZONE (Call 911): Sudden severe swelling throughout the body accompanied by severe shortness of breath. Self-care for mild stable edema: elevate legs above the level of your heart when resting; avoid sitting with legs dangling for long periods; keep salt intake below 2g/day; take diuretics as prescribed."
     },
     {
@@ -321,7 +583,16 @@
       "sourceId": "cornell_homecare",
       "title": "Orthopnea — Shortness of Breath Lying Flat",
       "category": "symptoms",
-      "keywords": ["orthopnea", "lying flat", "pillows", "paroxysmal nocturnal dyspnea", "PND", "night breathless", "sleeping upright", "waking up breathless"],
+      "keywords": [
+        "orthopnea",
+        "lying flat",
+        "pillows",
+        "paroxysmal nocturnal dyspnea",
+        "PND",
+        "night breathless",
+        "sleeping upright",
+        "waking up breathless"
+      ],
       "content": "Orthopnea is shortness of breath that occurs when lying flat, forcing you to sleep with extra pillows or in a recliner chair. It is a classic symptom of heart failure caused by fluid shifting from the legs into the chest when lying down, increasing the heart's workload. Paroxysmal nocturnal dyspnea (PND) is sudden awakening from sleep with severe breathlessness — a more severe form of the same problem. Tracking: note how many pillows you need to sleep comfortably. If you typically use two pillows but now need three or four, this is a yellow-zone warning sign. If you wake up unable to breathe and must sit upright for more than 15 minutes to recover, or if you must sleep in a chair, call your care team the same day. If you cannot breathe even while sitting upright, call 911 immediately."
     },
     {
@@ -329,7 +600,17 @@
       "sourceId": "acc_aha_2022",
       "title": "Cardiac Rehabilitation Benefits and Structure",
       "category": "exercise",
-      "keywords": ["cardiac rehab", "cardiac rehabilitation", "Phase II", "Phase III", "exercise program", "supervised", "Medicare", "insurance coverage", "referral"],
+      "keywords": [
+        "cardiac rehab",
+        "cardiac rehabilitation",
+        "Phase II",
+        "Phase III",
+        "exercise program",
+        "supervised",
+        "Medicare",
+        "insurance coverage",
+        "referral"
+      ],
       "content": "Cardiac rehabilitation (cardiac rehab) is a medically supervised exercise and education program for heart failure patients. ACC/AHA/HFSA 2022 guidelines give cardiac rehab a Class IIa recommendation for stable HFrEF patients. Benefits: 25-30% reduction in HF hospitalizations, improved exercise capacity, better quality of life, reduced depression and anxiety. What to expect: Phase I (inpatient, if hospitalized), Phase II (outpatient supervised, typically 2-3 sessions/week for 12 weeks, covered by Medicare and most insurance), Phase III (independent maintenance program). Medicare Part B covers cardiac rehab for HF patients — 36 sessions, with possible extension to 72. A referral from your cardiologist is required. Home-based cardiac rehab programs are also available if you cannot travel. If you have completed rehab, ask your care team for a home exercise prescription to maintain your gains."
     },
     {
@@ -337,7 +618,15 @@
       "sourceId": "acc_aha_2022",
       "title": "Sleep Apnea and Heart Failure",
       "category": "symptoms",
-      "keywords": ["sleep apnea", "CPAP", "BIPAP", "snoring", "sleep-disordered breathing", "central sleep apnea", "obstructive sleep apnea"],
+      "keywords": [
+        "sleep apnea",
+        "CPAP",
+        "BIPAP",
+        "snoring",
+        "sleep-disordered breathing",
+        "central sleep apnea",
+        "obstructive sleep apnea"
+      ],
       "content": "Sleep-disordered breathing is very common in heart failure — occurring in up to 50-75% of patients. Two main types: Obstructive sleep apnea (OSA) — the airway collapses during sleep, causing snoring and brief awakenings; Central sleep apnea (CSA, or Cheyne-Stokes breathing) — the brain temporarily stops sending breathing signals. Both types worsen heart function and cause daytime fatigue, poor sleep, and increased cardiovascular risk. Signs: loud snoring, awakening gasping for air, excessive daytime sleepiness, morning headaches. Treatment: OSA with CPAP (continuous positive airway pressure) improves sleep quality; treatment of HF itself can improve CSA. If you have not been tested for sleep apnea, mention these symptoms to your care team. Treating sleep apnea can improve heart failure outcomes and quality of life. (ACC/AHA 2022 guidelines recommend screening for sleep-disordered breathing — Class IIa)"
     },
     {
@@ -345,7 +634,16 @@
       "sourceId": "aha_hf_living",
       "title": "Depression and Anxiety in Heart Failure",
       "category": "self_care",
-      "keywords": ["depression", "anxiety", "mental health", "mood", "emotional wellbeing", "psychological", "quality of life", "PHQ-9"],
+      "keywords": [
+        "depression",
+        "anxiety",
+        "mental health",
+        "mood",
+        "emotional wellbeing",
+        "psychological",
+        "quality of life",
+        "PHQ-9"
+      ],
       "content": "Depression affects approximately 20-40% of heart failure patients and significantly worsens outcomes — patients with depression are more likely to be hospitalized, less likely to adhere to medications and diet, and have higher mortality. Signs of depression: persistent sadness or emptiness, loss of interest in activities, fatigue (beyond what HF causes), hopelessness, changes in appetite or sleep, difficulty concentrating. Anxiety is also common — worry, racing thoughts, avoidance of activities. Important: both depression and anxiety are treatable medical conditions. Tell your care team — they can refer you to mental health support, and there are HF-safe treatments available. The PHQ-2 or PHQ-9 questionnaires are used for screening. Social support is protective — staying connected with friends and family matters. Cardiac rehabilitation also has proven benefits for mood and anxiety. You do not have to face heart failure alone."
     },
     {
@@ -353,7 +651,16 @@
       "sourceId": "aha_hf_living",
       "title": "DASH and Mediterranean Diets for Heart Failure",
       "category": "diet",
-      "keywords": ["DASH diet", "Mediterranean diet", "heart healthy eating", "dietary pattern", "vegetables", "whole grains", "olive oil", "fish"],
+      "keywords": [
+        "DASH diet",
+        "Mediterranean diet",
+        "heart healthy eating",
+        "dietary pattern",
+        "vegetables",
+        "whole grains",
+        "olive oil",
+        "fish"
+      ],
       "content": "The DASH (Dietary Approaches to Stop Hypertension) diet and Mediterranean diet are the best-studied dietary patterns for heart health and are appropriate for most heart failure patients. DASH diet emphasizes: fruits, vegetables, whole grains, lean protein (fish, poultry, beans), low-fat dairy, nuts and seeds; limits: sodium, saturated fats, red meat, sweets, and sugary drinks. Mediterranean diet emphasizes: olive oil, fish, vegetables, legumes, nuts, moderate whole grains and dairy, with red meat rarely. Both patterns reduce blood pressure, inflammation, and cardiovascular risk. For HF patients: modify these patterns by adhering to your personal sodium limit (<2g/day) and fluid restriction. If you have diabetes, work with your care team to balance carbohydrate content. A registered dietitian with cardiovascular expertise can help create a personalized meal plan."
     },
     {
@@ -361,7 +668,17 @@
       "sourceId": "acc_aha_2022",
       "title": "Vaccinations for Heart Failure Patients",
       "category": "self_care",
-      "keywords": ["vaccine", "vaccination", "flu shot", "influenza", "pneumonia", "pneumococcal", "COVID", "RSV", "immunization"],
+      "keywords": [
+        "vaccine",
+        "vaccination",
+        "flu shot",
+        "influenza",
+        "pneumonia",
+        "pneumococcal",
+        "COVID",
+        "RSV",
+        "immunization"
+      ],
       "content": "Vaccinations are critically important for heart failure patients because respiratory infections can trigger HF decompensation and hospitalizations. Recommended vaccinations: Annual influenza (flu) vaccine — strongly recommended, reduces HF hospitalization during flu season (Class I, AHA/ACC 2022); Pneumococcal vaccines (PCV15, PCV20, or PPSV23) — protect against pneumonia bacteria; COVID-19 vaccines and boosters — HF patients are at high risk for severe COVID-19; RSV vaccine — recommended for adults 60+ years. Important: some vaccines are live-attenuated (e.g., nasal flu spray) and should be avoided if you are on certain immunosuppressants — use the injectable flu shot instead. Inform your cardiologist before receiving any new vaccine, especially if you are on complex medication regimens. Vaccinations are a free, proven intervention to reduce HF hospitalizations."
     },
     {
@@ -369,8 +686,151 @@
       "sourceId": "acc_aha_2022",
       "title": "Advanced Heart Failure and Palliative Care Options",
       "category": "advanced",
-      "keywords": ["advanced heart failure", "Stage D", "NYHA IV", "palliative care", "hospice", "end of life", "quality of life", "transplant"],
+      "keywords": [
+        "advanced heart failure",
+        "Stage D",
+        "NYHA IV",
+        "palliative care",
+        "hospice",
+        "end of life",
+        "quality of life",
+        "transplant"
+      ],
       "content": "Advanced heart failure (Stage D, NYHA Class IV) occurs when symptoms are severe at rest and standard treatments are no longer fully effective. Options in advanced HF: Heart transplant — for selected patients, best long-term outcome; requires extensive evaluation and waitlist. Left Ventricular Assist Device (LVAD) — mechanical pump as bridge to transplant or as destination therapy. Palliative care — focuses on maximizing quality of life, managing symptoms (pain, breathlessness), and providing emotional and spiritual support; this can be provided alongside curative treatments, not only at end of life. Advance care planning — discuss your wishes for resuscitation (CPR), mechanical ventilation, and device deactivation with your care team and family. Hospice — specialized comfort-focused care when life expectancy is limited. Discussing advanced care planning is not 'giving up' — it is ensuring your values and preferences are honored. (ACC/AHA/HFSA 2022 guidelines support early palliative care integration — Class IIa)"
+    },
+    {
+      "id": "esc_diuretics_1",
+      "sourceId": "esc_hf_2021",
+      "title": "Diuretic Therapy — ESC 2021 Guidance",
+      "category": "medications",
+      "keywords": [
+        "diuretic",
+        "furosemide",
+        "bumetanide",
+        "fluid overload",
+        "congestion",
+        "loop diuretic",
+        "dose adjustment"
+      ],
+      "content": "The 2021 ESC Guidelines recommend loop diuretics (furosemide, bumetanide, torasemide) as first-line therapy for fluid overload in heart failure. Diuretics relieve symptoms of congestion such as breathlessness, ankle swelling, and weight gain. The dose should be titrated to achieve and maintain euvolemia (dry weight) using the lowest effective dose. Patients with chronic stable HF may be taught to self-adjust diuretic doses based on daily weight monitoring (increase by one dose step if weight rises >2 kg over 2 days). Hyponatraemia, hypokalaemia, and renal impairment are common side effects requiring monitoring. Resistant oedema may require combination diuretic therapy under medical supervision."
+    },
+    {
+      "id": "esc_monitoring_1",
+      "sourceId": "esc_hf_2021",
+      "title": "Remote Monitoring and Structured Follow-Up — ESC 2021",
+      "category": "monitoring",
+      "keywords": [
+        "remote monitoring",
+        "telemedicine",
+        "structured follow-up",
+        "readmission",
+        "implantable device",
+        "CardioMEMS"
+      ],
+      "content": "The 2021 ESC Guidelines support structured telephone follow-up and multidisciplinary HF management programmes to reduce hospital readmission rates. Non-invasive telemonitoring (daily weight, blood pressure, heart rate, and symptom diaries) supports early detection of decompensation. For selected patients with HFrEF, implantable haemodynamic monitors (e.g. CardioMEMS pulmonary artery pressure sensor) can guide diuretic therapy remotely. Follow-up within 1–2 weeks of hospital discharge is recommended for all patients. Nurse-led HF clinics improve guideline adherence and quality of life."
+    },
+    {
+      "id": "esc_comorbidities_1",
+      "sourceId": "esc_hf_2021",
+      "title": "Managing Comorbidities in Heart Failure — ESC 2021",
+      "category": "self_care",
+      "keywords": [
+        "comorbidity",
+        "diabetes",
+        "atrial fibrillation",
+        "CKD",
+        "anaemia",
+        "iron deficiency",
+        "COPD",
+        "obesity"
+      ],
+      "content": "The 2021 ESC Guidelines emphasise systematic management of comorbidities that worsen HF outcomes. Iron deficiency (with or without anaemia) affects ~50% of HF patients; intravenous iron (ferric carboxymaltose) improves symptoms and reduces HF hospitalisations. Atrial fibrillation is the most common arrhythmia in HF; rate control targets HR <110 bpm at rest; rhythm control may improve symptoms. SGLT2 inhibitors benefit HF patients with or without type 2 diabetes. COPD and HF frequently coexist; beta-blockers should not be withheld in HFrEF — cardioselective agents (bisoprolol, metoprolol succinate) are safe. Obesity increases HF risk; weight loss of ≥10% is associated with improvement in symptoms and EF."
+    },
+    {
+      "id": "esc_acutehf_1",
+      "sourceId": "esc_hf_2021",
+      "title": "Acute Decompensated Heart Failure — ESC 2021 Warning Signs",
+      "category": "triage",
+      "keywords": [
+        "acute",
+        "decompensation",
+        "hospital",
+        "breathless",
+        "orthopnea",
+        "pulmonary oedema",
+        "emergency",
+        "congestion worsening"
+      ],
+      "content": "The 2021 ESC Guidelines define acute heart failure (AHF) as the rapid onset or worsening of HF symptoms requiring urgent medical attention. Key warning signs requiring emergency assessment: severe breathlessness at rest or lying flat (orthopnoea), respiratory rate >25 breaths/min, oxygen saturation <90%, pink frothy sputum (pulmonary oedema), chest pain, new arrhythmia, or acute kidney injury. Patients should be taught to seek emergency care immediately for these signs. For patients experiencing gradual symptom worsening over 2–3 days (increased oedema, weight gain >2 kg, reduced exercise tolerance) without severe respiratory distress, same-day or next-day contact with their HF nurse or cardiologist is recommended before waiting for a scheduled appointment."
+    },
+    {
+      "id": "hfsa_gdmt_1",
+      "sourceId": "hfsa_2023",
+      "title": "Guideline-Directed Medical Therapy (GDMT) for HFrEF — HFSA 2023",
+      "category": "medications",
+      "keywords": [
+        "GDMT",
+        "HFrEF",
+        "quadruple therapy",
+        "ACE inhibitor",
+        "ARB",
+        "ARNI",
+        "beta-blocker",
+        "MRA",
+        "SGLT2i",
+        "optimal therapy"
+      ],
+      "content": "The HFSA 2023 Heart Failure Guideline Update reinforces quadruple therapy as the cornerstone of HFrEF management (EF ≤40%). The four pillars are: (1) RAAS blockade — preferably ARNI (sacubitril/valsartan) over ACE inhibitor or ARB; (2) evidence-based beta-blocker (carvedilol, metoprolol succinate, or bisoprolol); (3) mineralocorticoid receptor antagonist (spironolactone or eplerenone); (4) SGLT2 inhibitor (dapagliflozin or empagliflozin). All four drug classes should be initiated and titrated to target doses in all eligible patients. Early initiation (even during hospitalisation) is recommended. Patients should NOT stop any of these medications without consulting their cardiologist, as discontinuation significantly increases risk of HF deterioration and death."
+    },
+    {
+      "id": "hfsa_hfpef_1",
+      "sourceId": "hfsa_2023",
+      "title": "HFpEF Management Update — HFSA 2023",
+      "category": "medications",
+      "keywords": [
+        "HFpEF",
+        "preserved ejection fraction",
+        "SGLT2i",
+        "spironolactone",
+        "blood pressure",
+        "obesity",
+        "treatment"
+      ],
+      "content": "The HFSA 2023 update provides updated guidance on HFpEF (EF ≥50%). SGLT2 inhibitors (empagliflozin, dapagliflozin) now have a Class IIa recommendation for HFpEF, having demonstrated reduced HF hospitalisations. MRA therapy (spironolactone) carries a Class IIb recommendation for selected HFpEF patients, particularly those with EF in the 45–55% range. Aggressive blood pressure control remains essential — target <130/80 mmHg. Management of obesity, diabetes, atrial fibrillation, and sleep-disordered breathing is integral to HFpEF care. Exercise training improves quality of life in HFpEF. Unlike HFrEF, there is no proven mortality-reducing pharmacotherapy for HFpEF, making symptom management and comorbidity control the primary goals."
+    },
+    {
+      "id": "hfsa_sodium_1",
+      "sourceId": "hfsa_2023",
+      "title": "Sodium and Fluid Restriction — HFSA 2023 Update",
+      "category": "diet",
+      "keywords": [
+        "sodium",
+        "salt restriction",
+        "fluid",
+        "diet",
+        "2 grams",
+        "1500mg",
+        "decompensation",
+        "congestion"
+      ],
+      "content": "The HFSA 2023 guideline update acknowledges evolving evidence on sodium restriction in HF. A sodium intake of <2,000–3,000 mg/day is recommended for symptomatic HF patients, particularly during periods of congestion or decompensation. Strict sodium restriction (<1,500 mg/day) may worsen neurohormonal activation in stable compensated patients — the optimal target remains individualised. Fluid restriction (1.5–2 L/day) is recommended for patients with hyponatraemia (low blood sodium) or those refractory to diuretics. Practical tips: read food labels, avoid adding salt during cooking, limit processed and restaurant foods, choose low-sodium alternatives. Patients should track daily weight and report a gain of >2 lbs in one day or >5 lbs in one week to their healthcare team."
+    },
+    {
+      "id": "hfsa_transitions_1",
+      "sourceId": "hfsa_2023",
+      "title": "Transitions of Care and Readmission Prevention — HFSA 2023",
+      "category": "self_care",
+      "keywords": [
+        "discharge",
+        "readmission",
+        "transition",
+        "follow-up",
+        "self-care",
+        "education",
+        "30-day",
+        "post-discharge"
+      ],
+      "content": "The HFSA 2023 guideline emphasises that the post-discharge period (first 30–90 days) carries the highest risk of readmission. Key recommendations: (1) early post-discharge follow-up within 7–14 days; (2) patient education on daily weight monitoring, sodium restriction, medication adherence, and warning signs before leaving hospital; (3) structured telephone call within 48–72 hours of discharge; (4) GDMT optimisation at each follow-up visit. Patients and caregivers should be able to identify 'red flag' symptoms requiring emergency care and 'yellow flag' symptoms requiring same-day contact with the HF team. Heart failure disease management programmes run by nurses and pharmacists reduce 30-day readmissions by 20–30%."
     }
   ]
 }
