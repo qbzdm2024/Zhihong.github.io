@@ -363,7 +363,8 @@ ${JSON.stringify(skeleton, null, 2)}`;
       a.isWorseUsual = "no";
 
     // [3] changed in last day?
-    if (/today|this\s*morning|overnight|last\s*night|just\s*now|within\s*(a\s*)?day|24\s*hour|suddenly\s*started|came\s*on\s*today/i.test(text))
+    // "right now" / "at this moment" / "at the moment" all imply the symptom is happening now → within last 24h
+    if (/today|this\s*morning|overnight|last\s*night|just\s*now|right\s*now|at\s*this\s*moment|at\s*the\s*moment|within\s*(a\s*)?day|24\s*hour|suddenly\s*started|came\s*on\s*today/i.test(text))
       a.changedLastDay = "yes";
 
     return a;
