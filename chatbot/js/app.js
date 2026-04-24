@@ -856,19 +856,25 @@ class App {
       }
 
       // ── Detect which of the 7 categories are present and whether it's personal ──
-      // LLM handles natural phrasing + distinguishes personal reports from education questions.
-      // Fall back to regex if LLM fails.
-      let detectedSymptoms, isPersonalReport;
+      // Strategy: run regex first as a guaranteed baseline, then merge LLM results.
+      // Regex catches explicit keywords reliably. LLM adds colloquial/indirect phrasing.
+      // LLM can only ADD categories — it cannot remove what regex already found.
+      // This prevents non-deterministic LLM responses from silently dropping valid symptoms.
+      const regexSymptoms   = this.triageEngine.detectSymptoms(message);
+      const regexIsPersonal = this.triageEngine.isPersonalSymptomReport(message);
+      let detectedSymptoms = regexSymptoms;
+      let isPersonalReport = regexIsPersonal;
       try {
         const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
           message, this.chatEngine.apiKey, this.chatEngine.model
         );
-        detectedSymptoms  = llmDetection.categories;
-        isPersonalReport  = llmDetection.isPersonalReport;
+        // Merge: union of regex + LLM categories; personal = true if either says true
+        for (const c of llmDetection.categories) {
+          if (!detectedSymptoms.includes(c)) detectedSymptoms = [...detectedSymptoms, c];
+        }
+        if (llmDetection.isPersonalReport) isPersonalReport = true;
       } catch (e) {
-        console.warn("LLM symptom detection failed, using regex fallback:", e.message);
-        detectedSymptoms = this.triageEngine.detectSymptoms(message);
-        isPersonalReport = this.triageEngine.isPersonalSymptomReport(message);
+        console.warn("LLM symptom detection failed, using regex only:", e.message);
       }
       // ── AI-independently mode: bypass traffic light entirely ──────────────
       // AI decides its own follow-up questions (max 1 round then triage) and zone.
