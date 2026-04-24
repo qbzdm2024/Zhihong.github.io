@@ -500,7 +500,7 @@ ${JSON.stringify(skeleton, null, 2)}`;
     if (/new(er)?\s*(swell\w*|swollen)|worse\s*(than\s*usual|swell\w*|swollen)|worsening\s*(swell\w*|swollen)|getting\s*worse|more\s*(swollen|swell\w*)|recently\s*started/i.test(text) ||
         /\b(new\b|noticed.*(swell\w*|swollen)|(swell\w*|swollen).*worse)\b/i.test(text))
       a.isNewOrWorse = "yes";
-    else if (/same\s*as\s*usual|not\s*worse|no\s*change|my\s*usual\s*swell|always\s*have/i.test(text))
+    else if (/same\s*as\s*usual|not\s*worse|no\s*change|hasn'?t\s*changed|has\s*not\s*changed|not\s*changed|unchanged|my\s*usual\s*swell|always\s*have/i.test(text))
       a.isNewOrWorse = "no";
 
     // [3] one or both?

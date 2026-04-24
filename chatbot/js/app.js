@@ -911,15 +911,24 @@ class App {
 
       // ── Case B/C: Personal symptom report with triage categories detected ─────
       if (shouldTriage) {
-        // FOLLOW-UP GATING uses regex extraction — conservative (only explicit statements).
-        // The LLM tends to infer values ("legs are swollen" → isNewOrWorse:"yes", legs:"both")
-        // which would skip necessary follow-up questions. Regex returns null for anything
-        // not explicitly stated, ensuring all required questions are always asked.
-        const regexAnswers   = this._extractAllAnswers(message, detectedSymptoms);
-        const neededFollowUps = this.triageEngine.getNeededFollowUps(message, detectedSymptoms, regexAnswers);
+        // Use LLM (gpt-4o-mini) to extract what the patient has already provided.
+        // This correctly handles natural language like "has not changed", "right now",
+        // "only at end of day" that regex consistently misses.
+        // The extractAnswersWithLLM prompt is conservative: returns null for anything
+        // not clearly stated — so it won't skip questions that are genuinely unanswered.
+        let extractedAnswers = {};
+        try {
+          extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
+            message, detectedSymptoms, this.chatEngine.apiKey, "gpt-4o-mini"
+          );
+        } catch (e) {
+          console.warn("LLM extraction for follow-up gating failed, falling back to regex:", e.message);
+          extractedAnswers = this._extractAllAnswers(message, detectedSymptoms);
+        }
+        const neededFollowUps = this.triageEngine.getNeededFollowUps(message, detectedSymptoms, extractedAnswers);
 
         if (neededFollowUps.length > 0) {
-          // Case B: missing info — educational response + follow-up questions; triage runs in Case A
+          // Case B: missing info — ask follow-up questions; triage runs in Case A
           this.triageFollowUpState = {
             originalText:     message,
             detectedSymptoms: detectedSymptoms,
@@ -934,15 +943,7 @@ class App {
           return;
         }
 
-        // Case C: All info present — educational response + triage card.
-        let extractedAnswers = regexAnswers;
-        try {
-          extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
-            message, detectedSymptoms, this.chatEngine.apiKey, this.chatEngine.model
-          );
-        } catch (e) {
-          console.warn("LLM answer extraction failed, using regex answers:", e.message);
-        }
+        // Case C: All info present — reuse the already-extracted answers for triage.
         const result = await this.chatEngine.chat(message, { triageMode: true });
         this._removeTypingIndicator();
         const msgEl = this._addMessage("assistant", result.content, result.sources, result.evidenceSource);
