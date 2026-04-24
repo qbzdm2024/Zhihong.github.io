@@ -579,7 +579,9 @@ ${JSON.stringify(skeleton, null, 2)}`;
           q.push({ key: "sob_co", question: "Are any of the following happening alongside your shortness of breath? (say all that apply)\n• Chest pain or pressure (and if so — is it severe?)\n• Fever\n• Cough\n• Leg or ankle swelling\n• Mucus or phlegm\n• Wheezing\n• None of these" });
         if (answers.isWorseUsual === null)
           q.push({ key: "sob_worse", question: "Is your shortness of breath **worse than your usual level**?" });
-        if (answers.changedLastDay === null)
+        // changedLastDay only adds reviewFlag=true — same outcome as isWorseUsual="yes".
+        // Skip this question when isWorseUsual is already known (redundant and annoying to ask).
+        if (answers.changedLastDay === null && answers.isWorseUsual === null)
           q.push({ key: "sob_day", question: "Has your shortness of breath changed or gotten worse in the **last 24 hours**?" });
         break;
 
