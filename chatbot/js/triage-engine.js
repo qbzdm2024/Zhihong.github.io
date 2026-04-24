@@ -135,13 +135,13 @@ Return ONLY valid JSON — no explanation, no markdown:
 {"categories": ["sob", "fatigue"], "isPersonalReport": true}
 
 Rules:
-- categories: symptoms the patient IS currently experiencing (empty array [] if none)
+- categories: symptoms the patient is PERSONALLY REPORTING — include whether acute, chronic, stable, or recurring. A 2-week-old stable ankle swelling still counts as legSwelling. Only return [] if it is a general/education question with no personal symptom report.
 - isPersonalReport:
-  - true → patient describing their own current/recent symptoms: "I gained 5 lbs", "my legs are swollen", "I've been very tired"
+  - true → patient describing their own symptoms (current, recent, or ongoing): "I gained 5 lbs", "my legs are swollen", "I've been having ankle swelling for 2 weeks", "I feel tired lately"
   - true even with a question attached: "I gained 5 lbs this week — is this serious?", "my ankles are swollen, should I call?"
   - false → general education question: "What causes weight gain in HF?", "How is leg swelling treated?", "What are HF symptoms?"
   - false → hypothetical: "If someone has leg swelling, what does it mean?"
-- Only include a category if the patient is REPORTING that symptom, not merely asking about it
+- Only include a category if the patient is REPORTING that symptom personally, not merely asking about it
 - Include weightChange ONLY for weight GAIN — weight loss alone does NOT trigger it`;
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
