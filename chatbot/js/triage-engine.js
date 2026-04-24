@@ -215,7 +215,7 @@ Rules:
       legSwelling: {
         desc: "Leg / Ankle Swelling",
         fields: `- isNewOrWorse: "yes" (clearly new or worsening) | "no" (same as usual/stable) | null (not specified)
-- legs: "one" (one leg or ankle specified) | "both" (both legs or ankles) | null (not specified which)
+- legs: "one" (patient explicitly says one leg/ankle, e.g. "my right ankle", "one leg") | "both" (patient explicitly says both legs/ankles, bilateral) | null (not explicitly stated — do NOT infer from "ankle" singular)
 - tookDiuretic: "yes" (patient says they ARE taking water pills / diuretics) | "no" (not taking them) | "unsure" | null`
       },
       lightheaded: {

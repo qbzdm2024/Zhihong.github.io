@@ -172,7 +172,9 @@ The patient is describing symptoms they are experiencing right now.
 - Acknowledge the specific symptoms with empathy.
 - Provide relevant education with inline citations.
 - Note that a triage assessment is displayed below your response.
-- Do NOT repeat zone classifications in the text — the triage card shows them.`;
+- Do NOT repeat zone classifications in the text — the triage card shows them.
+- ALWAYS end your ## References section with this entry (whether or not you cite others):
+  Cornell Homecare. Heart Failure Traffic Light Triage Tool. http://cornellhomecare.com/traffictool`;
     }
 
     // ── Cardiac query without confirmed HF context ────────────────────────────
