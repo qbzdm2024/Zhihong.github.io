@@ -731,6 +731,10 @@ class App {
         document.querySelectorAll(".triage-tab").forEach((t) => t.classList.remove("active"));
         tab.classList.add("active");
         this.triageMode = tab.dataset.mode;
+        // Clear any pending follow-up state from the previous mode so the next
+        // message is treated as a fresh symptom report, not a follow-up answer.
+        this.triageFollowUpState = null;
+        this.aiIndependentFollowUpState = null;
       });
     });
 
@@ -811,36 +815,37 @@ class App {
         const combinedText = this.aiIndependentFollowUpState.originalText +
           "\nPatient's answers to follow-up questions: " + message;
 
-        // After 3 rounds, force triage — no more follow-up questions allowed
-        const promptText = currentRound >= 3
-          ? combinedText + "\n[Please provide your final triage assessment now — do not ask for any more follow-up questions.]"
-          : combinedText;
-
-        // Educational response first, then AI triage
-        const chatResult = await this.chatEngine.chat(message, { triageMode: true });
-        this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources, chatResult.evidenceSource);
-
+        // Pass currentRound + 1: first follow-up answer → roundNumber=2 → forces triage (no more loops).
+        // This caps AI-independent at exactly 1 round of follow-up in the normal case.
         this._setLoading(true, "Running AI independent triage...");
         let aiIndResult;
         try {
-          aiIndResult = await this.chatEngine.runAIIndependentTriage(promptText);
+          aiIndResult = await this.chatEngine.runAIIndependentTriage(combinedText, currentRound + 1);
         } catch (err) {
-          this._setLoading(false);
-          this._appendInlineTriage(msgEl, null, null, err.message, null);
+          this._removeTypingIndicator();
+          this._addErrorMessage(err.message);
           this.aiIndependentFollowUpState = null;
           return;
         }
-        this._setLoading(false);
 
-        if (!aiIndResult.isFollowUp || currentRound >= 3) {
-          if (!aiIndResult.isFollowUp) {
-            this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
-          } else {
-            this._appendInlineTriage(msgEl, null, null, "Could not complete assessment with available information.", null);
-          }
+        if (!aiIndResult.isFollowUp) {
+          // Final triage — show educational response + triage card
+          this._setLoading(true, "Retrieving knowledge & generating response...");
+          const chatResult = await this.chatEngine.chat(message, { triageMode: true });
+          this._removeTypingIndicator();
+          const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources, chatResult.evidenceSource);
+          this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
+          this.aiIndependentFollowUpState = null;
+        } else if (currentRound >= 2) {
+          // Safety net: AI ignored force instruction — end assessment
+          this._removeTypingIndicator();
+          const chatResult = await this.chatEngine.chat(message, { triageMode: true });
+          const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources, chatResult.evidenceSource);
+          this._appendInlineTriage(msgEl, null, null, "Could not complete assessment with available information.", null);
           this.aiIndependentFollowUpState = null;
         } else {
+          // AI still wants more info (round 2) — show questions only, no educational response
+          this._removeTypingIndicator();
           this.aiIndependentFollowUpState = { originalText: combinedText, answered: false, roundCount: currentRound + 1 };
           const qText = (aiIndResult.acknowledgment ? aiIndResult.acknowledgment + "\n\n" : "") +
             "A few more questions:\n\n" +
@@ -866,31 +871,35 @@ class App {
         isPersonalReport = this.triageEngine.isPersonalSymptomReport(message);
       }
       // ── AI-independently mode: bypass traffic light entirely ──────────────
-      // AI decides its own follow-up questions (max 3 rounds) and triage zone.
+      // AI decides its own follow-up questions (max 1 round then triage) and zone.
       if (this.triageMode === "ai-independently" && isPersonalReport) {
-        // Educational response first
-        const chatResult = await this.chatEngine.chat(message, { triageMode: false });
-        this._removeTypingIndicator();
-        const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources, chatResult.evidenceSource);
-
+        // Run AI triage FIRST to decide if follow-up is needed.
+        // We intentionally skip the educational response when follow-up is pending
+        // because showing education before asking clarifying questions is confusing.
         this._setLoading(true, "Running AI independent triage...");
         let aiIndResult;
         try {
           aiIndResult = await this.chatEngine.runAIIndependentTriage(message);
         } catch (err) {
-          this._setLoading(false);
-          this._appendInlineTriage(msgEl, null, null, err.message, null);
+          this._removeTypingIndicator();
+          this._addErrorMessage(err.message);
           return;
         }
-        this._setLoading(false);
 
         if (aiIndResult.isFollowUp) {
+          // Ask follow-up questions — no educational response yet
+          this._removeTypingIndicator();
           this.aiIndependentFollowUpState = { originalText: message, answered: false, roundCount: 1 };
           const qText = (aiIndResult.acknowledgment ? aiIndResult.acknowledgment + "\n\n" : "") +
             "To assess your symptoms, please answer:\n\n" +
             aiIndResult.questions.map((q, i) => `**${i + 1}.** ${q}`).join("\n\n");
           this._addMessage("assistant", qText, []);
         } else {
+          // Triage complete — now show educational response + triage card
+          this._setLoading(true, "Retrieving knowledge & generating response...");
+          const chatResult = await this.chatEngine.chat(message, { triageMode: true });
+          this._removeTypingIndicator();
+          const msgEl = this._addMessage("assistant", chatResult.content, chatResult.sources, chatResult.evidenceSource);
           this._appendInlineTriage(msgEl, null, null, null, aiIndResult);
         }
         return;

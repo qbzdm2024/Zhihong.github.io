@@ -10,6 +10,36 @@
  *   sob | chestDiscomfort | fatigue | weightChange | confusion | legSwelling | lightheaded
  */
 
+/**
+ * Build OpenAI API request body with correct parameters per model generation.
+ * - GPT-5+ and o-series: use max_completion_tokens (max_tokens is deprecated/unsupported)
+ * - o-series (o1, o3, o4): no temperature parameter
+ * - GPT-4.x and earlier: max_tokens + temperature
+ * @param {string} model
+ * @param {number} maxTokens
+ * @param {Array} messages
+ * @param {number|null} temperature  null = omit (required for o-series)
+ */
+function buildOpenAIBody(model, maxTokens, messages, temperature = 0.7) {
+  const isOSeries  = /^o[0-9]/i.test(model);
+  const isNewGen   = /^(gpt-5)/i.test(model) || isOSeries;
+  const body = { model, messages };
+
+  if (isNewGen) {
+    body.max_completion_tokens = maxTokens;
+  } else {
+    body.max_tokens = maxTokens;
+  }
+
+  // o-series reasoning models do not accept temperature
+  if (!isOSeries && temperature !== null) {
+    body.temperature = temperature;
+  }
+
+  return body;
+}
+window.buildOpenAIBody = buildOpenAIBody;
+
 class TriageEngine {
   constructor() {
     this.triageHistory = [];
@@ -117,12 +147,7 @@ Rules:
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: 120,
-        temperature: 0,
-        messages: [{ role: "user", content: prompt }]
-      })
+      body: JSON.stringify(buildOpenAIBody(model, 120, [{ role: "user", content: prompt }], 0))
     });
 
     if (!response.ok) {
@@ -237,12 +262,7 @@ ${JSON.stringify(skeleton, null, 2)}`;
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        max_tokens: 600,
-        temperature: 0,
-        messages: [{ role: "user", content: prompt }]
-      })
+      body: JSON.stringify(buildOpenAIBody(model, 600, [{ role: "user", content: prompt }], 0))
     });
 
     if (!response.ok) {
@@ -332,7 +352,7 @@ ${JSON.stringify(skeleton, null, 2)}`;
     if (/\bfever\b|\btemp(erature)?\s*(of\s*)?(?:1(?:0[0-9]|[1-9]\d)(\.\d+)?)\s*°?[Ff]|\btemp(erature)?\s*(of\s*)?(?:3[89]|4[0-1])(\.\d+)?\s*°?[Cc]/i.test(text))
       a.coSymptoms.push("fever");
     if (/\bcough(ing)?\b/i.test(text))        a.coSymptoms.push("cough");
-    if (/swell(ing|en)?|edema/i.test(text))   a.coSymptoms.push("leg_swelling");
+    if (/swell(ing|en)?|swollen|edema/i.test(text)) a.coSymptoms.push("leg_swelling");
     if (/mucus|phlegm|sputum/i.test(text))    a.coSymptoms.push("mucus");
     if (/wheez(ing|e)/i.test(text))           a.coSymptoms.push("wheeze");
 
@@ -441,7 +461,7 @@ ${JSON.stringify(skeleton, null, 2)}`;
     // [2] co-symptoms for weight change: SOB, cough, leg swelling, nausea, bowel changes
     if (/short(ness)?\s*of\s*breath|breathless/i.test(text))       a.coSymptoms.push("sob");
     if (/\bcough(ing)?\b/i.test(text))                              a.coSymptoms.push("cough");
-    if (/swell(ing|en)?|edema/i.test(text))                         a.coSymptoms.push("leg_swelling");
+    if (/swell(ing|en)?|swollen|edema/i.test(text))                  a.coSymptoms.push("leg_swelling");
     if (/\b(nausea|nauseat|vomit|sick\s*to\s*my\s*stomach)\b/i.test(text)) a.coSymptoms.push("nausea");
     if (/bowel|diarrhea|constipat|stool|loose.*stool|changes.*bowel/i.test(text)) a.coSymptoms.push("bowel_changes");
 
@@ -475,8 +495,9 @@ ${JSON.stringify(skeleton, null, 2)}`;
     const a = { isNewOrWorse: null, legs: null, tookDiuretic: null };
 
     // [2] new or worse?
-    if (/new(er)?\s*swell|worse\s*(than\s*usual|swell)|worsening\s*swell|getting\s*worse|more\s*swell|recently\s*started/i.test(text) ||
-        /\b(new\b|noticed.*swell|swell.*worse)\b/i.test(text))
+    // Note: "swollen" and "swell" are different strings — both must be covered.
+    if (/new(er)?\s*(swell\w*|swollen)|worse\s*(than\s*usual|swell\w*|swollen)|worsening\s*(swell\w*|swollen)|getting\s*worse|more\s*(swollen|swell\w*)|recently\s*started/i.test(text) ||
+        /\b(new\b|noticed.*(swell\w*|swollen)|(swell\w*|swollen).*worse)\b/i.test(text))
       a.isNewOrWorse = "yes";
     else if (/same\s*as\s*usual|not\s*worse|no\s*change|my\s*usual\s*swell|always\s*have/i.test(text))
       a.isNewOrWorse = "no";
@@ -1029,28 +1050,50 @@ Format as JSON with fields: zone (GREEN/YELLOW/RED), urgency, reasoning, keySymp
    * @param {string} symptomText - patient's full symptom description (may include follow-up answers)
    * @returns {string}
    */
-  buildAIIndependentTriagePrompt(symptomText) {
-    return `You are a clinical expert specializing in heart failure management. This chatbot is designed exclusively for patients with confirmed heart failure — do NOT ask about HF diagnosis, history, or whether the patient has heart failure. Assume they do.
+  /**
+   * @param {string} symptomText
+   * @param {number} roundNumber  1 = first call (may ask follow-ups); 2+ = must triage now
+   */
+  buildAIIndependentTriagePrompt(symptomText, roundNumber = 1) {
+    const mustDecideNow = roundNumber >= 2;
+    const forceNote = mustDecideNow
+      ? `\n\n⚠️ OVERRIDE: You have already asked one round of clarifying questions. You MUST now provide a final triage assessment. Use action "triage". Do NOT use action "follow_up" again — make your best clinical judgment with the information available.`
+      : "";
 
-Your task: decide whether you need more information before triaging, OR if you have enough detail to triage now.
-
-Patient's description:
-"${symptomText}"
-
-STEP 1 — Decide if you need more information:
+    const step1 = mustDecideNow
+      ? `STEP 1 — You must triage now:
+- You have already gathered additional information. Proceed directly to triage using action "triage".`
+      : `STEP 1 — Decide if you need more information:
 - If the description is too vague to assess severity confidently → ask 1–3 focused clinical follow-up questions
-- If you have sufficient detail to assess severity → proceed directly to triage
+- If you have sufficient detail to assess severity → proceed directly to triage`;
 
-STEP 2 — Respond ONLY with one of these two JSON formats:
-
-Option A — Need more information:
+    const followUpOption = mustDecideNow
+      ? ""
+      : `Option A — Need more information:
 {
   "action": "follow_up",
   "acknowledgment": "Brief empathetic acknowledgment of what they shared (1-2 sentences)",
   "questions": ["Question 1?", "Question 2?", "Question 3?"]
 }
 
-Option B — Ready to triage:
+`;
+
+    const followUpRule = mustDecideNow
+      ? `- You MUST use action "triage" — do NOT use "follow_up"`
+      : `- Follow-up questions: ask at most 3, focused on what would change your zone assignment`;
+
+    return `You are a clinical expert specializing in heart failure management. This chatbot is designed exclusively for patients with confirmed heart failure — do NOT ask about HF diagnosis, history, or whether the patient has heart failure. Assume they do.${forceNote}
+
+Your task: provide a triage assessment based on the patient's description.
+
+Patient's description:
+"${symptomText}"
+
+${step1}
+
+STEP 2 — Respond ONLY with one of these two JSON formats:
+
+${followUpOption}Option B — Ready to triage:
 {
   "action": "triage",
   "zone": "GREEN" | "YELLOW" | "RED",
@@ -1066,7 +1109,7 @@ RULES:
 - Zone: GREEN = stable (continue monitoring at home), YELLOW = contact care team today, RED = emergency (call 911 / go to ER now)
 - Be conservative: when uncertain, choose the more urgent zone
 - Never use UNKNOWN — always commit to GREEN, YELLOW, or RED
-- Follow-up questions: ask at most 3, focused on what would change your zone assignment
+${followUpRule}
 - Triage reasoning: use heart failure clinical knowledge (fluid overload, decompensation, hemodynamic instability, arrhythmia)`;
   }
 

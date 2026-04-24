@@ -254,7 +254,7 @@ Do NOT provide a triage zone. Provide concise, evidence-based educational inform
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${this.apiKey}` },
-      body: JSON.stringify({ model: this.model, max_tokens: 1500, messages })
+      body: JSON.stringify(buildOpenAIBody(this.model, 1500, messages))
     });
 
     if (!response.ok) {
@@ -301,11 +301,7 @@ Do NOT provide a triage zone. Provide concise, evidence-based educational inform
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${this.apiKey}` },
-      body: JSON.stringify({
-        model: this.model,
-        max_tokens: 1000,
-        messages: [{ role: "user", content: triagePrompt }]
-      })
+      body: JSON.stringify(buildOpenAIBody(this.model, 1000, [{ role: "user", content: triagePrompt }]))
     });
 
     if (!response.ok) {
@@ -322,21 +318,18 @@ Do NOT provide a triage zone. Provide concise, evidence-based educational inform
    * Run AI-independent triage — the AI uses its own clinical framework,
    * decides if follow-up questions are needed, then provides a zone.
    * @param {string} symptomText - patient symptom description (may include follow-up answers)
+   * @param {number} roundNumber - 1 = first call (may ask follow-ups); 2+ = must triage now
    * @returns {Object} - { isFollowUp, acknowledgment, questions } OR standard triage result
    */
-  async runAIIndependentTriage(symptomText) {
+  async runAIIndependentTriage(symptomText, roundNumber = 1) {
     if (!this.apiKey) throw new Error("API key not set.");
 
-    const prompt = this.triage.buildAIIndependentTriagePrompt(symptomText);
+    const prompt = this.triage.buildAIIndependentTriagePrompt(symptomText, roundNumber);
 
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${this.apiKey}` },
-      body: JSON.stringify({
-        model: this.model,
-        max_tokens: 800,
-        messages: [{ role: "user", content: prompt }]
-      })
+      body: JSON.stringify(buildOpenAIBody(this.model, 800, [{ role: "user", content: prompt }]))
     });
 
     if (!response.ok) {
