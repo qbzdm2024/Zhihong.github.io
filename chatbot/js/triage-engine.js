@@ -1017,8 +1017,7 @@ Your task is to assess the patient's symptoms and provide a triage zone recommen
 
 CRITICAL RULES:
 1. You MUST always assign a zone — GREEN, YELLOW_CONSIDER, YELLOW_CALL, or RED. Never return "UNKNOWN" or refuse to classify.
-2. When symptoms related to heart failure are present (weight gain, leg swelling, SOB, fatigue, confusion, lightheadedness, chest discomfort), you MUST assign at minimum YELLOW_CONSIDER.
-3. You are a support tool, not a replacement for medical advice.
+2. You are a support tool, not a replacement for medical advice.
 
 ## Patient-Reported Symptoms${catHints}
 ${freeTextSymptoms}
@@ -1158,7 +1157,6 @@ ${followUpOption}Option B — Ready to triage:
 RULES:
 - Output ONLY valid JSON — no text outside the JSON object
 - Zone: GREEN = stable, YELLOW_CONSIDER = monitor and consider calling, YELLOW_CALL = must call today, RED = emergency (call 911 / go to ER now)
-- Be conservative: when uncertain, choose the more urgent zone
 - Never use UNKNOWN or plain YELLOW — always commit to GREEN, YELLOW_CONSIDER, YELLOW_CALL, or RED
 ${followUpRule}
 - Triage reasoning: use heart failure clinical knowledge (fluid overload, decompensation, hemodynamic instability, arrhythmia)`;
