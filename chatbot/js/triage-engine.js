@@ -12,27 +12,32 @@
 
 /**
  * Build OpenAI API request body with correct parameters per model generation.
- * - GPT-5+ and o-series: use max_completion_tokens (max_tokens is deprecated/unsupported)
- * - o-series (o1, o3, o4): no temperature parameter
- * - GPT-4.x and earlier: max_tokens + temperature
+ * - GPT-4.x: max_tokens + temperature
+ * - GPT-5.4 (non-reasoning): max_completion_tokens + temperature
+ * - Reasoning models (o-series, gpt-5, gpt-5.6-*, gpt-6*): max_completion_tokens only.
+ *   They reject any temperature other than the default, and hidden reasoning counts
+ *   against the output limit, so the limit is raised to leave room for the answer.
  * @param {string} model
  * @param {number} maxTokens
  * @param {Array} messages
- * @param {number|null} temperature  null = omit (required for o-series)
+ * @param {number|null} temperature  null = omit; ignored for reasoning models
  */
+function modelAcceptsTemperature(model) {
+  return /^gpt-4/i.test(model) || /^gpt-5\.4/i.test(model);
+}
+
 function buildOpenAIBody(model, maxTokens, messages, temperature = 0.7) {
-  const isOSeries  = /^o[0-9]/i.test(model);
-  const isNewGen   = /^(gpt-5)/i.test(model) || isOSeries;
+  const isGpt4      = /^gpt-4/i.test(model);
+  const isReasoning = !modelAcceptsTemperature(model);
   const body = { model, messages };
 
-  if (isNewGen) {
-    body.max_completion_tokens = maxTokens;
-  } else {
+  if (isGpt4) {
     body.max_tokens = maxTokens;
+  } else {
+    body.max_completion_tokens = isReasoning ? Math.max(maxTokens, 8000) : maxTokens;
   }
 
-  // o-series reasoning models do not accept temperature
-  if (!isOSeries && temperature !== null) {
+  if (!isReasoning && temperature !== null) {
     body.temperature = temperature;
   }
 

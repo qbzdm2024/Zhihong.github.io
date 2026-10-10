@@ -300,10 +300,11 @@ Do NOT provide a triage zone. Provide concise, evidence-based educational inform
 
     const triagePrompt = this.triage.buildAITriagePrompt(symptomDescription, detectedCategories);
 
+    // temperature 0: the triage decision should be as repeatable as the model allows
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${this.apiKey}` },
-      body: JSON.stringify(buildOpenAIBody(this.model, 1000, [{ role: "user", content: triagePrompt }]))
+      body: JSON.stringify(buildOpenAIBody(this.model, 1000, [{ role: "user", content: triagePrompt }], 0))
     });
 
     if (!response.ok) {
@@ -331,7 +332,7 @@ Do NOT provide a triage zone. Provide concise, evidence-based educational inform
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${this.apiKey}` },
-      body: JSON.stringify(buildOpenAIBody(this.model, 800, [{ role: "user", content: prompt }]))
+      body: JSON.stringify(buildOpenAIBody(this.model, 800, [{ role: "user", content: prompt }], 0))
     });
 
     if (!response.ok) {
