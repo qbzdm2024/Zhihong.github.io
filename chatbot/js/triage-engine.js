@@ -132,9 +132,10 @@ ${text}
 """
 
 Return ONLY valid JSON — no explanation, no markdown:
-{"categories": ["sob", "fatigue"], "isPersonalReport": true}
+{"categories": ["sob", "fatigue"], "denied": ["legSwelling"], "isPersonalReport": true}
 
 Rules:
+- denied: categories the patient explicitly says they do NOT have ("no leg swelling", "I have no shortness of breath", "no chest pain"). A denied category must NEVER appear in categories — the traffic light tool only assesses a symptom the patient actually has. Use [] when nothing is denied.
 - categories: symptoms the patient is PERSONALLY REPORTING — include whether acute, chronic, stable, or recurring. A 2-week-old stable ankle swelling still counts as legSwelling. Only return [] if it is a general/education question with no personal symptom report.
 - isPersonalReport:
   - true → patient describing their own symptoms (current, recent, or ongoing): "I gained 5 lbs", "my legs are swollen", "I've been having ankle swelling for 2 weeks", "I feel tired lately"
@@ -147,7 +148,7 @@ Rules:
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-      body: JSON.stringify(buildOpenAIBody(model, 120, [{ role: "user", content: prompt }], 0))
+      body: JSON.stringify(buildOpenAIBody(model, 160, [{ role: "user", content: prompt }], 0))
     });
 
     if (!response.ok) {
@@ -160,12 +161,15 @@ Rules:
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+      const denied = Array.isArray(parsed.denied) ? parsed.denied.filter(c => this.CATEGORY_LABELS[c]) : [];
       return {
-        categories:      Array.isArray(parsed.categories) ? parsed.categories.filter(c => this.CATEGORY_LABELS[c]) : [],
+        // A symptom the patient denies is never assessed (the tool only runs on a symptom that is present)
+        categories:      Array.isArray(parsed.categories) ? parsed.categories.filter(c => this.CATEGORY_LABELS[c] && !denied.includes(c)) : [],
+        denied,
         isPersonalReport: parsed.isPersonalReport === true
       };
     }
-    return { categories: [], isPersonalReport: false };
+    return { categories: [], denied: [], isPersonalReport: false };
   }
 
   /**
@@ -184,15 +188,16 @@ Rules:
     const catSpecs = {
       sob: {
         desc: "Shortness of Breath",
-        fields: `- isNew: "yes" (new symptom, never had before) | "no" (recurring/ongoing) | null
+        fields: `- isNew: "yes" (new symptom, never had before) | "no" (recurring/ongoing — a symptom the patient already had that is getting worse is NOT new) | null
 - coSymptoms: array — include each item from ["chest_pain:severe","chest_pain:not_severe","fever","cough","leg_swelling","mucus","wheeze"] that is clearly present. Use "chest_pain:severe" for clearly severe/crushing chest pain; "chest_pain:not_severe" for mild/moderate chest pain.
-- isWorseUsual: "yes" | "no" | null
-- changedLastDay: "yes" | null`
+- worseAtRest: "yes" (short of breath at rest, e.g. while just sitting or lying down, or it gets worse at rest) | "no" (only short of breath with activity; not at rest) | null (not stated)
+- worseWithActivity: "yes" (worse when walking around, climbing stairs, exercising) | "no" | null`
       },
       chestDiscomfort: {
         desc: "Chest Discomfort",
         fields: `- isNew: "yes" | "no" | null
 - coSymptoms: array from ["shooting_pain","sob","heart_racing","sweating","nausea","regurg"] present
+  (shooting_pain = the tool's option "Shooting pain down arm or pain on left side of chest": pain that shoots, goes into, spreads or radiates to an arm, or pain on the left side of the chest)
 - isAtRest: "rest" (occurs at rest/sitting/lying) | "activity" (only with exertion) | null`
       },
       fatigue: {
@@ -214,25 +219,27 @@ Rules:
       },
       legSwelling: {
         desc: "Leg / Ankle Swelling",
-        fields: `- isNewOrWorse: "yes" (clearly new or worsening) | "no" (same as usual/stable) | null (not specified)
-- legs: "one" (patient explicitly says one leg/ankle, e.g. "my right ankle", "one leg") | "both" (patient explicitly says both legs/ankles, bilateral) | null (not explicitly stated — do NOT infer from "ankle" singular)
-- tookDiuretic: "yes" (patient explicitly says they took/are taking water pills/diuretics) | "no" (patient explicitly says they did not take them) | "unsure" (patient explicitly says they are not sure) | null (diuretics not mentioned at all — use null, NOT unsure, when patient simply did not bring it up)`
+        fields: `- isNew: "yes" (the leg swelling is a new symptom) | "no" (has had it before / ongoing) | null (not stated)
+- isWorse: "yes" (worse than previous days, e.g. goes up higher now) | "no" (same as before / not worse) | null (not stated)
+- takingWaterPills: "yes" (patient says they HAVE been taking their regular water pills / diuretics, e.g. Lasix) | "no" (patient says they have NOT been taking them) | null (not mentioned). This is about their regular water pills, NOT about an extra dose.
+- legs: "one" (patient explicitly says one leg/ankle, e.g. "my right ankle", "one leg") | "both" (patient explicitly says both legs/ankles, bilateral, or uses the plural "ankles"/"legs"/"feet") | null (not stated — do NOT infer from "ankle" singular)
+- dietChange: "yes" (recent diet change such as eating more salt) | "no" | null (not mentioned)`
       },
       lightheaded: {
         desc: "Dizziness / Lightheadedness / Falls",
         fields: `- isNew: "yes" | "no" | null (is this a new symptom the patient has not had before?)
 - fellToday: "yes" | "no" | "unsure" | null (did the patient fall today?)
-- bloodPressure: "yes" | "no" | "unsure" | null (does patient have high or low blood pressure?)`
+- bloodPressure: "yes" (patient says their blood pressure is HIGH or LOW) | "no" (patient says their blood pressure is normal) | "unsure" | null (blood pressure not mentioned)`
       }
     };
 
     const emptyStructures = {
-      sob:            { isNew: null, coSymptoms: [], isWorseUsual: null, changedLastDay: null },
+      sob:            { isNew: null, coSymptoms: [], worseAtRest: null, worseWithActivity: null },
       chestDiscomfort:{ isNew: null, coSymptoms: [], isAtRest: null },
       fatigue:        { coSymptoms: [], isWorseUsual: null, canDoActivities: null },
       weightChange:   { changeType: null, tookDiuretic: null, coSymptoms: [] },
       confusion:      { isNew: null, coSymptoms: [] },
-      legSwelling:    { isNewOrWorse: null, legs: null, tookDiuretic: null },
+      legSwelling:    { isNew: null, isWorse: null, takingWaterPills: null, legs: null, dietChange: null },
       lightheaded:    { isNew: null, fellToday: null, bloodPressure: null }
     };
 
@@ -275,12 +282,31 @@ ${JSON.stringify(skeleton, null, 2)}`;
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       try {
-        return JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]);
+        // Safety net for the tool's RED option "Shooting pain down arm or pain on left side of chest":
+        // if the patient's own words describe it, record it even when the LLM left it out.
+        if (parsed.chestDiscomfort && this._describesArmOrLeftChestPain(text)) {
+          const co = Array.isArray(parsed.chestDiscomfort.coSymptoms) ? parsed.chestDiscomfort.coSymptoms : [];
+          if (!co.includes("shooting_pain")) co.push("shooting_pain");
+          parsed.chestDiscomfort.coSymptoms = co;
+        }
+        return parsed;
       } catch (e) {
         console.warn("Failed to parse LLM extraction response:", e);
       }
     }
     return {};
+  }
+
+  /**
+   * True when the text describes the tool's chest option "Shooting pain down arm or pain on left
+   * side of chest" and does not deny it ("no pain in my arm").
+   */
+  _describesArmOrLeftChestPain(text) {
+    const arm  = /(pain|ache|aching|pressure|tightness|discomfort)[^.?!]{0,60}?(goes|going|spread(s|ing)?|radiat(es|ing)|shoot(s|ing)?|travel(s|l?ing)?|mov(es|ing)|run(s|ning)?)\s*(down|in|into|to|through|up)\s*(to\s*)?(my|the)?\s*(left|right)?\s*(arm|shoulder)|shooting\s*pain\s*(down|in|into)\s*(my|the)?\s*(left|right)?\s*arm|pain\s*(down|in)\s*(my|the)\s*(left|right)?\s*arm/i;
+    const left = /(pain|ache|pressure|tightness)\s*(is\s*)?(on|in)\s*(the|my)\s*left\s*side\s*of\s*(the|my)\s*chest|left[-\s]*sided\s*chest\s*(pain|pressure|tightness)/i;
+    const denied = /\b(no|not|without|don'?t\s*have|doesn'?t|isn'?t|never)\b[^.?!]{0,40}(arm|left\s*side)/i;
+    return (arm.test(text) || left.test(text)) && !denied.test(text);
   }
 
   /**
@@ -332,8 +358,8 @@ ${JSON.stringify(skeleton, null, 2)}`;
   // ── Per-category extractors ──────────────────────────────────────────────
 
   _extractSobAnswers(text) {
-    // answer_list: [isNew, coSymptoms_str, isWorseUsual, changedLastDay]
-    const a = { isNew: null, coSymptoms: [], isWorseUsual: null, changedLastDay: null };
+    // answer_list: [isNew, coSymptoms_str, worseAtRest, worseWithActivity]  (the tool's q0–q3)
+    const a = { isNew: null, coSymptoms: [], worseAtRest: null, worseWithActivity: null };
 
     // [0] new?
     if (/\b(new\b|first\s*time|never.*before|just\s*started|started\s*recently|recently\s*start)\b/i.test(text))
@@ -356,16 +382,15 @@ ${JSON.stringify(skeleton, null, 2)}`;
     if (/mucus|phlegm|sputum/i.test(text))    a.coSymptoms.push("mucus");
     if (/wheez(ing|e)/i.test(text))           a.coSymptoms.push("wheeze");
 
-    // [2] worse than usual?
-    if (/worse\s*(than\s*usual|than\s*normal)|worsening|getting\s*worse|more\s*(breathless|short\s*of\s*breath)/i.test(text))
-      a.isWorseUsual = "yes";
-    else if (/same\s*as\s*usual|not\s*worse|no\s*change|stable/i.test(text))
-      a.isWorseUsual = "no";
+    // [2] worse at rest?  (tool: "Is shortness of breath worse at rest, e.g. while the patient is just sitting?")
+    if (/not\s*(short\s*of\s*breath\s*)?at\s*rest|only\s*(when|with|during|on)\s*(i\s*)?(walk|climb|exert|activ|mov|exercis)|fine\s*(at|when)\s*(rest|sitting)/i.test(text))
+      a.worseAtRest = "no";
+    else if (/\bat\s*rest\b|while\s*(just\s*)?(sitting|resting|lying)|even\s*(when\s*)?(sitting|resting|lying)|when\s*(i\s*)?(sit|lie|lay)\b|lying\s*(down|flat)/i.test(text))
+      a.worseAtRest = "yes";
 
-    // [3] changed in last day?
-    // "right now" / "at this moment" / "at the moment" all imply the symptom is happening now → within last 24h
-    if (/today|this\s*morning|overnight|last\s*night|just\s*now|right\s*now|at\s*this\s*moment|at\s*the\s*moment|within\s*(a\s*)?day|24\s*hour|suddenly\s*started|came\s*on\s*today/i.test(text))
-      a.changedLastDay = "yes";
+    // [3] worse with activity?  (tool: "Is shortness of breath worse with activity, e.g. walking around, exercising?")
+    if (/(walk|climb|stairs|exert|exercis|activit|moving\s*around)/i.test(text))
+      a.worseWithActivity = "yes";
 
     return a;
   }
@@ -382,6 +407,8 @@ ${JSON.stringify(skeleton, null, 2)}`;
 
     // [1] co-symptoms (shooting_pain is RED; sob, heart_racing, sweating, nausea, regurg → YELLOW logic)
     if (/shooting\s*(pain|sensation).*arm|arm.*shooting|pain.*shoot(ing)?\s*down|shoot(s|ing)?\s*down\s*(my|the)?\s*arm/i.test(text))
+      a.coSymptoms.push("shooting_pain");
+    else if (this._describesArmOrLeftChestPain(text))
       a.coSymptoms.push("shooting_pain");
     if (/short(ness)?\s*of\s*breath|breathless/i.test(text))
       a.coSymptoms.push("sob");
@@ -492,16 +519,27 @@ ${JSON.stringify(skeleton, null, 2)}`;
   }
 
   _extractLegSwellingAnswers(text) {
-    // answer_list: ["", "", isNewOrWorse, legs, tookDiuretic]  ([0],[1] unused)
-    const a = { isNewOrWorse: null, legs: null, tookDiuretic: null };
+    // answer_list: [isNew, isWorse, takingWaterPills, legs, dietChange]  (the tool's q0–q4)
+    const a = { isNew: null, isWorse: null, takingWaterPills: null, legs: null, dietChange: null };
 
-    // [2] new or worse?
+    // [0] new symptom?
+    if (/\bnew\b|first\s*time|never.*before|just\s*started|recently\s*started/i.test(text))
+      a.isNew = "yes";
+    else if (/\b(not\s*new|had.*before|usual|chronic|always\s*have|for\s*(weeks|months|years))\b/i.test(text))
+      a.isNew = "no";
+
+    // [1] worse than previous days?
     // Note: "swollen" and "swell" are different strings — both must be covered.
-    if (/new(er)?\s*(swell\w*|swollen)|worse\s*(than\s*usual|swell\w*|swollen)|worsening\s*(swell\w*|swollen)|getting\s*worse|more\s*(swollen|swell\w*)|recently\s*started/i.test(text) ||
-        /\b(new\b|noticed.*(swell\w*|swollen)|(swell\w*|swollen).*worse)\b/i.test(text))
-      a.isNewOrWorse = "yes";
-    else if (/same\s*as\s*usual|not\s*worse|no\s*change|hasn'?t\s*changed|has\s*not\s*changed|not\s*changed|unchanged|my\s*usual\s*swell|always\s*have/i.test(text))
-      a.isNewOrWorse = "no";
+    if (/same\s*as\s*usual|not\s*(gotten\s*|getting\s*)?(any\s*)?worse|no\s*change|hasn'?t\s*changed|has\s*not\s*changed|not\s*changed|unchanged/i.test(text))
+      a.isWorse = "no";
+    else if (/worse|worsening|more\s*(swollen|swell\w*)|goes?\s*up\s*higher|higher\s*(up|now)/i.test(text))
+      a.isWorse = "yes";
+
+    // [2] taking their water pills?  (tool: "Has the patient been taking their water pills (i.e. lasix)?")
+    if (/(not|haven'?t|didn'?t|stopped|missed|skipp?ed|ran\s*out).{0,25}(water\s*pills?|diuretics?|lasix|furosemide|torsemide|bumex)/i.test(text))
+      a.takingWaterPills = "no";
+    else if (/(taking|take|took).{0,25}(water\s*pills?|diuretics?|lasix|furosemide|torsemide|bumex)/i.test(text))
+      a.takingWaterPills = "yes";
 
     // [3] one or both?
     if (/both\s*(leg|ankle|feet|foot)|both\s*side|bilateral/i.test(text))
@@ -509,11 +547,9 @@ ${JSON.stringify(skeleton, null, 2)}`;
     else if (/one\s*(leg|ankle|foot)|right\s*(leg|ankle|foot)|left\s*(leg|ankle|foot)|single/i.test(text))
       a.legs = "one";
 
-    // [4] took extra water pill?
-    if (/took.*water\s*pill|water\s*pill.*took|extra.*diuretic|took.*diuretic|took.*furosemide|took.*lasix|took.*torsemide|took.*bumex/i.test(text))
-      a.tookDiuretic = "yes";
-    else if (/didn'?t\s*take|no\s*water\s*pill|haven'?t\s*taken|not\s*taken\s*(any|a)\s*(water\s*pill|diuretic)/i.test(text))
-      a.tookDiuretic = "no";
+    // [4] recent diet change (e.g. more salt)?
+    if (/more\s*salt|salty|ate\s*out|fast\s*food|diet\s*(has\s*)?chang|changed\s*my\s*diet/i.test(text))
+      a.dietChange = "yes";
 
     return a;
   }
@@ -577,19 +613,17 @@ ${JSON.stringify(skeleton, null, 2)}`;
           q.push({ key: "sob_new", question: "Is your shortness of breath a **new** symptom for you, or something you have had before?" });
         if (answers.coSymptoms.length === 0)
           q.push({ key: "sob_co", question: "Are any of the following happening alongside your shortness of breath? (say all that apply)\n• Chest pain or pressure (and if so — is it severe?)\n• Fever\n• Cough\n• Leg or ankle swelling\n• Mucus or phlegm\n• Wheezing\n• None of these" });
-        if (answers.isWorseUsual === null)
-          q.push({ key: "sob_worse", question: "Is your shortness of breath **worse than your usual level**?" });
-        // changedLastDay only adds reviewFlag=true — same outcome as isWorseUsual="yes".
-        // Skip this question when isWorseUsual is already known (redundant and annoying to ask).
-        if (answers.changedLastDay === null && answers.isWorseUsual === null)
-          q.push({ key: "sob_day", question: "Has your shortness of breath changed or gotten worse in the **last 24 hours**?" });
+        // Tool q2 (required): "Is shortness of breath worse at rest (e.g. while the patient is just sitting)?"
+        // Tool q3 (worse with activity) is optional and only sets the review flag, so it is not asked.
+        if (answers.worseAtRest === null || answers.worseAtRest === undefined)
+          q.push({ key: "sob_rest", question: "Is your shortness of breath **worse at rest** (for example, while you are just sitting)?" });
         break;
 
       case "chestDiscomfort":
         if (answers.isNew === null)
           q.push({ key: "chest_new", question: "Is this chest discomfort **new** for you, or something you have felt before?" });
         if (answers.coSymptoms.length === 0)
-          q.push({ key: "chest_co", question: "Are any of the following happening alongside your chest discomfort? (say all that apply)\n• Shooting pain down your arm\n• Shortness of breath\n• Heart racing or palpitations\n• Sweating\n• Nausea or vomiting\n• Regurgitation or heartburn\n• None of these" });
+          q.push({ key: "chest_co", question: "Are any of the following happening alongside your chest discomfort? (say all that apply)\n• Shooting pain down your arm, or pain on the left side of your chest\n• Shortness of breath\n• Heart racing or palpitations\n• Sweating\n• Nausea or vomiting\n• Regurgitation or heartburn\n• None of these" });
         if (answers.isAtRest === null)
           q.push({ key: "chest_rest", question: "Is the chest discomfort happening **at rest** (sitting, lying down), or only during physical activity (walking, exercising)?" });
         break;
@@ -620,12 +654,15 @@ ${JSON.stringify(skeleton, null, 2)}`;
         break;
 
       case "legSwelling":
-        if (answers.isNewOrWorse === null)
-          q.push({ key: "swell_new", question: "Is the swelling **new**, or is it **worse than your usual level**?" });
-        if (answers.legs === null)
-          q.push({ key: "swell_legs", question: "Is the swelling in **one leg/ankle** or **both**?" });
-        if (answers.tookDiuretic === null)
-          q.push({ key: "swell_diuretic", question: "Have you already taken an **extra water pill (diuretic)** as directed by your doctor?" });
+        // The tool's leg-swelling questions q0–q3, in the tool's wording (q4, diet change, only sets the review flag).
+        if (answers.isNew === null || answers.isNew === undefined)
+          q.push({ key: "swell_new", question: "Is the leg swelling a **new** symptom for you?" });
+        if (answers.isWorse === null || answers.isWorse === undefined)
+          q.push({ key: "swell_worse", question: "Is the leg swelling **worse than previous days** (for example, it goes up higher now)?" });
+        if (answers.takingWaterPills === null || answers.takingWaterPills === undefined)
+          q.push({ key: "swell_pills", question: "Have you been taking your **water pills** (for example, Lasix)?" });
+        if (answers.legs === null || answers.legs === undefined)
+          q.push({ key: "swell_legs", question: "Is the swelling in **one leg** or **both legs**?" });
         break;
 
       case "lightheaded":
@@ -740,7 +777,8 @@ ${JSON.stringify(skeleton, null, 2)}`;
     let zone = this.ZONE_LIST[0];
     let reviewFlag = false;
 
-    const CO_SYMS = ["sob", "cough", "leg_swelling", "nausea", "bowel_changes"];
+    // The tool lists nausea and bowel changes as options, but its rule only counts these three.
+    const CO_SYMS = ["sob", "cough", "leg_swelling"];
 
     // yellow_consider: patient NOT taking diuretics (medication non-compliance)
     if (answerList[1] === "no")
@@ -842,8 +880,8 @@ ${JSON.stringify(skeleton, null, 2)}`;
           answerList = [
             ans.isNew || "no",
             (ans.coSymptoms || []).join(","),
-            ans.isWorseUsual || "no",
-            ans.changedLastDay || "no"
+            ans.worseAtRest || "no",        // tool q2: worse at rest?
+            ans.worseWithActivity || "no"   // tool q3: worse with activity? (review flag only)
           ];
           result = this.getResultSob(answerList);
           break;
@@ -886,14 +924,14 @@ ${JSON.stringify(skeleton, null, 2)}`;
           break;
 
         case "legSwelling":
-          // Defaults when unknown: isNewOrWorse="yes" (patient noticed/reported swelling → likely new),
-          // legs="one" (single-sided default; "both" triggers additional reviewFlag but
-          // yellow_consider fires for either value), tookDiuretic="no" (conservative: flag for review)
+          // Same order as the tool's five questions. An unanswered question stays blank, exactly as
+          // in the tool, so it cannot trigger a zone. The tool's rule reads only q2–q4.
           answerList = [
-            "", "",  // indices 0,1 unused in reference logic
-            ans.isNewOrWorse !== null ? ans.isNewOrWorse : "yes",
-            ans.legs !== null ? ans.legs : "one",
-            ans.tookDiuretic !== null ? ans.tookDiuretic : "no"
+            ans.isNew || "",             // q0 new symptom? (not used by the tool's rule)
+            ans.isWorse || "",           // q1 worse than previous days? (not used by the tool's rule)
+            ans.takingWaterPills || "",  // q2 taking water pills?
+            ans.legs || "",              // q3 one leg or both?
+            ans.dietChange || ""         // q4 recent diet change?
           ];
           result = this.getResultLegSwelling(answerList);
           break;
@@ -978,26 +1016,27 @@ ${JSON.stringify(skeleton, null, 2)}`;
 Your task is to assess the patient's symptoms and provide a triage zone recommendation.
 
 CRITICAL RULES:
-1. You MUST always assign a zone — GREEN, YELLOW, or RED. Never return "UNKNOWN" or refuse to classify.
-2. When symptoms related to heart failure are present (weight gain, leg swelling, SOB, fatigue, confusion, lightheadedness, chest discomfort), you MUST assign at minimum YELLOW.
+1. You MUST always assign a zone — GREEN, YELLOW_CONSIDER, YELLOW_CALL, or RED. Never return "UNKNOWN" or refuse to classify.
+2. When symptoms related to heart failure are present (weight gain, leg swelling, SOB, fatigue, confusion, lightheadedness, chest discomfort), you MUST assign at minimum YELLOW_CONSIDER.
 3. You are a support tool, not a replacement for medical advice.
 
 ## Patient-Reported Symptoms${catHints}
 ${freeTextSymptoms}
 
 ## Zone Definitions
-- 🟢 GREEN: Symptoms are stable, consistent with patient's baseline, and not concerning for acute decompensation. Continue usual care.
-- 🟡 YELLOW: Symptoms suggest possible worsening or new HF-related change. Patient should contact care team TODAY.
-- 🔴 RED: Symptoms suggest acute decompensation, hemodynamic compromise, or life-threatening emergency. Call 911 immediately.
+- 🟢 GREEN          : Symptoms are stable, consistent with patient's baseline. No acute concern. Continue usual care.
+- 🟡 YELLOW_CONSIDER: Symptoms may indicate early or mild change. Patient should monitor closely and CONSIDER calling their care team if symptoms persist or worsen; a same-day call is not urgent.
+- 🟡 YELLOW_CALL    : Symptoms indicate likely HF worsening. Patient MUST call their care team TODAY (not tomorrow, not if-it-gets-worse).
+- 🔴 RED            : Acute decompensation or life-threatening emergency. Call 911 / go to ER immediately.
 
 ## Instructions
 Perform an independent clinical triage using 2022 AHA/ACC/HFSA Heart Failure Guidelines:
-1. Assign zone (GREEN/YELLOW/RED) based on the symptom constellation
+1. Assign zone (GREEN/YELLOW_CONSIDER/YELLOW_CALL/RED) based on the symptom constellation
 2. State your clinical reasoning — consider fluid overload, hemodynamic instability, ischemia, arrhythmia, and functional status
 3. List the key symptoms driving your assessment
 4. Give immediate action instructions
 
-Format as JSON with fields: zone (GREEN/YELLOW/RED), urgency, reasoning, keySymptoms (array of strings), immediateActions (array of strings), evidenceBasis, disclaimer`;
+Format as JSON with fields: zone (GREEN/YELLOW_CONSIDER/YELLOW_CALL/RED), urgency, reasoning, keySymptoms (array of strings), immediateActions (array of strings), evidenceBasis, disclaimer`;
   }
 
   /**
@@ -1009,11 +1048,20 @@ Format as JSON with fields: zone (GREEN/YELLOW/RED), urgency, reasoning, keySymp
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         const zoneColors = { GREEN: "#38a169", YELLOW: "#d69e2e", RED: "#e53e3e" };
+        const rawZone = (parsed.zone || "").toUpperCase().replace(/-/g,"_");
+        // Normalise 4-level → 3-level display zone; preserve urgency sub-label
+        const displayMap = {
+          GREEN:          { zone: "GREEN",  urgency: "STABLE" },
+          YELLOW_CONSIDER:{ zone: "YELLOW", urgency: "CONSIDER CALLING" },
+          YELLOW_CALL:    { zone: "YELLOW", urgency: "CALL TODAY" },
+          RED:            { zone: "RED",    urgency: "EMERGENCY" }
+        };
+        const norm = displayMap[rawZone] || { zone: "YELLOW", urgency: parsed.urgency || "YELLOW" };
         return {
           method:       "ai_reasoning",
-          zone:         parsed.zone || "UNKNOWN",
-          color:        zoneColors[parsed.zone] || "#718096",
-          urgency:      parsed.urgency || parsed.zone,
+          zone:         norm.zone,
+          color:        zoneColors[norm.zone] || "#718096",
+          urgency:      parsed.urgency || norm.urgency,
           reasoning:    parsed.reasoning || "",
           keySymptoms:  parsed.keySymptoms || [],
           action: Array.isArray(parsed.immediateActions)
@@ -1099,8 +1147,8 @@ STEP 2 — Respond ONLY with one of these two JSON formats:
 ${followUpOption}Option B — Ready to triage:
 {
   "action": "triage",
-  "zone": "GREEN" | "YELLOW" | "RED",
-  "urgency": "short urgency label (e.g. Stable, Call today, Emergency — call 911)",
+  "zone": "GREEN" | "YELLOW_CONSIDER" | "YELLOW_CALL" | "RED",
+  "urgency": "short urgency label (e.g. Stable, Consider calling, Call today, Emergency — call 911)",
   "reasoning": "2-4 sentence clinical reasoning based on heart failure pathophysiology",
   "keySymptoms": ["symptom 1", "symptom 2"],
   "immediateActions": ["Action 1", "Action 2"],
@@ -1109,9 +1157,9 @@ ${followUpOption}Option B — Ready to triage:
 
 RULES:
 - Output ONLY valid JSON — no text outside the JSON object
-- Zone: GREEN = stable (continue monitoring at home), YELLOW = contact care team today, RED = emergency (call 911 / go to ER now)
+- Zone: GREEN = stable, YELLOW_CONSIDER = monitor and consider calling, YELLOW_CALL = must call today, RED = emergency (call 911 / go to ER now)
 - Be conservative: when uncertain, choose the more urgent zone
-- Never use UNKNOWN — always commit to GREEN, YELLOW, or RED
+- Never use UNKNOWN or plain YELLOW — always commit to GREEN, YELLOW_CONSIDER, YELLOW_CALL, or RED
 ${followUpRule}
 - Triage reasoning: use heart failure clinical knowledge (fluid overload, decompensation, hemodynamic instability, arrhythmia)`;
   }
@@ -1138,12 +1186,20 @@ ${followUpRule}
 
         if (parsed.action === "triage") {
           const zoneColors = { GREEN: "#38a169", YELLOW: "#d69e2e", RED: "#e53e3e" };
+          const rawZone = (parsed.zone || "").toUpperCase().replace(/-/g,"_");
+          const displayMap = {
+            GREEN:          { zone: "GREEN",  urgency: "STABLE" },
+            YELLOW_CONSIDER:{ zone: "YELLOW", urgency: "CONSIDER CALLING" },
+            YELLOW_CALL:    { zone: "YELLOW", urgency: "CALL TODAY" },
+            RED:            { zone: "RED",    urgency: "EMERGENCY" }
+          };
+          const norm = displayMap[rawZone] || { zone: "YELLOW", urgency: parsed.urgency || "YELLOW" };
           return {
             isFollowUp:   false,
             method:       "ai_independent",
-            zone:         parsed.zone || "UNKNOWN",
-            color:        zoneColors[parsed.zone] || "#718096",
-            urgency:      parsed.urgency || parsed.zone,
+            zone:         norm.zone,
+            color:        zoneColors[norm.zone] || "#718096",
+            urgency:      parsed.urgency || norm.urgency,
             reasoning:    parsed.reasoning || "",
             keySymptoms:  parsed.keySymptoms || [],
             action:       Array.isArray(parsed.immediateActions)
@@ -1160,15 +1216,17 @@ ${followUpRule}
 
     // Fallback: extract zone from text
     const u = aiResponse.toUpperCase();
-    let zone = "YELLOW"; // conservative default
-    if (u.includes("RED ZONE") || u.includes("🔴") || u.includes("EMERGENCY")) zone = "RED";
-    else if (u.includes("GREEN ZONE") || u.includes("🟢") || u.includes("STABLE"))  zone = "GREEN";
+    let zone = "YELLOW"; // display zone (3-level)
+    let urgency = "CONSIDER CALLING";
+    if (u.includes("RED ZONE") || u.includes("🔴") || u.includes("EMERGENCY")) { zone = "RED"; urgency = "EMERGENCY"; }
+    else if (u.includes("GREEN ZONE") || u.includes("🟢") || u.includes("STABLE")) { zone = "GREEN"; urgency = "STABLE"; }
+    else if (u.includes("YELLOW_CALL") || u.includes("CALL TODAY")) { urgency = "CALL TODAY"; }
 
     const zoneColors = { GREEN: "#38a169", YELLOW: "#d69e2e", RED: "#e53e3e" };
     return {
       isFollowUp:  false,
       method:      "ai_independent",
-      zone, color: zoneColors[zone], urgency: zone,
+      zone, color: zoneColors[zone], urgency,
       reasoning:   aiResponse, keySymptoms: [], action: "",
       disclaimer:  "This AI assessment is for educational purposes only and does not replace medical advice.",
       rawResponse: aiResponse, timestamp: new Date().toISOString()

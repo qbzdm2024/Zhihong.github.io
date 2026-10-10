@@ -775,14 +775,16 @@ class App {
         const combinedText = this.triageFollowUpState.originalText +
           "\nAdditional information: " + message;
 
-        // Re-detect from combined text — follow-up may introduce new categories
+        // Re-detect from combined text using gpt-4o-mini which understands negation.
+        // REPLACES regex categories for triage so denial phrases ("no chest pain") don't
+        // trigger false-positive rules. Falls back to original if LLM returns empty.
         let detectedSymptoms = this.triageFollowUpState.detectedSymptoms;
         try {
           const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
-            combinedText, this.chatEngine.apiKey, this.chatEngine.model
+            combinedText, this.chatEngine.apiKey, "gpt-4o-mini"
           );
-          for (const c of llmDetection.categories) {
-            if (!detectedSymptoms.includes(c)) detectedSymptoms = [...detectedSymptoms, c];
+          if (llmDetection.categories.length > 0) {
+            detectedSymptoms = llmDetection.categories;
           }
         } catch (e) {
           console.warn("LLM re-detection failed in Case A:", e.message);
@@ -792,11 +794,23 @@ class App {
         let extractedAnswers = {};
         try {
           extractedAnswers = await this.triageEngine.extractAnswersWithLLM(
-            combinedText, detectedSymptoms, this.chatEngine.apiKey, this.chatEngine.model
+            combinedText, detectedSymptoms, this.chatEngine.apiKey, "gpt-4o-mini"
           );
         } catch (e) {
           console.warn("LLM answer extraction failed in Case A, using regex:", e.message);
           extractedAnswers = this._extractAllAnswers(combinedText, detectedSymptoms);
+        }
+
+        // Merge: pre-extracted answers (gpt-4o-mini, temperature=0) take priority.
+        // Preserves answers already determined from the initial message (e.g. isNew="no"
+        // from "same for the past year") so stochastic re-extraction cannot override them.
+        const preExtracted = (this.triageFollowUpState.preExtractedAnswers) || {};
+        for (const [cat, preAns] of Object.entries(preExtracted)) {
+          if (!extractedAnswers[cat]) extractedAnswers[cat] = {};
+          for (const [field, val] of Object.entries(preAns)) {
+            const authoritative = Array.isArray(val) ? val.length > 0 : (val !== null && val !== undefined);
+            if (authoritative) extractedAnswers[cat][field] = val;
+          }
         }
 
         // Educational response + triage card
@@ -858,21 +872,24 @@ class App {
       // ── Detect which of the 7 categories are present and whether it's personal ──
       // Strategy: run regex first as a guaranteed baseline, then merge LLM results.
       // Regex catches explicit keywords reliably. LLM adds colloquial/indirect phrasing.
-      // LLM can only ADD categories — it cannot remove what regex already found.
-      // This prevents non-deterministic LLM responses from silently dropping valid symptoms.
+      // LLM can only ADD categories here — preserving original follow-up question scope.
+      // Category pruning for triage accuracy happens in Case A re-detection (below).
       const regexSymptoms   = this.triageEngine.detectSymptoms(message);
       const regexIsPersonal = this.triageEngine.isPersonalSymptomReport(message);
       let detectedSymptoms = regexSymptoms;
       let isPersonalReport = regexIsPersonal;
       try {
         const llmDetection = await this.triageEngine.detectSymptomsWithLLM(
-          message, this.chatEngine.apiKey, this.chatEngine.model
+          message, this.chatEngine.apiKey, "gpt-4o-mini"
         );
-        // Merge: union of regex + LLM categories; personal = true if either says true
         for (const c of llmDetection.categories) {
           if (!detectedSymptoms.includes(c)) detectedSymptoms = [...detectedSymptoms, c];
         }
         if (llmDetection.isPersonalReport) isPersonalReport = true;
+        // Drop symptoms the patient explicitly denies ("no leg swelling"): the regex matches the
+        // keyword even when negated, and the traffic light tool only assesses a symptom that is present.
+        if (llmDetection.denied && llmDetection.denied.length > 0)
+          detectedSymptoms = detectedSymptoms.filter(c => !llmDetection.denied.includes(c));
       } catch (e) {
         console.warn("LLM symptom detection failed, using regex only:", e.message);
       }
@@ -936,9 +953,10 @@ class App {
         if (neededFollowUps.length > 0) {
           // Case B: missing info — ask follow-up questions; triage runs in Case A
           this.triageFollowUpState = {
-            originalText:     message,
-            detectedSymptoms: detectedSymptoms,
-            answered:         false
+            originalText:        message,
+            detectedSymptoms:    detectedSymptoms,
+            preExtractedAnswers: extractedAnswers,
+            answered:            false
           };
           const result = await this.chatEngine.chat(message, {
             triageMode:        false,
@@ -1132,8 +1150,8 @@ class App {
           ...(form.swellingNewWorse ? ["leg_swelling"]      : []),
           ...(form.newCough         ? ["cough"]             : [])
         ],
-        isWorseUsual:  null,
-        changedLastDay:null
+        worseAtRest:       null,
+        worseWithActivity: null
       };
     }
 
@@ -1192,9 +1210,11 @@ class App {
     if (form.swellingNewWorse) {
       detectedSymptoms.push("legSwelling");
       extractedAnswers.legSwelling = {
-        isNewOrWorse: "yes",
-        legs:         null,
-        tookDiuretic: null
+        isNew:            null,
+        isWorse:          "yes",
+        takingWaterPills: null,
+        legs:             null,
+        dietChange:       null
       };
     }
 
